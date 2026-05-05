@@ -1,0 +1,39 @@
+# Sample accounts.toml
+#
+# Lives at <bffs-config>/accounts.toml. On macOS that's
+# ~/Library/Application Support/bffs/accounts.toml, on Linux it's
+# $XDG_CONFIG_HOME/bffs/accounts.toml, on Windows it's %AppData%\bffs\accounts.toml.
+# Override the directory with $BFFS_HOME.
+#
+# `bffs add`, `bffs login`, and `bffs remove` manage this file for you —
+# this example exists to document the shape and what each field does.
+
+# api_key account — `bffs add work --secret sk-ant-...`
+[accounts.work]
+type = "api_key"
+secret = "sk-ant-WORK-paste-the-real-key-here"
+email = "team@example.com"  # optional, only shown in `bffs list`
+
+# oauth account, default isolation — `bffs login personal`
+# Note: there is NO `secret` here. Claude Code owns the credential inside
+# the per-account session dir at <bffs-config>/sessions/personal/ — Keychain
+# entry on macOS (service name `Claude Code-credentials-<sha256>`),
+# .credentials.json elsewhere.
+[accounts.personal]
+type = "oauth"
+email = "rael@example.com"
+# isolation is omitted, so the global default in state.toml is used
+# (and "partial" if state.toml doesn't set one).
+
+# oauth account with per-account isolation override —
+# `bffs login work-oauth --preset=full` (or `bffs reisolate work-oauth --preset=full`)
+[accounts."work-oauth"]
+type = "oauth"
+email = "you@bigcorp.com"
+isolation = "full"  # totally fresh ~/.claude — no shared settings/skills/plugins/history
+
+# OAuthAccountMeta and user_id are written by `bffs login` for display in
+# `bffs list` / `bffs show`. They're populated automatically; you don't
+# normally edit them.
+# oauth_account_meta = '{"emailAddress":"you@bigcorp.com","accountUuid":"...","organizationUuid":"..."}'
+# user_id = "user-hash-..."

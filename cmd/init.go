@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -18,6 +17,10 @@ var (
 	initForce      bool
 )
 
+// EnvShimDir lets a user pin the shim install directory persistently so
+// they don't have to pass --dir every time. --dir still wins.
+const EnvShimDir = "BFFS_SHIM_DIR"
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Install the `claude` shim so any `claude` invocation honors bffs",
@@ -26,7 +29,15 @@ shell snippet needed to put that directory at the front of your PATH.
 
 The shim simply re-execs bffs in shim mode, which resolves the
 account (env > project > global) and execs the real ` + "`claude`" + ` binary
-found later on PATH.`,
+found later on PATH.
+
+Install directory resolution (highest priority wins):
+  1. --dir flag
+  2. $BFFS_SHIM_DIR env var
+  3. Per-OS default — ~/.bffs/bin (macOS/Linux) or %LOCALAPPDATA%\bffs\bin
+     (Windows). The default is intentionally a dedicated bffs dir, not a
+     shared location like ~/.local/bin, so the shim won't collide with
+     Claude Code's own install script (which also targets ~/.local/bin).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		self, err := os.Executable()
 		if err != nil {
@@ -58,7 +69,7 @@ found later on PATH.`,
 }
 
 func init() {
-	initCmd.Flags().StringVar(&initInstallDir, "dir", "", "directory to install the shim into (default per-OS)")
+	initCmd.Flags().StringVar(&initInstallDir, "dir", "", "directory to install the shim into (overrides $"+EnvShimDir+" and per-OS default)")
 	initCmd.Flags().BoolVar(&initForce, "force", false, "overwrite an existing shim at the install path")
 	rootCmd.AddCommand(initCmd)
 }
@@ -67,11 +78,14 @@ func pickInstallDir() (string, error) {
 	if initInstallDir != "" {
 		return initInstallDir, nil
 	}
+	if v := os.Getenv(EnvShimDir); v != "" {
+		return v, nil
+	}
 	switch runtime.GOOS {
 	case "windows":
 		base := os.Getenv("LOCALAPPDATA")
 		if base == "" {
-			return "", errors.New("LOCALAPPDATA is not set; pass --dir to choose an install directory")
+			return "", fmt.Errorf("LOCALAPPDATA is not set; pass --dir or set $%s to choose an install directory", EnvShimDir)
 		}
 		return filepath.Join(base, "bffs", "bin"), nil
 	default:
@@ -79,7 +93,7 @@ func pickInstallDir() (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(home, ".local", "bin"), nil
+		return filepath.Join(home, ".bffs", "bin"), nil
 	}
 }
 

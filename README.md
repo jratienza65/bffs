@@ -18,7 +18,9 @@ go install github.com/jratienza65/bffs@latest
 bffs init        # installs the shim, prints the PATH snippet
 ```
 
-After adding the printed snippet to your shell rc and re-opening your terminal, `which claude` should point at the shim (typically `~/.local/bin/claude`), with the real `claude` still resolvable later on `PATH`.
+After adding the printed snippet to your shell rc and re-opening your terminal, `which claude` should point at the shim (default: `~/.bffs/bin/claude` on macOS/Linux, `%LOCALAPPDATA%\bffs\bin\claude.exe` on Windows), with the real `claude` still resolvable later on `PATH`.
+
+The default install dir is intentionally a dedicated bffs directory rather than `~/.local/bin` so the shim doesn't collide with Claude Code's own install script. Override with `bffs init --dir <path>` (one-shot) or `BFFS_SHIM_DIR=<path>` (persistent — set in your shell rc).
 
 ## The core commands
 

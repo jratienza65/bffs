@@ -99,6 +99,14 @@ can be changed later with ` + "`bffs reisolate <name>`" + `.`,
 			fmt.Fprintf(out, "warning: %s already exists in %s as a real file; left untouched (won't be shared with ~/.claude)\n", s, sessionDir)
 		}
 
+		// Seed the per-account .claude.json from ~/.claude.json so claude's
+		// first-run wizard (theme, terms, etc.) doesn't fire on the next
+		// interactive invocation. `claude auth login` will populate the
+		// auth/identity fields below.
+		if err := claudejson.SeedFromHome(filepath.Join(sessionDir, ".claude.json")); err != nil {
+			return fmt.Errorf("seed per-account .claude.json: %w", err)
+		}
+
 		loginArgs := []string{"auth", "login"}
 		if loginConsole {
 			loginArgs = append(loginArgs, "--console")

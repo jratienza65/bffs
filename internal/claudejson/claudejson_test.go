@@ -31,6 +31,97 @@ func TestReadEmptyFile(t *testing.T) {
 	}
 }
 
+func TestSeedFromHomeStripsAuthAndKeepsRest(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	writeJSON(t, filepath.Join(home, ".claude.json"), `{
+  "oauthAccount": {"emailAddress": "global@example.com"},
+  "userID": "uid-GLOBAL",
+  "theme": "dark",
+  "numStartups": 42,
+  "tipsHistory": {"intro": true},
+  "bypassPermissionsModeAccepted": true
+}`)
+
+	target := filepath.Join(t.TempDir(), ".claude.json")
+	if err := SeedFromHome(target); err != nil {
+		t.Fatalf("SeedFromHome: %v", err)
+	}
+
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := doc["oauthAccount"]; has {
+		t.Error("oauthAccount should be stripped")
+	}
+	if _, has := doc["userID"]; has {
+		t.Error("userID should be stripped")
+	}
+	for _, k := range []string{"theme", "numStartups", "tipsHistory", "bypassPermissionsModeAccepted"} {
+		if _, has := doc[k]; !has {
+			t.Errorf("expected %q to be carried over from ~/.claude.json", k)
+		}
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("seeded file perm = %o, want 0600", got)
+	}
+}
+
+func TestSeedFromHomeNoopWhenSourceMissing(t *testing.T) {
+	home := t.TempDir() // no .claude.json inside
+	setHome(t, home)
+
+	target := filepath.Join(t.TempDir(), ".claude.json")
+	if err := SeedFromHome(target); err != nil {
+		t.Fatalf("SeedFromHome: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("expected target to not exist, got err=%v", err)
+	}
+}
+
+func TestSeedFromHomeOverwritesExistingTarget(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	writeJSON(t, filepath.Join(home, ".claude.json"), `{"theme": "light"}`)
+
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, ".claude.json")
+	writeJSON(t, target, `{"oauthAccount": {"emailAddress": "stale@example.com"}, "theme": "dark"}`)
+
+	if err := SeedFromHome(target); err != nil {
+		t.Fatalf("SeedFromHome: %v", err)
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := doc["oauthAccount"]; has {
+		t.Error("stale oauthAccount in target should have been overwritten away")
+	}
+	var theme string
+	if err := json.Unmarshal(doc["theme"], &theme); err != nil {
+		t.Fatal(err)
+	}
+	if theme != "light" {
+		t.Errorf("theme = %q, want %q (from home)", theme, "light")
+	}
+}
+
 func TestReadAndPatchRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	setHome(t, dir)

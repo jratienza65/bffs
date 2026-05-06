@@ -76,6 +76,76 @@ func ReadFrom(p string) (Snapshot, error) {
 	return s, nil
 }
 
+// SeedFromHome bootstraps a per-account .claude.json by copying ~/.claude.json
+// into targetPath and stripping the identity/auth fields (oauthAccount and
+// userID) so a subsequent `claude auth login` can populate them per-account.
+//
+// The point: claude shows its first-run wizard (theme, terms, etc.) if the
+// .claude.json it sees lacks the wizard-completion markers. Without this
+// seeding, every new per-account session dir hits the wizard even though
+// auth is already valid. Seeding carries over the wizard markers + prefs
+// from the user's main ~/.claude.json so the per-account dir starts in a
+// "first launch already done" state.
+//
+// No-op (returns nil) if ~/.claude.json doesn't exist — claude will then
+// create the per-account file from scratch and the wizard will fire once.
+func SeedFromHome(targetPath string) error {
+	sourcePath, err := Path()
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(sourcePath)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", sourcePath, err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return fmt.Errorf("parse %s: %w", sourcePath, err)
+	}
+	delete(doc, "oauthAccount")
+	delete(doc, "userID")
+
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode: %w", err)
+	}
+	return atomicWrite(targetPath, out, 0o600)
+}
+
+// atomicWrite writes data to path via a temp file + rename, with the given
+// permissions. Used by SeedFromHome and Patch to keep their writes torn-free.
+func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp.*")
+	if err != nil {
+		return fmt.Errorf("create temp in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
 // Patch reads ~/.claude.json, replaces the oauthAccount and userID fields
 // with the snapshot's values, and atomically writes the file back. All other
 // fields are preserved verbatim. The file's permissions are preserved.

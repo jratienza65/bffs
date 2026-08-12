@@ -51,6 +51,9 @@ var showCmd = &cobra.Command{
 		if r.ProjectFile != "" {
 			fmt.Fprintf(out, "project:    %s\n", r.ProjectFile)
 		}
+		if r.PathRule != "" {
+			fmt.Fprintf(out, "rule:       %s\n", r.PathRule)
+		}
 		return nil
 	},
 }

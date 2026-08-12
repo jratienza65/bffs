@@ -15,6 +15,7 @@ type Source string
 const (
 	SourceEnv     Source = "env"
 	SourceProject Source = "project"
+	SourcePath    Source = "path"
 	SourceGlobal  Source = "global"
 	SourceNone    Source = "none"
 )
@@ -23,11 +24,15 @@ type Result struct {
 	Account     store.Account
 	Source      Source
 	ProjectFile string
+	// PathRule is the matched directory prefix, set when Source is SourcePath.
+	PathRule string
 }
 
 // Resolve picks the account to use, given a config dir and a starting cwd.
-// Precedence: env BFFS_ACCOUNT > nearest project file > global state > none.
-// An unknown account name from any source is an error.
+// Precedence: env BFFS_ACCOUNT > nearest bffs.toml > path rule > global
+// state > none. An unknown account name from any source is an error.
+// bffs.toml outranks path rules deliberately: a checked-in file is the more
+// explicit statement, so adding a rule never re-points a pinned repo.
 func Resolve(configDir, cwd string) (Result, error) {
 	accounts, err := store.LoadAccounts(configDir)
 	if err != nil {
@@ -52,6 +57,18 @@ func Resolve(configDir, cwd string) (Result, error) {
 			return Result{}, unknownAccount(found.Config.Account, found.Path, accounts)
 		}
 		return Result{Account: acc, Source: SourceProject, ProjectFile: found.Path}, nil
+	}
+
+	paths, err := store.LoadPaths(configDir)
+	if err != nil {
+		return Result{}, err
+	}
+	if rule, ok := paths.Match(cwd); ok {
+		acc, ok := accounts.Get(rule.Account)
+		if !ok {
+			return Result{}, unknownAccount(rule.Account, "path rule "+rule.Path, accounts)
+		}
+		return Result{Account: acc, Source: SourcePath, PathRule: rule.Path}, nil
 	}
 
 	state, err := store.LoadState(configDir)

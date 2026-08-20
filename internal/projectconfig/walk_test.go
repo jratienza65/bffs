@@ -111,7 +111,10 @@ func TestFindStopsAtHomeBoundary(t *testing.T) {
 	// Plant a config ABOVE $HOME — Find must ignore it.
 	writeConfig(t, filepath.Join(root, Filename), `account = "attacker"`)
 
+	// Go reads USERPROFILE on Windows and HOME everywhere else; set both so
+	// the boundary under test is the fake home on every platform.
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	_, ok, err := Find(proj)
 	if err != nil {

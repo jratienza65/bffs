@@ -72,12 +72,15 @@ func TestSeedFromHomeStripsAuthAndKeepsRest(t *testing.T) {
 		}
 	}
 
-	info, err := os.Stat(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Errorf("seeded file perm = %o, want 0600", got)
+	// Go does not apply Unix mode bits on Windows; files there report 0666.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("seeded file perm = %o, want 0600", got)
+		}
 	}
 }
 

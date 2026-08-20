@@ -11,13 +11,13 @@
 // per-account vs symlinked back to ~/.claude:
 //
 //   - partial (default): only .claude.json and .credentials.json are
-//                        per-account. Everything else in ~/.claude is
-//                        symlinked back, so history, projects, todos,
-//                        settings, skills, plugins all carry across
-//                        accounts. Drop-in for users who just want auth
-//                        isolated.
+//     per-account. Everything else in ~/.claude is
+//     symlinked back, so history, projects, todos,
+//     settings, skills, plugins all carry across
+//     accounts. Drop-in for users who just want auth
+//     isolated.
 //   - full:              nothing symlinked. Each account is a fresh Claude
-//                        Code world.
+//     Code world.
 //
 // SyncSymlinks is idempotent and lenient — it adds missing symlinks and
 // removes ones we no longer want, but never destroys real files claude wrote.

@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	EnvRealClaude    = "BFFS_REAL_CLAUDE"
-	EnvAPIKey        = "ANTHROPIC_API_KEY"
-	EnvOAuthToken    = "CLAUDE_CODE_OAUTH_TOKEN"
-	EnvClaudeCfgDir  = "CLAUDE_CONFIG_DIR"
+	EnvRealClaude   = "BFFS_REAL_CLAUDE"
+	EnvAPIKey       = "ANTHROPIC_API_KEY"
+	EnvOAuthToken   = "CLAUDE_CODE_OAUTH_TOKEN"
+	EnvClaudeCfgDir = "CLAUDE_CONFIG_DIR"
 )
 
 // Run resolves the active account, sets the appropriate env var, and executes
@@ -83,12 +83,12 @@ func syncOAuthSessionDir(cfgDir string, acc store.Account) {
 //
 //   - api_key: sets ANTHROPIC_API_KEY to the secret.
 //   - oauth:   sets CLAUDE_CONFIG_DIR to the per-account session dir under
-//              cfgDir. Claude Code reads .claude.json + .credentials.json
-//              from there and uses a Keychain service name derived (sha256)
-//              from the dir, so concurrent oauth sessions on different
-//              accounts are fully isolated. The session dir is set up by
-//              `bffs login` (or `bffs reisolate`); the shim just points
-//              claude at it.
+//     cfgDir. Claude Code reads .claude.json + .credentials.json
+//     from there and uses a Keychain service name derived (sha256)
+//     from the dir, so concurrent oauth sessions on different
+//     accounts are fully isolated. The session dir is set up by
+//     `bffs login` (or `bffs reisolate`); the shim just points
+//     claude at it.
 //
 // Stale ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, and CLAUDE_CONFIG_DIR
 // values from the user's shell are dropped first so they can't override the

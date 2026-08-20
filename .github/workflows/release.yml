@@ -1,0 +1,67 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Lets you re-cut a release from the UI if a tag push run failed.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          # GoReleaser needs the full history + tags to build the changelog.
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --force --tags
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Resolve Go cache paths
+        id: gopaths
+        shell: bash
+        run: |
+          echo "build=$(go env GOCACHE)" >>"$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >>"$GITHUB_OUTPUT"
+
+      # Read-only: restore whatever ci.yml's release-dry-run job warmed up on
+      # the default branch -- it cross-compiles the same six targets, so the
+      # build cache carries over. A release runs once per tag, so there is
+      # nothing worth writing back, and not saving keeps releases from
+      # evicting the caches that CI depends on.
+      - name: Restore Go cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.gopaths.outputs.build }}
+            ${{ steps.gopaths.outputs.mod }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-release-dry-run-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-go-release-dry-run-
+            ${{ runner.os }}-${{ runner.arch }}-go-
+
+      - name: Test
+        run: go test ./...
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

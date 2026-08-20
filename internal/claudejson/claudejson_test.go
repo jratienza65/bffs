@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
+// setHome points os.UserHomeDir at dir. Go reads USERPROFILE on Windows and
+// HOME everywhere else, so set both to keep these tests platform-agnostic.
 func setHome(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 }
 
 func writeJSON(t *testing.T, path string, body string) {
@@ -68,12 +72,15 @@ func TestSeedFromHomeStripsAuthAndKeepsRest(t *testing.T) {
 		}
 	}
 
-	info, err := os.Stat(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Errorf("seeded file perm = %o, want 0600", got)
+	// Go does not apply Unix mode bits on Windows; files there report 0666.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("seeded file perm = %o, want 0600", got)
+		}
 	}
 }
 
@@ -181,6 +188,9 @@ func TestReadAndPatchRoundTrip(t *testing.T) {
 }
 
 func TestPatchPreservesPerms(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Go does not apply Unix mode bits on Windows; files there report 0666")
+	}
 	dir := t.TempDir()
 	setHome(t, dir)
 	p := filepath.Join(dir, Filename)

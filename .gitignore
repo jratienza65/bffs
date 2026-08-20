@@ -1,0 +1,6 @@
+# Built binary (make build drops it in the repo root)
+/bffs
+/bffs.exe
+
+# GoReleaser output
+/dist/

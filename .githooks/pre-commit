@@ -1,0 +1,80 @@
+#!/bin/sh
+# bffs pre-commit hook.
+#
+# Mirrors the checks in .github/workflows/ci.yml -- gofmt and go vet -- so
+# formatting and vet problems surface here rather than as a red PR. It is
+# deliberately not stricter than CI: a hook that gates on more than CI does
+# is just an obstacle.
+#
+# Install:   make hooks            (points core.hooksPath at .githooks)
+# Bypass:    git commit --no-verify
+# Skip vet:  BFFS_HOOK_SKIP_VET=1 git commit ...
+#
+# gofmt problems are fixed in place and re-staged automatically; only vet
+# findings, which cannot be auto-fixed, actually block a commit.
+
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v gofmt >/dev/null 2>&1; then
+	echo "pre-commit: gofmt not found on PATH, skipping checks" >&2
+	exit 0
+fi
+
+staged=$(mktemp)
+trap 'rm -f "$staged"' EXIT
+git diff --cached --name-only --diff-filter=ACM -- '*.go' >"$staged"
+
+# No Go files staged means neither gofmt nor vet can say anything new about
+# this commit -- don't make a docs-only change wait on a build.
+[ -s "$staged" ] || exit 0
+
+fixed=''
+blocked=''
+
+while IFS= read -r f; do
+	[ -n "$f" ] && [ -f "$f" ] || continue
+	[ -n "$(gofmt -l -- "$f")" ] || continue
+	# Check for pre-existing unstaged edits BEFORE formatting -- gofmt -w
+	# itself creates an unstaged difference against the index, so asking
+	# afterwards would always say "dirty".
+	if git diff --quiet -- "$f"; then
+		dirty=no
+	else
+		dirty=yes
+	fi
+	gofmt -w -- "$f"
+	if [ "$dirty" = no ]; then
+		# Fully staged: safe to reformat and re-stage for the contributor.
+		git add -- "$f"
+		fixed="${fixed}  ${f}
+"
+	else
+		# The file also has unstaged edits. Re-staging it would sweep those
+		# into the commit, so hand the decision back to the contributor.
+		blocked="${blocked}  ${f}
+"
+	fi
+done <"$staged"
+
+if [ -n "$fixed" ]; then
+	printf 'pre-commit: gofmt applied and re-staged:\n'
+	printf '%s' "$fixed"
+fi
+
+if [ -n "$blocked" ]; then
+	printf 'pre-commit: gofmt applied, but these files also have unstaged changes,\n'
+	printf '            so they were NOT re-staged -- doing so would pull those\n'
+	printf '            unstaged edits into your commit. Review, stage, recommit:\n'
+	printf '%s' "$blocked"
+	exit 1
+fi
+
+[ "${BFFS_HOOK_SKIP_VET:-}" = "1" ] && exit 0
+
+if ! go vet ./...; then
+	printf '\npre-commit: go vet failed -- the same check ci.yml runs.\n'
+	printf '            Fix the findings, or bypass once with: git commit --no-verify\n'
+	exit 1
+fi

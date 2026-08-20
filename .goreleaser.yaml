@@ -1,0 +1,115 @@
+# GoReleaser config for bffs.
+#   Validate: goreleaser check
+#   Dry run:  goreleaser release --snapshot --clean
+#   Release:  git tag -a v0.2.0 -m v0.2.0 && git push origin v0.2.0
+version: 2
+
+project_name: bffs
+
+before:
+  hooks:
+    - go mod download
+    - go mod verify
+
+builds:
+  - id: bffs
+    main: .
+    binary: bffs
+    # Static binaries: the shim execs the real `claude`, it never needs libc.
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/jratienza65/bffs/cmd.Version={{ .Version }}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: bffs
+    ids:
+      - bffs
+    # bffs_0.2.0_darwin_arm64.tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - SECURITY.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "^style:"
+      - "^refactor\\(no-release\\):"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Security
+      regexp: '^.*?sec(urity)?(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: jratienza65
+    name: bffs
+  draft: false
+  # Tags like v0.2.0-rc.1 are published as prereleases automatically.
+  prerelease: auto
+  mode: replace
+  name_template: "v{{ .Version }}"
+  footer: |
+    ## Install
+
+    ```bash
+    # Homebrew-less: download the archive for your platform, then
+    tar -xzf bffs_{{ .Version }}_darwin_arm64.tar.gz
+    sudo install -m 0755 bffs /usr/local/bin/bffs
+    bffs init      # installs the `claude` shim, prints the PATH snippet
+    ```
+
+    Or straight from source:
+
+    ```bash
+    go install github.com/jratienza65/bffs@{{ .Tag }}
+    bffs init
+    ```
+
+    Verify a download against `checksums.txt`:
+
+    ```bash
+    sha256sum -c checksums.txt --ignore-missing
+    ```

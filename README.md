@@ -18,6 +18,16 @@ go install github.com/jratienza65/bffs@latest
 bffs init        # installs the shim, prints the PATH snippet
 ```
 
+Or grab a prebuilt binary from [Releases](https://github.com/jratienza65/bffs/releases) (macOS, Linux, Windows × amd64/arm64):
+
+```bash
+tar -xzf bffs_<version>_<os>_<arch>.tar.gz
+sudo install -m 0755 bffs /usr/local/bin/bffs
+bffs init
+```
+
+Each release ships a `checksums.txt`; verify with `sha256sum -c checksums.txt --ignore-missing`.
+
 After adding the printed snippet to your shell rc and re-opening your terminal, `which claude` should point at the shim (default: `~/.bffs/bin/claude` on macOS/Linux, `%LOCALAPPDATA%\bffs\bin\claude.exe` on Windows), with the real `claude` still resolvable later on `PATH`.
 
 The default install dir is intentionally a dedicated bffs directory rather than `~/.local/bin` so the shim doesn't collide with Claude Code's own install script. Override with `bffs init --dir <path>` (one-shot) or `BFFS_SHIM_DIR=<path>` (persistent — set in your shell rc).
@@ -121,3 +131,49 @@ Same resolution logic, no symlinks installed.
 ## Status
 
 Per-project pinning works for both `api_key` and `oauth` accounts. The `oauth` flow uses per-account `CLAUDE_CONFIG_DIR` isolation; concurrent sessions don't race. macOS, Linux, and Windows are all supported (the per-dir Keychain hashing is macOS-specific but happens inside Claude Code itself, not bffs). Linux libsecret and Windows DPAPI backends for the api_key store are tracked in [SECURITY.md](SECURITY.md).
+
+## Development
+
+```bash
+make hooks     # one-time: enable the pre-commit hook for this checkout
+make fmt       # gofmt -w .
+make lint      # gofmt check + go vet, same checks CI runs
+go test ./...
+```
+
+`make hooks` points `core.hooksPath` at [`.githooks/`](.githooks). The
+pre-commit hook runs gofmt and `go vet` — exactly what `ci.yml` checks, and
+deliberately nothing more, so it can't block a commit CI would accept.
+gofmt problems are fixed and re-staged for you; only vet findings, which
+can't be auto-fixed, actually stop a commit. If a file has unstaged edits
+alongside its staged ones the hook formats it but won't re-stage it, since
+that would pull the unstaged edits into your commit.
+
+Bypass once with `git commit --no-verify`, or skip just the vet step with
+`BFFS_HOOK_SKIP_VET=1`. Git won't run hooks from a fresh clone on its own,
+so `make hooks` is opt-in per checkout.
+
+## Releasing
+
+Releases are cut by [GoReleaser](https://goreleaser.com) from a tag push:
+
+```bash
+git tag -a v0.2.0 -m v0.2.0
+git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` then builds all six OS/arch targets, stamps
+`cmd.Version` via ldflags, and publishes archives plus `checksums.txt` to the
+GitHub release, with a changelog grouped from conventional-commit subjects.
+Tags like `v0.2.0-rc.1` publish as prereleases automatically.
+
+To check the release locally before tagging:
+
+```bash
+make release-check   # validate .goreleaser.yaml
+make snapshot        # full cross-platform build into ./dist, publishes nothing
+```
+
+CI (`.github/workflows/ci.yml`) runs `gofmt`, `go vet`, and `go test -race` on
+Linux/macOS/Windows for every push and PR, plus a GoReleaser snapshot build so
+release-config breakage surfaces before a tag is cut.

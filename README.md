@@ -132,6 +132,27 @@ Same resolution logic, no symlinks installed.
 
 Per-project pinning works for both `api_key` and `oauth` accounts. The `oauth` flow uses per-account `CLAUDE_CONFIG_DIR` isolation; concurrent sessions don't race. macOS, Linux, and Windows are all supported (the per-dir Keychain hashing is macOS-specific but happens inside Claude Code itself, not bffs). Linux libsecret and Windows DPAPI backends for the api_key store are tracked in [SECURITY.md](SECURITY.md).
 
+## Development
+
+```bash
+make hooks     # one-time: enable the pre-commit hook for this checkout
+make fmt       # gofmt -w .
+make lint      # gofmt check + go vet, same checks CI runs
+go test ./...
+```
+
+`make hooks` points `core.hooksPath` at [`.githooks/`](.githooks). The
+pre-commit hook runs gofmt and `go vet` — exactly what `ci.yml` checks, and
+deliberately nothing more, so it can't block a commit CI would accept.
+gofmt problems are fixed and re-staged for you; only vet findings, which
+can't be auto-fixed, actually stop a commit. If a file has unstaged edits
+alongside its staged ones the hook formats it but won't re-stage it, since
+that would pull the unstaged edits into your commit.
+
+Bypass once with `git commit --no-verify`, or skip just the vet step with
+`BFFS_HOOK_SKIP_VET=1`. Git won't run hooks from a fresh clone on its own,
+so `make hooks` is opt-in per checkout.
+
 ## Releasing
 
 Releases are cut by [GoReleaser](https://goreleaser.com) from a tag push:

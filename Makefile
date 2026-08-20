@@ -29,7 +29,7 @@ install: build
 # prefix if you have goreleaser on PATH.
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@latest
 
-.PHONY: build install release-check snapshot clean-dist
+.PHONY: build install release-check snapshot clean-dist hooks fmt lint
 
 release-check:
 	$(GORELEASER) check
@@ -40,3 +40,24 @@ snapshot:
 
 clean-dist:
 	rm -rf dist
+
+# ── Contributor tooling ──────────────────────────────────────────
+# Git will not run hooks from a fresh clone on its own (by design), so this
+# is opt-in per checkout. Run it once after cloning.
+hooks:
+	@git config core.hooksPath .githooks
+	@echo "  >  pre-commit hook enabled (gofmt + go vet, mirrors CI)"
+	@echo "  >  bypass once with: git commit --no-verify"
+
+fmt:
+	gofmt -w .
+
+# Same checks the pre-commit hook and ci.yml run.
+lint:
+	@unformatted="$$(gofmt -l .)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "These files need gofmt (run 'make fmt'):"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+	go vet ./...

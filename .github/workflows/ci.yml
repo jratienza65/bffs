@@ -21,7 +21,32 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          # Cache handled explicitly below; see the Restore step for why.
+          cache: false
+
+      - name: Resolve Go cache paths
+        id: gopaths
+        shell: bash
+        run: |
+          echo "build=$(go env GOCACHE)" >>"$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >>"$GITHUB_OUTPUT"
+
+      # setup-go's built-in `cache: true` is post-if: success(), so a job that
+      # fails never warms the cache -- precisely the runs you most want warm
+      # while iterating on a red build. It also matches on an exact key only,
+      # so any go.sum change starts completely cold. Restore/save split fixes
+      # both: restore-keys fall back to the last good cache, and the save step
+      # runs even when the job failed.
+      - name: Restore Go cache
+        id: gocache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.gopaths.outputs.build }}
+            ${{ steps.gopaths.outputs.mod }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-${{ github.job }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-go-${{ github.job }}-
 
       - name: gofmt
         if: matrix.os == 'ubuntu-latest'
@@ -39,6 +64,17 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      # Only writes when the exact key is absent, so this is one save per
+      # (os, arch, job, go.sum) rather than a new copy every commit.
+      - name: Save Go cache
+        if: ${{ !cancelled() && steps.gocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.gopaths.outputs.build }}
+            ${{ steps.gopaths.outputs.mod }}
+          key: ${{ steps.gocache.outputs.cache-primary-key }}
+
   # Catches release-config breakage (bad template, unbuildable GOOS/GOARCH)
   # before a tag is cut, not after.
   release-dry-run:
@@ -51,7 +87,28 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Resolve Go cache paths
+        id: gopaths
+        shell: bash
+        run: |
+          echo "build=$(go env GOCACHE)" >>"$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >>"$GITHUB_OUTPUT"
+
+      # Keyed on github.job so this cross-compiling job keeps its own cache:
+      # it builds six GOOS/GOARCH targets, and sharing a key with `test`
+      # (native only) would let whichever job saved first define the contents.
+      - name: Restore Go cache
+        id: gocache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.gopaths.outputs.build }}
+            ${{ steps.gopaths.outputs.mod }}
+          key: ${{ runner.os }}-${{ runner.arch }}-go-${{ github.job }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-go-${{ github.job }}-
 
       - name: Check .goreleaser.yaml
         uses: goreleaser/goreleaser-action@v6
@@ -66,3 +123,12 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           args: release --snapshot --clean --skip=publish
+
+      - name: Save Go cache
+        if: ${{ !cancelled() && steps.gocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.gopaths.outputs.build }}
+            ${{ steps.gopaths.outputs.mod }}
+          key: ${{ steps.gocache.outputs.cache-primary-key }}

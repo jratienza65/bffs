@@ -28,6 +28,28 @@ bffs init
 
 Each release ships a `checksums.txt`; verify with `sha256sum -c checksums.txt --ignore-missing`.
 
+`bffs init` verifies the shim would actually be the `claude` that runs before
+installing it. Which directories are on `PATH` depends on how a shell was
+started, so a shim can win in your terminal and lose everywhere else — IDE
+integrations, launchd/systemd, cron and `ssh host 'cmd'` read different startup
+files. init probes each invocation mode and refuses to install a shim that
+would silently never run:
+
+```
+Would a claude shim in ~/.bffs/bin actually run?
+
+  interactive      yes
+  login            NO — /opt/homebrew/bin/claude comes first on PATH
+  non-interactive  NO — no claude resolves at all in this mode
+  current shell    yes
+```
+
+On a terminal it prompts for the install directory, offering any directory
+already early enough on `PATH` in every mode (choosing one means no PATH edit
+at all). `bffs init --auto` takes the per-OS default without prompting and
+still verifies; with no terminal — CI, dotfile bootstrap — it behaves as
+`--auto` rather than hanging. `--force` installs anyway.
+
 After adding the printed snippet to your shell rc and re-opening your terminal, `which claude` should point at the shim (default: `~/.bffs/bin/claude` on macOS/Linux, `%LOCALAPPDATA%\bffs\bin\claude.exe` on Windows), with the real `claude` still resolvable later on `PATH`.
 
 The default install dir is intentionally a dedicated bffs directory rather than `~/.local/bin` so the shim doesn't collide with Claude Code's own install script. Override with `bffs init --dir <path>` (one-shot) or `BFFS_SHIM_DIR=<path>` (persistent — set in your shell rc).

@@ -1,9 +1,11 @@
 // Package claudejson reads and patches the per-user ~/.claude.json file that
-// Claude Code maintains. bffs only touches two top-level fields —
+// Claude Code maintains. bffs only touches three top-level fields —
 // oauthAccount (cached account metadata: email, orgUuid, etc.) and userID
-// (the per-user hash) — because Claude Code reads identity from those caches
-// rather than re-deriving it from the Keychain on every invocation. All other
-// fields (projects, MCP, plugin data, etc.) are passed through verbatim.
+// (the per-user hash), because Claude Code reads identity from those caches
+// rather than re-deriving it from the Keychain on every invocation, and the
+// bffs entry in mcpServers (see SetMCPServer/RemoveMCPServer, used by
+// `bffs mcp install`). All other fields (projects, other MCP servers, plugin
+// data, etc.) are passed through verbatim.
 package claudejson
 
 import (
@@ -74,6 +76,40 @@ func ReadFrom(p string) (Snapshot, error) {
 		}
 	}
 	return s, nil
+}
+
+// LastSessionIDs returns the set of projects.<path>.lastSessionId values in
+// the .claude.json at path. Claude Code records the id of the most recent
+// session per project in each config tree, and since every bffs oauth account
+// has its own .claude.json this is ground-truth "that session was this
+// account" data for usage attribution. Missing file or an unparseable
+// projects field returns an empty set, nil error — this is heuristic input,
+// not something worth failing over.
+func LastSessionIDs(path string) (map[string]struct{}, error) {
+	ids := map[string]struct{}{}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return ids, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	var projects map[string]struct {
+		LastSessionID string `json:"lastSessionId"`
+	}
+	if err := json.Unmarshal(doc["projects"], &projects); err != nil {
+		return ids, nil
+	}
+	for _, p := range projects {
+		if p.LastSessionID != "" {
+			ids[p.LastSessionID] = struct{}{}
+		}
+	}
+	return ids, nil
 }
 
 // SeedFromHome bootstraps a per-account .claude.json by copying ~/.claude.json

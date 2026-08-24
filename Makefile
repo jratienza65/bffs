@@ -9,14 +9,21 @@ GO_BUILD_FLAGS ?=
 build:
 	go build -p $(GO_P) $(GO_BUILD_FLAGS) -o $(BINARY) .
 
+# The rm before cp is load-bearing on macOS: cp onto an existing file rewrites
+# the same inode, which invalidates the kernel's cached code signature for the
+# binary — every subsequent exec is then SIGKILLed ("zsh: killed") even though
+# `codesign -v` reports the file as valid. Unlinking first gives the copy a
+# fresh inode and a clean signature registration.
 install: build
 	@echo "  >  Installing $(BINARY) to $(INSTALL_PATH)"
 	@if [ "$(INSTALL_PATH)" = "/opt/bffs" ]; then \
 		sudo mkdir -p $(INSTALL_PATH); \
+		sudo rm -f $(INSTALL_PATH)/$(BINARY); \
 		sudo cp $(BINARY) $(INSTALL_PATH)/$(BINARY); \
 		sudo chmod +x $(INSTALL_PATH)/$(BINARY); \
 	else \
 		mkdir -p $(INSTALL_PATH); \
+		rm -f $(INSTALL_PATH)/$(BINARY); \
 		cp $(BINARY) $(INSTALL_PATH)/$(BINARY); \
 		chmod +x $(INSTALL_PATH)/$(BINARY); \
 	fi;

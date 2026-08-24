@@ -83,9 +83,9 @@ func New(cfgDir, version string) *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "account_usage",
-		Description: "Estimate per-account usage headroom before Claude subscription rate limits: recent token " +
-			"burn (5h and horizon windows), last-used times, detected limit events, plan tiers, and a suggested " +
-			"account with the most headroom. Heuristic and best-effort — read the note field for caveats.",
+		Description: "Estimate per-account usage: recent token burn (5h and horizon windows), last-used times, " +
+			"detected limit events, plan tiers, and a suggested account with the most headroom for new work. " +
+			"Heuristic and best-effort — read the note field for caveats.",
 		Annotations: readOnly,
 	}, h.accountUsage)
 

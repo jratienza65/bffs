@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -37,6 +38,8 @@ var showCmd = &cobra.Command{
 			return nil
 		}
 		fmt.Fprintf(out, "account:    %s\n", r.Account.Name)
+		// Last shim launch only — `bffs usage` refines with transcript data.
+		fmt.Fprintf(out, "last used:  %s\n", humanizeAgo(lastUsedByAccount(dir)[r.Account.Name], time.Now()))
 		fmt.Fprintf(out, "type:       %s\n", r.Account.Type)
 		if r.Account.Email != "" {
 			fmt.Fprintf(out, "email:      %s\n", r.Account.Email)

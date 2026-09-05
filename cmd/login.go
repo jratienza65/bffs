@@ -18,12 +18,13 @@ import (
 )
 
 var (
-	loginConsole bool
-	loginSSO     bool
-	loginEmail   string
-	loginForce   bool
-	loginNoSwap  bool
-	loginPreset  string
+	loginConsole      bool
+	loginSSO          bool
+	loginEmail        string
+	loginForce        bool
+	loginNoSwap       bool
+	loginPreset       string
+	loginNoTrustCarry bool
 )
 
 var loginCmd = &cobra.Command{
@@ -42,7 +43,13 @@ The --preset flag controls how much of ~/.claude is symlinked into the
 per-account dir: "full" (nothing shared), "partial" (settings/skills/plugins
 shared — default), or "minimal" (everything except .claude.json and
 .credentials.json shared). The chosen preset is stored on the account and
-can be changed later with ` + "`bffs reisolate <name>`" + `.`,
+can be changed later with ` + "`bffs reisolate <name>`" + `.
+
+A new account's .claude.json is seeded from ~/.claude.json once (so claude's
+first-run wizard does not fire again) and then receives the folder-trust and
+external-imports answers the previously active account recorded, for every
+project whose directory still exists — never downgrading, never overriding a
+decline. --no-trust-carry skips that step; see ` + "`bffs trust`" + `.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfgDir := mustConfigDir(cmd)
@@ -54,6 +61,7 @@ can be changed later with ` + "`bffs reisolate <name>`" + `.`,
 		if err != nil {
 			return err
 		}
+		prevActive := state.Active
 
 		out := cmd.OutOrStdout()
 
@@ -102,8 +110,9 @@ can be changed later with ` + "`bffs reisolate <name>`" + `.`,
 		// Seed the per-account .claude.json from ~/.claude.json so claude's
 		// first-run wizard (theme, terms, etc.) doesn't fire on the next
 		// interactive invocation. `claude auth login` will populate the
-		// auth/identity fields below.
-		if err := claudejson.SeedFromHome(filepath.Join(sessionDir, ".claude.json")); err != nil {
+		// auth/identity fields below. Only ever once: a --force re-login
+		// must not wipe the trust answers already synced into the file.
+		if _, err := seedClaudeJSONOnce(filepath.Join(sessionDir, claudejson.Filename)); err != nil {
 			return fmt.Errorf("seed per-account .claude.json: %w", err)
 		}
 
@@ -173,6 +182,21 @@ can be changed later with ` + "`bffs reisolate <name>`" + `.`,
 			fmt.Fprintln(out, "This is now the active account; the shim will set CLAUDE_CONFIG_DIR per-invocation.")
 		}
 		fmt.Fprintln(out, "Per-project pinning works: drop a `bffs.toml` with `account = \""+name+"\"` in any project.")
+
+		// Carry the previously active account's dialog answers over so
+		// claude does not ask again in every project. Best-effort: the
+		// login itself has already succeeded.
+		if !loginNoTrustCarry {
+			n, src, err := carryTrustOnLogin(cfgDir, "", accs, prevActive, name)
+			switch {
+			case err != nil:
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not carry trust answers over: %v\n", err)
+			case n > 0 && src == reservedAccountName:
+				fmt.Fprintf(out, "added %d answers from ~/.claude.json\n", n)
+			case n > 0:
+				fmt.Fprintf(out, "added %d answers from %q that ~/.claude.json did not have\n", n, src)
+			}
+		}
 		return nil
 	},
 }
@@ -184,6 +208,7 @@ func init() {
 	loginCmd.Flags().BoolVar(&loginForce, "force", false, "overwrite an existing account with the same name")
 	loginCmd.Flags().BoolVar(&loginNoSwap, "no-swap", false, "don't make the new account active")
 	loginCmd.Flags().StringVar(&loginPreset, "preset", "", `isolation preset for this account: "partial" (default — drop-in: only auth per-account) or "full" (fresh world per account)`)
+	loginCmd.Flags().BoolVar(&loginNoTrustCarry, "no-trust-carry", false, "don't copy the previously active account's trust answers onto the new account")
 	rootCmd.AddCommand(loginCmd)
 }
 

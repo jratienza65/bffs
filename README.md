@@ -224,6 +224,81 @@ Default is `partial`. Override per-account with `bffs login --preset=full`, chan
 
 The shim re-runs the symlink reconciliation on every oauth invocation, so anything claude adds to `~/.claude/` later (a new skill, a new plugin) shows up in your per-account dirs automatically. If a real file is in the way of a desired symlink (e.g. claude wrote something into the session dir directly), that path is skipped, the user's file is preserved, and a one-line warning goes to stderr.
 
+## Why does Claude ask me again after switching accounts?
+
+Claude Code asks two questions the first time it runs in a directory — whether
+you trust the files in the folder, and "Allow external CLAUDE.md file
+imports?" (raised by an `@import` in a CLAUDE.md that reaches outside the
+project) — and records the answers per project in the
+`.claude.json` it reads from `CLAUDE_CONFIG_DIR`. Every bffs oauth account has
+its own `.claude.json`, so the answers diverge per account: `bffs switch work`
+puts a `.claude.json` in front of `claude` that never saw your answer, and the
+dialog comes back. Nothing is missing or moved — under `partial` isolation the
+transcripts and memory are the same files for every account; only these flags
+differ.
+
+`bffs trust` shows who has answered what for the current project
+(`--project <dir>`, `--all-projects`, `--json`):
+
+```
+$ bffs trust
+project:  ~/build/projects/bffs        (key: /Users/jonas/build/projects/bffs)
+
+ACCOUNT      FOLDER-TRUST  EXTERNAL-IMPORTS  TOOLS  MCP
+* aviate     accepted      allowed           3      2 enabled
+  innomind   -             -                 -      -
+  innomind2  -             declined          -      -
+  (home)     accepted      allowed           3      2 enabled
+
+"-" = never answered on that account (claude will ask); "inherited" = a parent directory is trusted (claude will not ask). Carry answers over with:
+    bffs trust sync --to innomind
+```
+
+`(home)` is `~/.claude.json` — what an unmanaged `claude` and api_key accounts
+read. Folder trust is inherited from a trusted parent directory — shown as
+`inherited (from <dir>)` — but never from above a git root: inside a
+repository the answer that counts is the repository's own. The
+external-imports answer is per exact directory. A `live:` line lists any
+`claude` currently running in the project.
+
+`bffs trust sync --to <account>` copies the answers over. The source is the
+active account when it accepted the project's folder trust, else the first
+account (by name) that did, else `~/.claude.json`; `--from` overrides,
+`--to all` fans out to every account, `--to home` targets `~/.claude.json`:
+
+```
+$ bffs trust sync --to innomind
+project ~/build/projects/bffs → account "innomind" (from "aviate"):
+  hasTrustDialogAccepted                    false -> true
+  hasClaudeMdExternalIncludesApproved       false -> true
+  hasClaudeMdExternalIncludesWarningShown   false -> true
+apply to ~/Library/Application Support/bffs/sessions/innomind/.claude.json? [y/N] y
+updated 1 project in "innomind". A running claude on that account picks the change up within about a second.
+(allowedTools and MCP approvals were not copied; add --include-permissions to include them.)
+```
+
+The rules: a sync never downgrades (`false → true` only) and never overrides
+an explicit decline — a declined external-imports answer is copied only onto
+an account that never answered; `--mirror` copies the source values verbatim
+instead. `allowedTools` and MCP server approvals travel only with
+`--include-permissions`, and every `mcpServers` command line is printed before
+you confirm. `--dry-run` shows the plan and writes nothing; `-y` skips the
+confirmation (required when there is no terminal). Nothing else in the file is
+touched — not `lastSessionId`, not the identity fields. The write takes
+Claude's own lock on the file and holds it well under a second, and a `claude`
+already running on that account re-reads the file about once a second, so the
+change lands without a restart.
+
+You rarely need to run it by hand. `bffs switch` and `bffs show` print a
+one-line note when the account in front of you still has a dialog ahead of it
+for the current directory that another account already answered
+(`bffs switch <name> --sync-trust` carries it over on the spot; set
+`trust_hint = false` in `state.toml` to silence the note). `bffs login` seeds a
+new account's `.claude.json` from `~/.claude.json` once — never again on a
+`--force` re-login, so synced answers survive — and then carries the
+previously active account's answers over for every project whose directory
+still exists (`--no-trust-carry` skips that).
+
 ## Account resolution order
 
 Highest priority wins:

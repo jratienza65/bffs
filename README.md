@@ -373,6 +373,44 @@ Every import ends with the command that verifies it (`cd <dir> && claude
 `bffs usage` uses to attribute the imported sessions to the account chosen
 at import time.
 
+### Same machine: copy or move between accounts
+
+Under the default partial isolation every oauth account shares one `projects/`
+pool with `~/.claude`, so there is nothing to copy between two such accounts:
+
+```
+$ bffs copy --from aviate --to innomind --project .
+nothing to copy: "aviate" and "innomind" share one projects pool (partial isolation) — the transcripts and the memory
+for ~/build/projects/bffs are already the same files. What differs per account is trust:
+    bffs trust sync --from aviate --to innomind --project /Users/jonas/build/projects/bffs
+```
+
+A real copy happens between different roots — into or out of a full-isolation
+account, or from an orphan session dir (a read-only source):
+
+```
+$ bffs copy --from home --to work --project ~/build/projects/bffs
+plan: 7 sessions, 1 memory dir  from ~/.claude/projects  to  ~/Library/Application Support/bffs/sessions/work/projects
+copy 7 sessions? [y/N] y
+copied 7 sessions, 1 memory dir
+verify:  BFFS_ACCOUNT=work claude --resume 0c5e19b2-…
+```
+
+The copy runs through the same staged, verified pipeline as `bffs import`
+(`--on-conflict`, `--memory`, `--set-last-session`, `--dry-run`, `-y` work the
+same way). `--move` deletes the originals only after every landed file was read
+back and its digest matched the manifest; sessions a running claude has open are
+held back and never touched; a move asks you to type the number of sessions
+when there is more than one. After `bffs reisolate <name> --preset full` the
+new root is empty — `bffs copy --from home --to <name> --all-projects` takes
+your history with you.
+
+`bffs sessions rm <sid|prefix>...` deletes sessions from the root they live in:
+it lists every path first (transcript, sidecar, file-history, tasks, plan
+files), refuses sessions a running claude has open, asks for the typed count
+when more than one is named, and never touches memory directories or
+`history.jsonl`.
+
 ## Transfer between machines
 
 Two machines on the same Wi-Fi or Ethernet can hand a bundle over directly:

@@ -47,9 +47,11 @@ import (
 // NoRewriteMemory keeps old-machine paths in merged memory as they are;
 // ForceStamp stamps a mapped transcript whose last line is torn (a live
 // session exported mid-write); without it such a session lands as-is,
-// pending, with a warning (plan §9.8). ExcludeRoot is accepted and
-// ignored. StreamMode says the reader stays open after the
-// archive (a LAN body), so its end is not required.
+// pending, with a warning (plan §9.8). ExcludeRoot names a projects/
+// directory whose transcripts the collision scan ignores — CopyLocal sets
+// it to the source pool, so the copies being made are no collision (plan
+// §9.4). StreamMode says the reader stays open after the archive (a LAN
+// body), so its end is not required.
 type ImportOptions struct {
 	Dest                 transcripts.Root
 	Account              string

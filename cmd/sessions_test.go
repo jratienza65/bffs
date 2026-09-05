@@ -307,7 +307,7 @@ func TestRenderSessionShow(t *testing.T) {
 		"old cwd:      /home/jonas/src/bffs",
 		"sidecar:      " + filepath.Join("~", "bffs", "sessions", "work", "projects", "-Users-jonas-build-projects-bffs", testSID2) + "  (absent)",
 		"plan:         -",
-		"resume:       BFFS_ACCOUNT=work cd /home/jonas/src/bffs && claude --resume " + testSID2,
+		"resume:       cd /home/jonas/src/bffs && BFFS_ACCOUNT=work claude --resume " + testSID2,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("imported show missing %q:\n%s", want, out)
@@ -340,8 +340,8 @@ func TestResumeLine(t *testing.T) {
 		want string
 	}{
 		{"shared", transcripts.Session{ID: testSID1, Cwd: "/a/b", Root: transcripts.Root{Shared: true}}, "cd /a/b && claude --resume " + testSID1},
-		{"owned", transcripts.Session{ID: testSID1, Cwd: "/a/b", Root: transcripts.Root{Owner: "work"}}, "BFFS_ACCOUNT=work cd /a/b && claude --resume " + testSID1},
-		{"orphan", transcripts.Session{ID: testSID1, Cwd: "/a/b", Root: transcripts.Root{Owner: "gone", Orphan: true, ConfigDir: "/cfg/sessions/gone"}}, "CLAUDE_CONFIG_DIR=/cfg/sessions/gone cd /a/b && claude --resume " + testSID1},
+		{"owned", transcripts.Session{ID: testSID1, Cwd: "/a/b", Root: transcripts.Root{Owner: "work"}}, "cd /a/b && BFFS_ACCOUNT=work claude --resume " + testSID1},
+		{"orphan", transcripts.Session{ID: testSID1, Cwd: "/a/b", Root: transcripts.Root{Owner: "gone", Orphan: true, ConfigDir: "/cfg/sessions/gone"}}, "cd /a/b && CLAUDE_CONFIG_DIR=/cfg/sessions/gone claude --resume " + testSID1},
 		{"quoted cwd", transcripts.Session{ID: testSID1, Cwd: "/a/my project's"}, `cd '/a/my project'\''s' && claude --resume ` + testSID1},
 		{"no cwd", transcripts.Session{ID: testSID1}, "claude --resume " + testSID1},
 	}

@@ -39,6 +39,7 @@ var (
 	sessionsPendingRehome bool
 	sessionsImportsJSON   bool
 	sessionsPlain         bool
+	sessionsRmYes         bool
 )
 
 const (
@@ -114,6 +115,18 @@ does not exist on this machine yet.`,
 	},
 }
 
+var sessionsRmCmd = &cobra.Command{
+	Use:   "rm <session-id|prefix>...",
+	Short: "Delete sessions: transcript, sidecar, file-history, tasks and plan files (never memory, never history.jsonl)",
+	Long: `Delete one or more sessions from the root they live in. Every path that
+will be removed is listed first; a session a running claude has open is
+refused. Memory directories and history.jsonl are never touched.`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionsRm(cmd, args, newPrompter(os.Stdin, cmd.OutOrStdout()), sessionsRmYes, isTTY())
+	},
+}
+
 func init() {
 	addSessionsListFlags(sessionsCmd)
 	sessionsCmd.Flags().BoolVar(&sessionsPlain, "plain", false, "print the table instead of opening the interactive browser")
@@ -121,7 +134,10 @@ func init() {
 	sessionsShowCmd.Flags().StringVar(&sessionsClaudeDir, "claude-dir", "", "override the shared claude config dir (testing)")
 	_ = sessionsShowCmd.Flags().MarkHidden("claude-dir")
 	sessionsImportsCmd.Flags().BoolVar(&sessionsImportsJSON, "json", false, "emit the import records as a JSON array instead of the table")
-	sessionsCmd.AddCommand(sessionsListCmd, sessionsShowCmd, sessionsImportsCmd)
+	sessionsRmCmd.Flags().BoolVarP(&sessionsRmYes, "yes", "y", false, "skip the confirmation")
+	sessionsRmCmd.Flags().StringVar(&sessionsClaudeDir, "claude-dir", "", "override the shared claude config dir (testing)")
+	_ = sessionsRmCmd.Flags().MarkHidden("claude-dir")
+	sessionsCmd.AddCommand(sessionsListCmd, sessionsShowCmd, sessionsImportsCmd, sessionsRmCmd)
 	rootCmd.AddCommand(sessionsCmd)
 }
 
@@ -933,19 +949,197 @@ func renderSessionShow(w io.Writer, d sessionDetail, now time.Time) {
 // account can launch it.
 func resumeLine(s transcripts.Session) string {
 	var sb strings.Builder
+	// Sanitise before quoting so a control character in a transcript's
+	// cwd neither reaches the terminal nor forces quotes.
+	if cwd := transcripts.Sanitize(s.Cwd); cwd != "" {
+		sb.WriteString("cd " + shellWord(cwd) + " && ")
+	}
+	// The assignment sits on the claude word: a leading `A=1 cd X && claude`
+	// would bind the variable to cd only.
 	switch {
 	case s.Root.Orphan:
 		sb.WriteString("CLAUDE_CONFIG_DIR=" + shellWord(s.Root.ConfigDir) + " ")
 	case s.Root.Owner != "":
 		sb.WriteString("BFFS_ACCOUNT=" + shellWord(s.Root.Owner) + " ")
 	}
-	// Sanitise before quoting so a control character in a transcript's
-	// cwd neither reaches the terminal nor forces quotes.
-	if cwd := transcripts.Sanitize(s.Cwd); cwd != "" {
-		sb.WriteString("cd " + shellWord(cwd) + " && ")
-	}
 	sb.WriteString("claude --resume " + s.ID)
 	return sb.String()
+}
+
+// runSessionsRm deletes the named sessions after listing every path.
+func runSessionsRm(cmd *cobra.Command, args []string, pr *prompter, yes, tty bool) error {
+	dir := mustConfigDir(cmd)
+	env, err := loadCatalogEnv(dir, sessionsClaudeDir)
+	if err != nil {
+		return err
+	}
+	out := cmd.OutOrStdout()
+	ctx := cmdContext(cmd)
+	live, err := transcripts.Live(ctx, env.configDirs())
+	if err != nil {
+		return fmt.Errorf("cannot tell which sessions are open in a running claude: %w; nothing was removed", err)
+	}
+	var targets []rmTarget
+	seen := map[string]bool{}
+	for _, arg := range args {
+		found, err := transcripts.Find(env.roots, arg)
+		if err != nil {
+			return err
+		}
+		if len(found) != 1 {
+			return fmt.Errorf("session %q matches %d transcripts; use the full id", arg, len(found))
+		}
+		s := found[0]
+		if seen[s.Path] {
+			continue
+		}
+		seen[s.Path] = true
+		if s.Root.Orphan {
+			return fmt.Errorf("session %s lives in the orphan session dir %s, which is read-only", short8(s.ID), short(s.Root.ConfigDir))
+		}
+		if ls, ok := live[s.ID]; ok {
+			return fmt.Errorf("session %s is open in a running claude (pid %d); close it first", s.ID, ls.PID)
+		}
+		t, err := newRmTarget(s)
+		if err != nil {
+			return err
+		}
+		targets = append(targets, t)
+	}
+	var total int64
+	for _, t := range targets {
+		fmt.Fprintf(out, "%s  %s\n", t.session.ID, transcripts.Sanitize(t.title))
+		for _, p := range t.paths {
+			fmt.Fprintf(out, "  %-8s %s\n", formatSize(p.size), short(p.path))
+			total += p.size
+		}
+	}
+	fmt.Fprintf(out, "remove %s (%s)? [y/N] ", countNoun(len(targets), "session"), formatSize(total))
+	if !yes {
+		if !tty {
+			return errors.New("stdin is not a terminal; pass -y to confirm")
+		}
+		ans, err := pr.line("")
+		if err != nil {
+			return err
+		}
+		if a := strings.ToLower(strings.TrimSpace(ans)); a != "y" && a != "yes" {
+			fmt.Fprintln(out, "aborted")
+			return nil
+		}
+		if len(targets) > 1 {
+			if err := confirmCount(pr, len(targets)); err != nil {
+				return err
+			}
+		}
+	} else {
+		fmt.Fprintln(out, "y")
+	}
+	removed := 0
+	for _, t := range targets {
+		if err := t.remove(); err != nil {
+			return exitWith(1, fmt.Errorf("removed %d of %d; %w", removed, len(targets), err))
+		}
+		removed++
+	}
+	fmt.Fprintf(out, "removed %s (%s)\n", countNoun(removed, "session"), formatSize(total))
+	return nil
+}
+
+// rmTarget is one session and the paths its removal covers, all relative
+// to the config dir so the deletion runs through an os.Root over it.
+type rmTarget struct {
+	session   transcripts.Session
+	title     string
+	configDir string
+	paths     []rmPath
+}
+
+type rmPath struct {
+	path string // absolute, for display
+	rel  string // relative to configDir
+	size int64
+	dir  bool
+}
+
+func newRmTarget(s transcripts.Session) (rmTarget, error) {
+	cfg, err := filepath.EvalSymlinks(s.Root.ConfigDir)
+	if err != nil {
+		return rmTarget{}, err
+	}
+	t := rmTarget{session: s, title: s.Title, configDir: cfg}
+	art := transcripts.ArtifactsFor(s.Root, s)
+	candidates := append([]string{art.Transcript, art.SidecarDir, art.FileHistoryDir, art.TasksDir}, art.PlanFiles...)
+	for _, p := range candidates {
+		if p == "" {
+			continue
+		}
+		info, err := os.Lstat(p)
+		if err != nil {
+			continue
+		}
+		real, err := filepath.EvalSymlinks(filepath.Dir(p))
+		if err != nil {
+			return rmTarget{}, err
+		}
+		real = filepath.Join(real, filepath.Base(p))
+		rel, err := filepath.Rel(cfg, real)
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			return rmTarget{}, fmt.Errorf("%s is outside the config dir %s; refusing", short(p), short(cfg))
+		}
+		size := info.Size()
+		if info.IsDir() {
+			size = rmDirSize(p)
+		}
+		t.paths = append(t.paths, rmPath{path: p, rel: rel, size: size, dir: info.IsDir()})
+	}
+	if len(t.paths) == 0 {
+		return rmTarget{}, fmt.Errorf("session %s has no files under %s", short8(s.ID), short(cfg))
+	}
+	return t, nil
+}
+
+// remove deletes the target's paths through an os.Root over the config
+// dir: the transcript last, so a partial failure never leaves a transcript
+// without the files Claude expects beside it.
+func (t rmTarget) remove() error {
+	root, err := os.OpenRoot(t.configDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	var transcript *rmPath
+	for i := range t.paths {
+		p := &t.paths[i]
+		if !p.dir && strings.HasSuffix(p.rel, transcripts.TranscriptExt) && filepath.Base(p.rel) == t.session.ID+transcripts.TranscriptExt {
+			transcript = p
+			continue
+		}
+		if err := root.RemoveAll(p.rel); err != nil {
+			return fmt.Errorf("remove %s: %w", short(p.path), err)
+		}
+	}
+	if transcript != nil {
+		if err := root.Remove(transcript.rel); err != nil {
+			return fmt.Errorf("remove %s: %w", short(transcript.path), err)
+		}
+	}
+	return nil
+}
+
+// rmDirSize sums the regular files under dir (best effort, for display).
+func rmDirSize(dir string) int64 {
+	var n int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			n += info.Size()
+		}
+		return nil
+	})
+	return n
 }
 
 // shellWord quotes s for a POSIX shell when it needs it.

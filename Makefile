@@ -36,7 +36,7 @@ install: build
 # prefix if you have goreleaser on PATH.
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@latest
 
-.PHONY: build install release-check snapshot clean-dist hooks fmt lint fuzz
+.PHONY: build install release-check snapshot clean-dist hooks fmt lint fuzz skill-validate
 
 release-check:
 	$(GORELEASER) check
@@ -80,3 +80,21 @@ lint:
 		exit 1; \
 	fi
 	go vet ./...
+
+# Install the embedded bffs-rehome skill into a throwaway Claude config dir
+# (a throwaway BFFS_HOME too, so no real account is touched) and run Claude
+# Code's own validator over that config dir (a bare skill dir is validated as
+# a plugin and only reports the missing manifest). --strict turns the
+# validator's warnings (missing description and the like; it does not flag
+# unknown frontmatter keys) into failures. Skipped when claude is not on PATH.
+#
+# The freshly built ./bffs is not the installed one, so its PATH walk for a
+# real claude cannot recognise an installed bffs shim as itself and may cache
+# the shim (which then execs itself until the 20 s timeout). BFFS_REAL_CLAUDE
+# pointing nowhere skips the in-install check; the explicit run below is the
+# check, and `claude` on PATH resolves normally there (no throwaway home).
+skill-validate: build
+	@if ! command -v claude >/dev/null 2>&1; then echo "  >  claude not on PATH; skipping skill validation"; exit 0; fi; \
+	tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+	BFFS_HOME="$$tmp/bffs" BFFS_REAL_CLAUDE="$$tmp/no-claude" ./$(BINARY) skill install --claude-dir "$$tmp/claude" && \
+	claude plugin validate "$$tmp/claude" --strict

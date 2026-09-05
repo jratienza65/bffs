@@ -582,12 +582,22 @@ func TestImportMemoryModes(t *testing.T) {
 			t.Errorf("sessions must still land: %v", rep.Imported)
 		}
 	})
-	t.Run("merge not yet", func(t *testing.T) {
+	t.Run("merge unconfirmed adds side files", func(t *testing.T) {
 		dst := secondEnv(t, src)
+		mem := dst.memDir(t)
+		writeFile(t, filepath.Join(mem, "mine.md"), "mine\n")
 		opts := importOpts(dst)
 		opts.Memory = rehome.MemoryMerge
-		if _, err := Import(context.Background(), dst.cfgDir, bytes.NewReader(data), opts); err == nil || !strings.Contains(err.Error(), "not available yet") {
-			t.Errorf("err = %v", err)
+		rep := doImport(t, dst, data, opts)
+		if !reflect.DeepEqual(rep.MemoryDirs, []string{mem}) {
+			t.Errorf("MemoryDirs = %v", rep.MemoryDirs)
+		}
+		if !exists(filepath.Join(mem, "topic.imported-"+id8+".md")) || exists(filepath.Join(mem, transcripts.MemoryIndexFile)) || readFile(t, filepath.Join(mem, "mine.md")) != "mine\n" {
+			t.Error("identity placement is unconfirmed: side files only, no index, existing files untouched")
+		}
+		recs, _ := imports.Load(dst.cfgDir)
+		if recs[0].Memories[0].Status != imports.StatusPlaced {
+			t.Errorf("memory record = %+v", recs[0].Memories[0])
 		}
 	})
 }
@@ -701,13 +711,12 @@ func TestImportOptionValidation(t *testing.T) {
 		mod  func(*ImportOptions)
 		want string
 	}{
-		{"map", func(o *ImportOptions) { o.Map = []rehome.Mapping{{Old: "/a", New: "/b"}} }, "--map not available yet"},
-		{"into", func(o *ImportOptions) { o.Into = "/x" }, "--into not available yet"},
-		{"placer", func(o *ImportOptions) {
-			o.Place = func(context.Context, *bundle.Manifest, []rehome.Suggestion) ([]Placement, error) { return nil, nil }
-		}, "interactive placement not available yet"},
-		{"carry trust", func(o *ImportOptions) { o.CarryTrust = true }, "--carry-trust not available yet"},
-		{"set last session", func(o *ImportOptions) { o.SetLastSession = true }, "--set-last-session not available yet"},
+		{"into missing", func(o *ImportOptions) { o.Into = filepath.Join(t.TempDir(), "gone") }, "is not a directory"},
+		{"into and map", func(o *ImportOptions) {
+			o.Into = t.TempDir()
+			o.Map = []rehome.Mapping{{Old: "/a", New: "/b"}}
+		}, "--into and --map are mutually exclusive"},
+		{"carry trust as-is", func(o *ImportOptions) { o.AsIs, o.CarryTrust = true, true }, "--carry-trust needs a mapped placement"},
 		{"bad conflict", func(o *ImportOptions) { o.OnConflict = "fork" }, "invalid --on-conflict"},
 		{"bad memory", func(o *ImportOptions) { o.Memory = "clobber" }, "invalid --memory"},
 		{"orphan", func(o *ImportOptions) { o.Dest.Orphan = true; o.Dest.Owner = "ghost" }, "orphans are never destinations"},
@@ -748,7 +757,7 @@ func TestImportOptionValidation(t *testing.T) {
 	if !exists(filepath.Join(work.Dir, src.slug(t), sidA+".jsonl")) {
 		t.Error("session not placed in the account root")
 	}
-	if len(rep.Verify) == 0 || !strings.HasPrefix(rep.Verify[0], "BFFS_ACCOUNT=work ") {
+	if len(rep.Verify) == 0 || !strings.Contains(rep.Verify[0], " && BFFS_ACCOUNT=work claude --resume ") {
 		t.Errorf("Verify = %v", rep.Verify)
 	}
 	// An explicit account on the shared root prefixes the verify line too.
@@ -756,7 +765,7 @@ func TestImportOptionValidation(t *testing.T) {
 	opts = importOpts(dst2)
 	opts.Account = "aviate"
 	rep = doImport(t, dst2, data, opts)
-	if len(rep.Verify) == 0 || !strings.HasPrefix(rep.Verify[0], "BFFS_ACCOUNT=aviate ") {
+	if len(rep.Verify) == 0 || !strings.Contains(rep.Verify[0], " && BFFS_ACCOUNT=aviate claude --resume ") {
 		t.Errorf("Verify = %v", rep.Verify)
 	}
 	recs, _ := imports.Load(dst2.cfgDir)

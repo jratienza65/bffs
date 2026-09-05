@@ -8,13 +8,13 @@ func TestVerifyCommand(t *testing.T) {
 		want              string
 	}{
 		{"/home/jonas/src/bffs", testSID, "", "cd /home/jonas/src/bffs && claude --resume " + testSID},
-		{"/home/jonas/src/bffs", testSID, "work", "BFFS_ACCOUNT=work cd /home/jonas/src/bffs && claude --resume " + testSID},
+		{"/home/jonas/src/bffs", testSID, "work", "cd /home/jonas/src/bffs && BFFS_ACCOUNT=work claude --resume " + testSID},
 		{"/Users/jonas/My Projects/bffs", testSID, "", "cd '/Users/jonas/My Projects/bffs' && claude --resume " + testSID},
 		{"/tmp/it's here", testSID, "", `cd '/tmp/it'\''s here' && claude --resume ` + testSID},
 		{"/tmp/a$b", testSID, "", "cd '/tmp/a$b' && claude --resume " + testSID},
 		{"C:/Users/jonas/src", testSID, "", "cd C:/Users/jonas/src && claude --resume " + testSID},
 		{"", testSID, "work", "BFFS_ACCOUNT=work claude --resume " + testSID},
-		{"/x", testSID, "odd name", "BFFS_ACCOUNT='odd name' cd /x && claude --resume " + testSID},
+		{"/x", testSID, "odd name", "cd /x && BFFS_ACCOUNT='odd name' claude --resume " + testSID},
 		{"/x\x1b]52;c;evil\x07/y", testSID, "", "cd /x/y && claude --resume " + testSID},
 	}
 	for _, tc := range cases {

@@ -7,27 +7,30 @@ import (
 )
 
 // VerifyCommand renders the line every import, copy and rehome ends with
-// (plan §9.12): "cd <newCwd> && claude --resume <sid>", prefixed with
-// "BFFS_ACCOUNT=<account> " when account is non-empty (a full-isolation
-// root or an explicit --account). newCwd is single-quoted only when it
-// needs quoting for a POSIX shell; an empty newCwd drops the "cd" half.
-// Every input passes transcripts.Sanitize — a cwd or title from a bundle
-// must not carry escape sequences into the terminal.
+// (plan §9.12): "cd <newCwd> && claude --resume <sid>". A non-empty account
+// (a full-isolation root or an explicit --account) puts
+// "BFFS_ACCOUNT=<account> " on the claude word itself — "cd X && A=1 claude"
+// — never before the cd: in a POSIX shell a leading assignment binds to the
+// first simple command only, so "A=1 cd X && claude" would launch claude
+// without it. An empty newCwd drops the "cd" half. newCwd is single-quoted
+// only when it needs quoting for a POSIX shell. Every input passes
+// transcripts.Sanitize — a cwd or title from a bundle must not carry escape
+// sequences into the terminal.
 func VerifyCommand(newCwd, sid, account string) string {
 	cwd := transcripts.Sanitize(newCwd)
 	sid = transcripts.Sanitize(sid)
 	account = transcripts.Sanitize(account)
 
 	var b strings.Builder
-	if account != "" {
-		b.WriteString("BFFS_ACCOUNT=")
-		b.WriteString(ShellQuote(account))
-		b.WriteByte(' ')
-	}
 	if cwd != "" {
 		b.WriteString("cd ")
 		b.WriteString(ShellQuote(cwd))
 		b.WriteString(" && ")
+	}
+	if account != "" {
+		b.WriteString("BFFS_ACCOUNT=")
+		b.WriteString(ShellQuote(account))
+		b.WriteByte(' ')
 	}
 	b.WriteString("claude --resume ")
 	b.WriteString(ShellQuote(sid))

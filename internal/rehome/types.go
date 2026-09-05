@@ -7,11 +7,13 @@
 // transcripts inside Claude's retention window live here too
 // (MtimePolicy, TranscriptFloor).
 //
-// This is the M4 half of the package — everything porter.Import needs.
-// In-place rehoming of local sessions (PlanRehome/Apply, AppendRelocated,
-// memory merge, path rewrites, Suggest) arrives with M6; only the types it
-// shares with porter (Mapping, Suggestion, Candidate, MemoryMerge) are
-// declared here already.
+// The second half is the in-place rehome of sessions already in a pool
+// (plan §9.6, §9.8–§9.10): PlanRehome decides which sessions a set of
+// prefix rules (ParseMapping, ApplyMappings) covers and where they go,
+// Apply moves them sidecar-first with a relocated stamp (AppendRelocated,
+// RelocatedRecord) and restored mtimes, merges their memory and rewrites
+// old paths in it (RewriteMemoryPaths), and Suggest proposes local
+// directories for an import record's old ones.
 //
 // Rules the package is built on (plan §9): the destination is written only
 // through an os.Root over the config dir; the transcript is the last file
@@ -36,8 +38,8 @@ import (
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
 
-// Mapping is one prefix rule (Old → New) applied during placement; the
-// parser and applier arrive with M6. It is the imports.Mapping type so an
+// Mapping is one prefix rule (Old → New) applied during placement
+// (ParseMapping, ApplyMappings). It is the imports.Mapping type so an
 // import record stores exactly what was applied.
 type Mapping = imports.Mapping
 
@@ -52,9 +54,10 @@ const (
 	// MemoryOverwrite sets an existing destination aside as
 	// "memory.bffs-replaced-<epochms>" (never deleted) and writes fresh.
 	MemoryOverwrite MemoryMode = "overwrite"
-	// MemoryMerge merges file by file. The mode is accepted by the type so
-	// callers can carry it, but the merge itself arrives with M6; M4
-	// returns an error for it.
+	// MemoryMerge merges file by file into an existing destination
+	// (plan §9.9): absent files are added, identical ones left alone,
+	// different ones land as "<name>.imported-<id8>.md", and an existing
+	// MEMORY.md gains one "## Imported" section listing what arrived.
 	MemoryMerge MemoryMode = "merge"
 )
 
@@ -73,12 +76,25 @@ type MemoryMove struct {
 	Unchanged     []string
 	IndexAppended bool
 	Remaining     []transcripts.PathRef
+
+	// Warnings are merge-time notes ready to print: an index that grew
+	// past what Claude loads, a file kept because both its name and its
+	// ".imported-<id8>" variant already exist with other content.
+	Warnings []string
+
+	// The fields below are filled by PlanRehome and carried through Apply
+	// (M6): OldCwd is the directory the memory belonged to, ID8 the suffix
+	// of side files (a bundle id prefix, else eight hex digits of
+	// sha256(OldCwd)), Mode the MemoryMode the move runs with, Rewritten
+	// the files RewriteMemoryPaths changed afterwards.
+	OldCwd    string
+	ID8       string
+	Mode      MemoryMode
+	Rewritten []string
 }
 
 // Suggestion is the set of local directories an imported project might
-// live in, offered when a bundle's cwd does not exist here. Suggest itself
-// arrives with M6; the types are declared now because porter.Placer takes
-// them.
+// live in, offered when a bundle's cwd does not exist here (Suggest).
 type Suggestion struct {
 	OldCwd     string
 	Candidates []Candidate

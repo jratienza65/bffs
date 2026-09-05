@@ -38,6 +38,7 @@ func TestServerEndToEnd(t *testing.T) {
 		"pin_account": false, "unpin_account": false, "check_shim": false,
 		"account_usage": false, "run_on_account": false,
 		"list_sessions": false, "list_memories": false, "trust_status": false,
+		"export_bundle": false, "import_bundle": false, "rehome": false,
 	}
 	for _, tool := range tools.Tools {
 		if _, ok := want[tool.Name]; !ok {

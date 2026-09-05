@@ -2,10 +2,14 @@
 // Code session can inspect and stage account changes itself: list accounts,
 // explain which account a directory resolves to and why, set the global
 // default, pin/unpin directory rules, estimate per-account usage headroom,
-// delegate headless runs to another account, and browse Claude Code's own
+// delegate headless runs to another account, browse Claude Code's own
 // tree read-only: the sessions of a project and who ran them, the
 // auto-memory directories and what they reference, and which accounts have
-// answered the folder-trust and external-imports dialogs.
+// answered the folder-trust and external-imports dialogs — and move
+// sessions around: export them to a local .bffs bundle, import such a
+// bundle, and rehome sessions to the directory their project lives in
+// now. Memory is never merged and trust never carried through this
+// package; those stay human decisions on the CLI.
 //
 // Stdout discipline: on the stdio transport stdout carries JSON-RPC
 // exclusively, so nothing in this package may write to stdout. Cobra wiring
@@ -25,15 +29,16 @@ import (
 // model as mcp__bffs__<tool>.
 const ServerName = "bffs"
 
-// New builds the MCP server with all eleven tools registered. version feeds
-// the MCP handshake (callers pass cmd.Version).
+// New builds the MCP server with all fourteen tools registered. version
+// feeds the MCP handshake and the bffs_version stamp of exported bundles
+// (callers pass cmd.Version).
 func New(cfgDir, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:    ServerName,
 		Title:   "bffs Claude Code account switcher",
 		Version: version,
 	}, nil)
-	h := &handlers{cfgDir: cfgDir}
+	h := &handlers{cfgDir: cfgDir, version: version}
 
 	// All tools except run_on_account operate on local bffs config only.
 	closedWorld := false
@@ -141,6 +146,39 @@ func New(cfgDir, version string) *mcp.Server {
 			"person can run in a terminal.",
 		Annotations: readOnly,
 	}, h.trustStatus)
+
+	// The transfer tools write, but only what a person could undo: a new
+	// file outside Claude's tree, sessions landed or moved without
+	// deleting or overwriting anything, memory copied only where none
+	// existed. Merging memory, carrying trust, overwriting a session and
+	// the LAN transfer stay on the CLI (plan §10.4).
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "export_bundle",
+		Description: "Write the sessions and auto-memory of a project (or named sessions) to a .bffs bundle file on this machine - " +
+			"the same bundle `bffs export --out` writes, for `bffs import`/import_bundle elsewhere. The output path must be " +
+			"absolute, end in .bffs, not exist yet, and lie outside ~/.claude, the bffs config dir and the temp directory. " +
+			"The bundle contains conversation content; treat it as sensitive. No credentials are included. Bundles over 1 GiB are CLI-only.",
+		Annotations: write,
+	}, h.exportBundle)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "import_bundle",
+		Description: "Land a local .bffs bundle's sessions in a bffs account's Claude tree: the same pipeline as `bffs import --from <file>` " +
+			"(manifest verified, staged, committed transactionally, import record written), with the policies a model may not change: " +
+			"existing sessions are skipped, never overwritten; auto-memory is never merged (copied only where the target has none); " +
+			"trust answers are never carried; a session open in a running claude is held. Sessions whose directory does not exist " +
+			"here land as-is (pending) unless a rehome rule places them. dry_run reports the plan.",
+		Annotations: write,
+	}, h.importBundle)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "rehome",
+		Description: "Move sessions of a directory that moved - or arrived pending from another machine - to where the project lives " +
+			"now: `bffs rehome --map`. Each transcript is renamed into the new directory's entry with one relocated record appended; " +
+			"conversation content, mtimes and picker order are unchanged, nothing is deleted, live sessions are never moved. " +
+			"Memory is never merged over MCP (copied only where the new directory has none); trust is not carried. dry_run lists the moves.",
+		Annotations: write,
+	}, h.rehomeSessions)
 
 	return s
 }

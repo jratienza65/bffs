@@ -29,9 +29,15 @@ via a bffs.toml file in the project root.`,
 	SilenceUsage: true,
 }
 
+// Execute runs the cobra tree and ends the process with the error's exit
+// code: 1 for any error, or the code carried by an exitError (exitWith) —
+// see cmd/exit.go for the code conventions. Cobra has already printed
+// "Error: <msg>" to stderr by the time an error reaches here (SilenceErrors
+// is off; it also prints the `Run 'bffs --help'` hint for an unknown
+// subcommand), so nothing is printed a second time.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }
 

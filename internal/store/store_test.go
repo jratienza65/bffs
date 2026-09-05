@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -145,5 +146,58 @@ func TestAccountsGetSetsName(t *testing.T) {
 	}
 	if got.Name != "x" {
 		t.Errorf("Name not set, got %q", got.Name)
+	}
+}
+
+func TestStateTrustFieldsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	off := false
+	if err := SaveState(dir, State{Active: "work", TrustHint: &off, TrustSync: "launch"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := LoadState(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.TrustHint == nil || *got.TrustHint {
+		t.Errorf("want trust_hint=false, got %v", got.TrustHint)
+	}
+	if got.TrustSync != "launch" {
+		t.Errorf("want trust_sync=launch, got %q", got.TrustSync)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, StateFile))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	for _, want := range []string{"trust_hint = false", `trust_sync = "launch"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("state.toml missing %q:\n%s", want, raw)
+		}
+	}
+}
+
+// An unset TrustHint is tri-state "absent", not false: it must neither be
+// written nor read back as an explicit value.
+func TestStateTrustFieldsOmittedWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveState(dir, State{Active: "work"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, StateFile))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(raw), "trust_hint") || strings.Contains(string(raw), "trust_sync") {
+		t.Errorf("unset trust fields were written:\n%s", raw)
+	}
+	got, err := LoadState(dir)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.TrustHint != nil {
+		t.Errorf("want TrustHint nil, got %v", *got.TrustHint)
+	}
+	if got.TrustSync != "" {
+		t.Errorf("want TrustSync empty, got %q", got.TrustSync)
 	}
 }

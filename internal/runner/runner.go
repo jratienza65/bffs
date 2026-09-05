@@ -8,6 +8,10 @@
 // instance markers a hosting Claude Code session plants in the environment
 // are stripped so the child never mistakes itself for a subprocess of the
 // current session.
+//
+// Command prepares the child without starting it, for callers that hand the
+// process to something else (a bubbletea program's ExecProcess, which wires
+// the terminal into nil stdio fields); Run is Command plus start-and-wait.
 package runner
 
 import (
@@ -42,16 +46,17 @@ const LaunchSource = "run"
 // is meaningless to real claude but stripped for hygiene — the account
 // decision was already made by the caller.
 var sessionMarkers = map[string]bool{
-	"CLAUDECODE":                   true,
-	"CLAUDE_PID":                   true,
-	"CLAUDE_EFFORT":                true,
-	"CLAUDE_CODE_ENTRYPOINT":       true,
-	"CLAUDE_CODE_SESSION_ID":       true,
-	"CLAUDE_CODE_CHILD_SESSION":    true,
-	"CLAUDE_CODE_MESSAGING_SOCKET": true,
-	"CLAUDE_CODE_MESSAGING_TOKEN":  true,
-	"CLAUDE_CODE_EXECPATH":         true,
-	"BFFS_ACCOUNT":                 true,
+	"CLAUDECODE":                    true,
+	"CLAUDE_PID":                    true,
+	"CLAUDE_EFFORT":                 true,
+	"CLAUDE_CODE_ENTRYPOINT":        true,
+	"CLAUDE_CODE_SESSION_ID":        true,
+	"CLAUDE_CODE_CHILD_SESSION":     true,
+	"CLAUDE_CODE_MESSAGING_SOCKET":  true,
+	"CLAUDE_CODE_MESSAGING_TOKEN":   true,
+	"CLAUDE_CODE_EXECPATH":          true,
+	"CLAUDE_CODE_BRIDGE_SESSION_ID": true, // observed in a 2.1.259 session's env (bridge/remote-control link)
+	"BFFS_ACCOUNT":                  true,
 }
 
 // Request describes one delegated claude run.
@@ -73,35 +78,52 @@ type Request struct {
 	// terminal's foreground group (no Ctrl-C, SIGTTIN on tty reads).
 	ProcessGroup bool
 
-	Stdout, Stderr io.Writer // nil → discarded
-	Stdin          io.Reader // nil → no stdin
+	// Stdio for the child. Run treats a nil Stdout/Stderr as "discard";
+	// Command leaves every nil field nil so a caller like bubbletea's
+	// ExecProcess can wire the terminal in. A nil Stdin is no stdin either way.
+	Stdout, Stderr io.Writer
+	Stdin          io.Reader
 }
 
-// Run spawns claude on the requested account and waits. It returns the
-// child's exit code; exitCode -1 with a non-nil error means the child never
-// ran or was killed (timeout/cancel). A nonzero exit with nil error is a
-// normal child failure for the caller to interpret.
-func Run(ctx context.Context, cfgDir string, req Request) (int, error) {
+// Command prepares the claude child for req without starting it: account
+// lookup, working-dir and oauth-login checks, the per-account env (session
+// markers stripped, credentials injected), session-dir sync, the real
+// claude's path, ctx/timeout and process-group wiring, and the launch-log
+// event. It never touches nil stdio fields — cmd.Stdin/Stdout/Stderr stay
+// nil so the caller (or bubbletea's ExecProcess) decides what they are.
+//
+// The launch is recorded before return: call Command only when the process
+// is about to be started. cleanup releases what Command allocated (the
+// timeout context, when req.Timeout > 0) and is safe to defer as soon as err
+// is nil; call it after the process has finished.
+func Command(ctx context.Context, cfgDir string, req Request) (cmd *exec.Cmd, cleanup func(), err error) {
+	cmd, _, cleanup, err = command(ctx, cfgDir, req)
+	return cmd, cleanup, err
+}
+
+// command is Command plus the effective context, which Run needs to tell a
+// deadline kill from a caller's cancellation.
+func command(ctx context.Context, cfgDir string, req Request) (*exec.Cmd, context.Context, func(), error) {
 	accs, err := store.LoadAccounts(cfgDir)
 	if err != nil {
-		return -1, err
+		return nil, nil, nil, err
 	}
 	acc, ok := accs.Get(req.Account)
 	if !ok {
-		return -1, fmt.Errorf("unknown account %q; known accounts: %v", req.Account, accs.Names())
+		return nil, nil, nil, fmt.Errorf("unknown account %q; known accounts: %v", req.Account, accs.Names())
 	}
 	if req.Dir == "" {
-		return -1, errors.New("no working directory given")
+		return nil, nil, nil, errors.New("no working directory given")
 	}
 	if info, err := os.Stat(req.Dir); err != nil || !info.IsDir() {
-		return -1, fmt.Errorf("directory %s does not exist", req.Dir)
+		return nil, nil, nil, fmt.Errorf("directory %s does not exist", req.Dir)
 	}
 	// Before SyncOAuthSessionDir: the sync would EnsureDir a missing session
 	// dir, and a bare one sends headless claude into its first-run wizard.
 	if acc.Type == store.TypeOAuth {
 		sessDir := sessions.Dir(cfgDir, acc.Name)
 		if info, err := os.Stat(sessDir); err != nil || !info.IsDir() {
-			return -1, fmt.Errorf("oauth account %q has not been logged in (no session dir at %s); run `bffs login %s` in a terminal first", acc.Name, sessDir, acc.Name)
+			return nil, nil, nil, fmt.Errorf("oauth account %q has not been logged in (no session dir at %s); run `bffs login %s` in a terminal first", acc.Name, sessDir, acc.Name)
 		}
 	}
 
@@ -111,21 +133,24 @@ func Run(ctx context.Context, cfgDir string, req Request) (int, error) {
 	}
 	realPath, err := shim.FindRealClaude(cfgDir)
 	if err != nil {
-		return -1, err
+		return nil, nil, nil, err
 	}
 
+	// Nothing below can fail, so the timeout context is the only allocation
+	// cleanup has to release and it is never leaked on an error path.
+	cleanup := func() {}
 	if req.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-		defer cancel()
+		cleanup = cancel
 	}
 
 	c := exec.CommandContext(ctx, realPath, req.Args...)
 	c.Dir = req.Dir
 	c.Env = env
 	c.Stdin = req.Stdin
-	c.Stdout = orDiscard(req.Stdout)
-	c.Stderr = orDiscard(req.Stderr)
+	c.Stdout = req.Stdout
+	c.Stderr = req.Stderr
 	// Bounds Wait when a grandchild inherits the stdout pipe and outlives
 	// the child.
 	c.WaitDelay = 5 * time.Second
@@ -144,6 +169,22 @@ func Run(ctx context.Context, cfgDir string, req Request) (int, error) {
 			Cwd:     req.Dir,
 		})
 	}
+	return c, ctx, cleanup, nil
+}
+
+// Run spawns claude on the requested account and waits. It returns the
+// child's exit code; exitCode -1 with a non-nil error means the child never
+// ran or was killed (timeout/cancel). A nonzero exit with nil error is a
+// normal child failure for the caller to interpret.
+func Run(ctx context.Context, cfgDir string, req Request) (int, error) {
+	c, ctx, cleanup, err := command(ctx, cfgDir, req)
+	if err != nil {
+		return -1, err
+	}
+	defer cleanup()
+	// Non-interactive default: never inherit the parent's terminal.
+	c.Stdout = orDiscard(req.Stdout)
+	c.Stderr = orDiscard(req.Stderr)
 
 	err = c.Run()
 	if err == nil {

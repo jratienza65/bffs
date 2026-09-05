@@ -440,28 +440,30 @@ func TestImportRequestValidation(t *testing.T) {
 		t.Errorf("on-conflict: %v", err)
 	}
 	req = b.request("-")
-	req.Memory = "merge"
-	if err := runImport(c, b.cfgDir, pr, req, true); err == nil || !strings.Contains(err.Error(), "--memory merge is not available yet") {
-		t.Errorf("memory merge: %v", err)
+	req.Memory = "replace"
+	if err := runImport(c, b.cfgDir, pr, req, true); err == nil || !strings.Contains(err.Error(), `invalid --memory "replace"`) {
+		t.Errorf("memory mode: %v", err)
+	}
+	req = b.request("-")
+	req.Into, req.Map = "/x", []string{"a=b"}
+	if err := runImport(c, b.cfgDir, pr, req, true); err == nil || !strings.Contains(err.Error(), "--into and --map are mutually exclusive") {
+		t.Errorf("into+map: %v", err)
+	}
+	req = b.request("-")
+	req.CarryTrust, req.AsIs = true, true
+	if err := runImport(c, b.cfgDir, pr, req, true); err == nil || !strings.Contains(err.Error(), "--carry-trust cannot be combined with --as-is") {
+		t.Errorf("carry-trust+as-is: %v", err)
+	}
+	req = b.request("-")
+	req.Map = []string{"no-equals-sign"}
+	if err := runImport(c, b.cfgDir, pr, req, true); err == nil {
+		t.Errorf("bad rule accepted")
 	}
 	req = b.request("-")
 	req.Stdin = strings.NewReader("not a bundle")
 	err = runImport(c, b.cfgDir, pr, req, true)
 	if err == nil || !strings.Contains(err.Error(), "bundle:") || exitCode(err) != 1 {
 		t.Errorf("bad envelope: %v (exit %d)", err, exitCode(err))
-	}
-}
-
-func TestImportLaterFlags(t *testing.T) {
-	if got := importLaterFlags(); len(got) != 0 {
-		t.Errorf("no flags set: %v", got)
-	}
-	importInto, importMap, importCarryTrust, importSetLastSession, importForceStamp = "/x", []string{"a=b"}, true, true, true
-	defer func() {
-		importInto, importMap, importCarryTrust, importSetLastSession, importForceStamp = "", nil, false, false, false
-	}()
-	if got := strings.Join(importLaterFlags(), ", "); got != "--into, --map, --carry-trust, --set-last-session, --force-stamp" {
-		t.Errorf("later flags = %q", got)
 	}
 }
 

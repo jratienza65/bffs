@@ -34,26 +34,27 @@ import (
 )
 
 var (
-	importFrom           string
-	importAccount        string
-	importAsIs           bool
-	importOnConflict     string
-	importMemory         string
-	importTrustMemory    bool
-	importPreserveMtimes bool
-	importMaxSize        string
-	importForce          bool
-	importCleanStaging   bool
-	importDryRun         bool
-	importYes            bool
-	importInto           string
-	importMap            []string
-	importCarryTrust     bool
-	importSetLastSession bool
-	importForceStamp     bool
-	importAllowRouted    bool
-	importAllowLoopback  bool
-	importClaudeDir      string
+	importFrom            string
+	importAccount         string
+	importAsIs            bool
+	importOnConflict      string
+	importMemory          string
+	importTrustMemory     bool
+	importPreserveMtimes  bool
+	importMaxSize         string
+	importForce           bool
+	importCleanStaging    bool
+	importDryRun          bool
+	importYes             bool
+	importInto            string
+	importMap             []string
+	importCarryTrust      bool
+	importSetLastSession  bool
+	importForceStamp      bool
+	importNoRewriteMemory bool
+	importAllowRouted     bool
+	importAllowLoopback   bool
+	importClaudeDir       string
 )
 
 // importDefaultMaxSize is the --max-size default: bundle.DefaultLimits'
@@ -94,9 +95,6 @@ machine is the safe form. A wrong code exits 2.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := mustConfigDir(cmd)
-		if later := importLaterFlags(); len(later) > 0 {
-			return fmt.Errorf("%s not available yet: import lands sessions by identity or --as-is for now", strings.Join(later, ", "))
-		}
 		if importFrom == "" {
 			return errors.New(`--from is required: a host[:port] shown by bffs export --serve, a .bffs file, or "-" for stdin`)
 		}
@@ -126,6 +124,13 @@ machine is the safe form. A wrong code exits 2.`,
 			ClaudeDir:      importClaudeDir,
 			Cwd:            cwd,
 			Now:            time.Now(),
+
+			Into:            importInto,
+			Map:             importMap,
+			CarryTrust:      importCarryTrust,
+			SetLastSession:  importSetLastSession,
+			ForceStamp:      importForceStamp,
+			NoRewriteMemory: importNoRewriteMemory,
 		}
 		req.Host, req.User = localIdentity()
 		pr := newPrompter(cmd.InOrStdin(), cmd.OutOrStdout())
@@ -139,7 +144,7 @@ func init() {
 	f.StringVar(&importAccount, "account", "", "target account (default: the account claude would use here, else the active one; \"home\" = ~/.claude)")
 	f.BoolVar(&importAsIs, "as-is", false, "place every session under its original slug, flagged pending, without looking for its directory here")
 	f.StringVar(&importOnConflict, "on-conflict", string(porter.ConflictSkip), `an existing session with the same id: "skip" or "overwrite" (set aside, never deleted)`)
-	f.StringVar(&importMemory, "memory", string(rehome.MemorySkip), `an existing memory directory: "skip" or "overwrite" (set aside, never deleted)`)
+	f.StringVar(&importMemory, "memory", "", `memory directories: "merge" (default for a directory you mapped or confirmed), "skip" (default otherwise) or "overwrite" (set aside, never deleted)`)
 	f.BoolVar(&importTrustMemory, "trust-memory", false, "keep pinned: frontmatter on imported memory files (default: rewritten to pinned-imported:)")
 	f.BoolVar(&importPreserveMtimes, "preserve-mtimes", false, "keep source mtimes on sidecar, file-history, plan and task files (Claude sweeps them when older than its retention window)")
 	f.StringVar(&importMaxSize, "max-size", importDefaultMaxSize, "largest bundle payload accepted: 500M, 2G")
@@ -147,39 +152,18 @@ func init() {
 	f.BoolVar(&importCleanStaging, "clean-staging", false, "remove leftover staging directories of interrupted imports after listing them")
 	f.BoolVar(&importDryRun, "dry-run", false, "show the plan and write nothing")
 	f.BoolVarP(&importYes, "yes", "y", false, "skip the confirmation")
-	f.StringVar(&importInto, "into", "", "directory of the bundle's single project here (next milestones)")
-	f.StringArrayVar(&importMap, "map", nil, "prefix rule old=new, repeatable (next milestones)")
-	f.BoolVar(&importCarryTrust, "carry-trust", false, "also copy the source's trust answers for mapped directories (next milestones)")
-	f.BoolVar(&importSetLastSession, "set-last-session", false, "point the account's lastSessionId at the newest imported session (next milestones)")
-	f.BoolVar(&importForceStamp, "force-stamp", false, "stamp a transcript whose last line is incomplete (next milestones)")
+	f.StringVar(&importInto, "into", "", "directory of the bundle's single project on this machine (a confirmed placement; cannot be combined with --map)")
+	f.StringArrayVar(&importMap, "map", nil, "prefix rule OLD=NEW, repeatable: sessions and memory recorded under OLD (or below it) land under NEW, which must exist here; the longest matching rule wins")
+	f.BoolVar(&importCarryTrust, "carry-trust", false, "also copy the source's folder-trust and external-imports answers for directories you mapped or confirmed (never for --as-is); the effect is printed before the confirmation")
+	f.BoolVar(&importSetLastSession, "set-last-session", false, "point the account's lastSessionId at the newest imported session of each mapped project")
+	f.BoolVar(&importForceStamp, "force-stamp", false, "stamp a transcript whose last line is incomplete (a live session exported mid-write); otherwise such a session lands as-is")
+	f.BoolVar(&importNoRewriteMemory, "no-rewrite-memory", false, "leave old absolute paths inside merged memory files as they are")
 	f.BoolVar(&importAllowRouted, "allow-routed", false, "with --from host, pair with a private address that is not on-link (multi-VLAN offices); prints a warning")
 	f.BoolVar(&importAllowLoopback, "allow-loopback", false, "with --from host, allow a loopback address (tests and same-machine trials)")
 	_ = f.MarkHidden("allow-loopback")
 	f.StringVar(&importClaudeDir, "claude-dir", "", "override the shared claude config dir (testing)")
 	_ = f.MarkHidden("claude-dir")
 	rootCmd.AddCommand(importCmd)
-}
-
-// importLaterFlags names the flags that are parsed now but wired in a
-// later milestone.
-func importLaterFlags() []string {
-	var later []string
-	if importInto != "" {
-		later = append(later, "--into")
-	}
-	if len(importMap) > 0 {
-		later = append(later, "--map")
-	}
-	if importCarryTrust {
-		later = append(later, "--carry-trust")
-	}
-	if importSetLastSession {
-		later = append(later, "--set-last-session")
-	}
-	if importForceStamp {
-		later = append(later, "--force-stamp")
-	}
-	return later
 }
 
 // importRequest is one resolved `bffs import` invocation, independent of
@@ -207,6 +191,16 @@ type importRequest struct {
 	AllowRouted   bool
 	AllowLoopback bool
 	Host, User    string
+
+	// Placement (plan §9.3): prefix rules, the single-project shorthand,
+	// and what follows a confirmed placement.
+	Into            string
+	Map             []string
+	Rules           []rehome.Mapping // parsed Map plus interactive answers
+	CarryTrust      bool
+	SetLastSession  bool
+	ForceStamp      bool
+	NoRewriteMemory bool
 }
 
 // fromKind is the shape of a --from value.
@@ -398,11 +392,22 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 		return fmt.Errorf("invalid --on-conflict %q: must be %q or %q", req.OnConflict, porter.ConflictSkip, porter.ConflictOverwrite)
 	}
 	switch rehome.MemoryMode(req.Memory) {
-	case "", rehome.MemorySkip, rehome.MemoryOverwrite:
-	case rehome.MemoryMerge:
-		return fmt.Errorf("--memory merge is not available yet: use %q or %q", rehome.MemorySkip, rehome.MemoryOverwrite)
+	case "", rehome.MemorySkip, rehome.MemoryOverwrite, rehome.MemoryMerge:
 	default:
-		return fmt.Errorf("invalid --memory %q: must be %q or %q", req.Memory, rehome.MemorySkip, rehome.MemoryOverwrite)
+		return fmt.Errorf("invalid --memory %q: must be %q, %q or %q", req.Memory, rehome.MemoryMerge, rehome.MemorySkip, rehome.MemoryOverwrite)
+	}
+	if req.Into != "" && len(req.Map) > 0 {
+		return errors.New("--into and --map are mutually exclusive: --into is the single-project shorthand for one rule")
+	}
+	if req.CarryTrust && req.AsIs {
+		return errors.New("--carry-trust cannot be combined with --as-is: trust answers are carried only for directories you mapped or confirmed")
+	}
+	for _, rule := range req.Map {
+		m, err := rehome.ParseMapping(rule)
+		if err != nil {
+			return err
+		}
+		req.Rules = append(req.Rules, m)
 	}
 	if kind == fromStdin && !req.Yes && !req.DryRun {
 		return errors.New("--from - reads the bundle from stdin, which leaves no terminal for the confirmation; pass -y")
@@ -473,7 +478,7 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 	sum := newImportSummary(m, dest, req)
 	sum.Limit = limits.MaxTotalBytes
 	sum.Retention = retentionLabel(dest.root.ConfigDir, days, source)
-	renderImportSummary(out, sum)
+	req.Rules = append(req.Rules, renderImportSummaryAsk(out, &sum, newPlacementAsker(pr, tty && !req.Yes && !req.AsIs && !req.DryRun))...)
 
 	if req.DryRun {
 		fmt.Fprintln(out, "dry run: nothing is written")
@@ -508,6 +513,12 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 		Now:                  req.Now,
 		Live:                 live,
 		LaunchEnv:            os.Environ(),
+		Map:                  req.Rules,
+		Into:                 req.Into,
+		CarryTrust:           req.CarryTrust,
+		SetLastSession:       req.SetLastSession,
+		ForceStamp:           req.ForceStamp,
+		NoRewriteMemory:      req.NoRewriteMemory,
 	}
 	start := time.Now()
 	rep, err := porter.Import(ctx, dir, rest, opts)
@@ -516,6 +527,7 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 		fmt.Fprintln(errOut, "warning:", transcripts.Sanitize(w))
 	}
 	receipt := newImportReceipt(dir, m, rep, req.DryRun, elapsed)
+	receipt.Account, receipt.MemoryMode = dest.account, req.Memory
 	if err != nil {
 		if len(rep.Imported)+len(rep.Pending)+len(rep.MemoryDirs) > 0 {
 			fmt.Fprintln(out, "import stopped; what landed before the failure:")
@@ -570,13 +582,22 @@ type importSummary struct {
 	Target    string
 	Limit     int64
 	Retention string
+
+	Manifest       *bundle.Manifest
+	Root           transcripts.Root
+	Account        string // "" = home
+	CarryTrust     bool
+	SetLastSession bool
 }
 
 // importProject is one project of a bundle and how it will be placed.
 type importProject struct {
 	Label       string // the original directory (sanitised), or the slug
+	Cwd         string // the original directory as recorded (unsanitised; "" when none)
+	ProjectKey  string
 	Slug        string
-	Exists      bool // the directory exists here → identity placement
+	Exists      bool   // the directory exists here → identity placement
+	Mapped      string // the local directory a rule, --into or an answer chose
 	Sessions    int
 	Bytes       int64
 	MemoryFiles int
@@ -587,7 +608,8 @@ type importProject struct {
 // the placement line the way porter will: identity when the directory
 // exists here and --as-is is not set, as-is otherwise.
 func newImportSummary(m *bundle.Manifest, dest importDest, req importRequest) importSummary {
-	s := importSummary{Host: transcripts.Sanitize(m.Source.Hostname), AsIs: req.AsIs, Trust: req.TrustMemory, Target: dest.label}
+	s := importSummary{Host: transcripts.Sanitize(m.Source.Hostname), AsIs: req.AsIs, Trust: req.TrustMemory, Target: dest.label,
+		Manifest: m, Root: dest.root, Account: dest.account, CarryTrust: req.CarryTrust, SetLastSession: req.SetLastSession}
 	parts := []string{}
 	if u := transcripts.Sanitize(m.Source.User); u != "" {
 		parts = append(parts, u)
@@ -630,11 +652,26 @@ func newImportSummary(m *bundle.Manifest, dest importDest, req importRequest) im
 			key, label = "projects/"+slug, "projects/"+slug+" (no directory recorded)"
 		}
 		p := group(key, label, slug)
+		p.Cwd, p.ProjectKey = e.Cwd, e.ProjectKey
 		// The same rule porter applies: only an absolute path that is a
 		// directory here is "the same directory" (a relative or "~" cwd
 		// would resolve against this process, not the source machine).
 		if e.Cwd != "" && filepath.IsAbs(e.Cwd) && isDir(e.Cwd) {
 			p.Exists = true
+		}
+		// A rule or --into decides the placement up front (plan §9.3):
+		// the target must exist here, else porter falls back to as-is.
+		if !req.AsIs && p.Mapped == "" {
+			switch {
+			case req.Into != "":
+				if dir, err := store.NormalizePath(req.Into); err == nil && isDir(dir) {
+					p.Mapped = dir
+				}
+			case len(req.Rules) > 0 && e.Cwd != "":
+				if dir, _, ok := rehome.ApplyMappings(req.Rules, e.Cwd, e.ProjectKey); ok && isDir(dir) {
+					p.Mapped = dir
+				}
+			}
 		}
 		switch e.Kind {
 		case bundle.EntrySession:
@@ -658,14 +695,30 @@ func newImportSummary(m *bundle.Manifest, dest importDest, req importRequest) im
 // renderImportSummary prints the block the user confirms. Every string
 // from the manifest was sanitised when the summary was built.
 func renderImportSummary(w io.Writer, s importSummary) {
+	renderImportSummaryAsk(w, &s, nil)
+}
+
+// renderImportSummaryAsk prints the summary and, for every project no
+// rule decided that does not exist here, asks where it lives (plan
+// §5.10, §9.3) when ask is active. The answers come back as exact rules
+// (a mapping is a confirmation) and are recorded on the summary.
+func renderImportSummaryAsk(w io.Writer, s *importSummary, ask *placementAsker) []rehome.Mapping {
+	var rules []rehome.Mapping
 	fmt.Fprintf(w, "Bundle %s:\n", s.Header)
-	for _, p := range s.Projects {
+	for i := range s.Projects {
+		p := &s.Projects[i]
 		placement := "exists here ✗ → imported as-is; rehome later with bffs rehome or /bffs-rehome in claude"
+		asked := false
 		switch {
 		case s.AsIs:
 			placement = fmt.Sprintf("imported as-is under projects/%s/ (--as-is); rehome later with bffs rehome or /bffs-rehome in claude", p.Slug)
 		case p.Exists:
 			placement = "exists here ✓ (same directory — no rehome needed)"
+		case p.Mapped != "":
+			placement = "exists here ✗ → " + short(p.Mapped) + " (relocated record appended)"
+		case ask != nil && ask.active && p.Cwd != "":
+			placement = "exists here ✗"
+			asked = true
 		}
 		fmt.Fprintf(w, "  project %s        %s\n", p.Label, placement)
 		line := fmt.Sprintf("    %s  %s", countNoun(p.Sessions, "session"), formatSize(p.Bytes))
@@ -676,9 +729,30 @@ func renderImportSummary(w io.Writer, s importSummary) {
 			line += fmt.Sprintf("   (trust: %s on %s — informational)", p.Trust, s.Host)
 		}
 		fmt.Fprintln(w, line)
+		if asked {
+			if dir, ok := ask.ask(w, s, p); ok {
+				p.Mapped = dir
+				rules = append(rules, rehome.Mapping{Old: p.Cwd, New: dir})
+			} else {
+				fmt.Fprintf(w, "    → imported as-is under projects/%s/; rehome later with bffs rehome or /bffs-rehome in claude\n", p.Slug)
+			}
+		}
+		if p.Mapped != "" {
+			if slug, err := transcripts.Slug(p.Mapped); err == nil {
+				fmt.Fprintf(w, "    → sessions will be placed under projects/%s/ (relocated record appended)\n", slug)
+			}
+			if p.MemoryFiles > 0 {
+				if dir, err := transcripts.MemoryDirFor(s.Root, p.Mapped); err == nil {
+					fmt.Fprintf(w, "    → memory merged into %s\n", short(dir))
+				}
+			}
+		}
 		if p.MemoryFiles > 0 {
 			target := p.Label
-			if !p.Exists || s.AsIs {
+			switch {
+			case p.Mapped != "":
+				target = short(p.Mapped)
+			case !p.Exists || s.AsIs:
 				target = "projects/" + p.Slug + "/memory (as-is)"
 			}
 			fmt.Fprintf(w, "    note: memory files in this bundle will be loaded into every future claude session for %s\n", target)
@@ -689,7 +763,121 @@ func renderImportSummary(w io.Writer, s importSummary) {
 			}
 		}
 	}
+	acct := s.Account
+	if acct == "" {
+		acct = transcripts.HomeName
+	}
+	for _, p := range s.Projects {
+		if p.Mapped == "" {
+			continue
+		}
+		if s.CarryTrust {
+			fmt.Fprintf(w, "  → marks %s trusted for %q: its hooks, .mcp.json servers and local settings will run without the trust dialog\n", short(p.Mapped), acct)
+		}
+		if s.SetLastSession {
+			fmt.Fprintf(w, "  → sets the last-session pointer for %s in %q\n", short(p.Mapped), acct)
+		}
+	}
 	fmt.Fprintf(w, "Target: %s   limit %s   retention: %s\n", s.Target, formatLimit(s.Limit), s.Retention)
+	return rules
+}
+
+// placementAsker runs the interactive placement prompt of plan §5.10 on
+// the shared prompter: candidates from rehome.Suggest, a typed path, or
+// as-is. Inactive (with -y, --as-is, --dry-run or no terminal) it asks
+// nothing and every undecided project lands as-is.
+type placementAsker struct {
+	pr          *prompter
+	active      bool
+	suggestions map[string][]rehome.Candidate
+	loaded      bool
+}
+
+func newPlacementAsker(pr *prompter, active bool) *placementAsker {
+	return &placementAsker{pr: pr, active: active}
+}
+
+// candidates runs rehome.Suggest once over the manifest's projects (git
+// remote match, same path relative to home, same basename).
+func (a *placementAsker) candidates(m *bundle.Manifest, oldCwd string) []rehome.Candidate {
+	if !a.loaded {
+		a.loaded = true
+		a.suggestions = map[string][]rehome.Candidate{}
+		if m != nil {
+			home, _ := os.UserHomeDir()
+			for _, sg := range rehome.Suggest(recordFromManifest(m), home, nil) {
+				a.suggestions[sg.OldCwd] = sg.Candidates
+			}
+		}
+	}
+	return a.suggestions[oldCwd]
+}
+
+// recordFromManifest is the import record rehome.Suggest wants, built
+// from a manifest that has not been imported yet.
+func recordFromManifest(m *bundle.Manifest) imports.Record {
+	rec := imports.Record{BundleID: m.BundleID, Source: imports.Source{Hostname: m.Source.Hostname, User: m.Source.User, Home: m.Source.Home, OS: m.Source.OS, Account: m.Source.Account}}
+	for _, e := range m.Entries {
+		switch e.Kind {
+		case bundle.EntrySession:
+			rec.Sessions = append(rec.Sessions, imports.Session{ID: e.SessionID, OldCwd: e.Cwd, OldSlug: e.Slug, Title: e.Title, GitRemote: e.GitRemote})
+		case bundle.EntryMemory:
+			rec.Memories = append(rec.Memories, imports.Memory{OldCwd: e.Cwd})
+		}
+	}
+	return rec
+}
+
+// ask prints the question for one project and reads the answer: a
+// candidate number, a typed existing directory, or as-is. A bad answer is
+// re-asked up to three times, then the project lands as-is.
+func (a *placementAsker) ask(w io.Writer, s *importSummary, p *importProject) (string, bool) {
+	cands := a.candidates(s.Manifest, p.Cwd)
+	fmt.Fprintln(w, "    where does this project live on this machine?")
+	for i, c := range cands {
+		fmt.Fprintf(w, "      [%d] %-40s (%s)\n", i+1, short(c.Dir), transcripts.Sanitize(c.Reason))
+	}
+	typeIdx, asIsIdx := len(cands)+1, len(cands)+2
+	fmt.Fprintf(w, "      [%d] type a path\n", typeIdx)
+	fmt.Fprintf(w, "      [%d] import as-is; rehome later with `bffs rehome` or /bffs-rehome in claude\n", asIsIdx)
+	for attempt := 0; attempt < 3; attempt++ {
+		ans, err := a.pr.line("    choose [1]: ")
+		if err != nil {
+			return "", false
+		}
+		ans = strings.TrimSpace(ans)
+		n := 1
+		if ans != "" {
+			v, err := strconv.Atoi(ans)
+			if err != nil || v < 1 || v > asIsIdx {
+				fmt.Fprintf(w, "    please answer 1-%d\n", asIsIdx)
+				continue
+			}
+			n = v
+		}
+		switch {
+		case n == asIsIdx:
+			return "", false
+		case n == typeIdx:
+			path, err := a.pr.line("    path: ")
+			if err != nil {
+				return "", false
+			}
+			dir, err := store.NormalizePath(strings.TrimSpace(path))
+			if err != nil || !isDir(dir) {
+				fmt.Fprintf(w, "    %q is not a directory here\n", strings.TrimSpace(path))
+				continue
+			}
+			return dir, true
+		default:
+			if dir, err := store.NormalizePath(cands[n-1].Dir); err == nil {
+				return dir, true
+			}
+			return cands[n-1].Dir, true
+		}
+	}
+	fmt.Fprintln(w, "    no usable answer; importing as-is")
+	return "", false
 }
 
 // importReceipt is everything the post-import block needs.
@@ -700,6 +888,8 @@ type importReceipt struct {
 	DryRun     bool
 	Elapsed    time.Duration
 	RecordPath string
+	Account    string // "" = home
+	MemoryMode string // the --memory value
 }
 
 // newImportReceipt reads the record porter saved (when it did) so the
@@ -768,7 +958,30 @@ func renderImportReceipt(w io.Writer, r importReceipt) {
 			if ok {
 				what = fmt.Sprintf("%d files", n)
 			}
+			if r.mergedMemory(dir) {
+				fmt.Fprintf(w, "  memory     %s merged %s %s (conflicts kept as *.imported-%s.md; MEMORY.md indexed)\n", what, verb, short(dir), id8)
+				continue
+			}
 			fmt.Fprintf(w, "  memory     %s %s %s (side files: *.imported-%s.md; MEMORY.md untouched)\n", what, verb, short(dir), id8)
+		}
+	}
+
+	// What followed a confirmed placement.
+	acct := r.Account
+	if acct == "" {
+		acct = transcripts.HomeName
+	}
+	for _, key := range rep.TrustCarried {
+		fmt.Fprintf(w, "  trust      carried over for %s → %q\n", short(transcripts.Sanitize(key)), acct)
+	}
+	if len(rep.LastSession) > 0 {
+		dirs := make([]string, 0, len(rep.LastSession))
+		for dir := range rep.LastSession {
+			dirs = append(dirs, dir)
+		}
+		sort.Strings(dirs)
+		for _, dir := range dirs {
+			fmt.Fprintf(w, "  last-session pointer set for %s in %q (%s)\n", short(transcripts.Sanitize(dir)), acct, short8(rep.LastSession[dir]))
 		}
 	}
 
@@ -889,10 +1102,13 @@ func landingDirs(r importReceipt) []string {
 	}
 	slugs := map[string]bool{}
 	var order []string
-	add := func(slug string, isPending bool) {
+	add := func(slug string, isPending bool, relocated string) {
 		key := "projects/" + transcripts.Sanitize(slug) + "/"
-		if isPending {
+		switch {
+		case isPending:
 			key += " (as-is, pending rehome)"
+		case relocated != "":
+			key += " (relocated → " + short(transcripts.Sanitize(relocated)) + ")"
 		}
 		if !slugs[key] {
 			slugs[key] = true
@@ -902,13 +1118,13 @@ func landingDirs(r importReceipt) []string {
 	if r.Record != nil {
 		for _, s := range r.Record.Sessions {
 			if landed[s.ID] {
-				add(s.Slug, s.Status == imports.StatusPending)
+				add(s.Slug, s.Status == imports.StatusPending, rehomedTo(s))
 			}
 		}
 	} else if r.Manifest != nil {
 		for _, e := range r.Manifest.Entries {
 			if e.Kind == bundle.EntrySession && landed[e.SessionID] {
-				add(e.Slug, pending[e.SessionID])
+				add(e.Slug, pending[e.SessionID], "")
 			}
 		}
 	}
@@ -1118,7 +1334,7 @@ func runImportFromHost(cmd *cobra.Command, dir string, env *catalogEnv, dest imp
 		s := newImportSummary(&m, dest, req)
 		s.Limit = limits.MaxTotalBytes
 		s.Retention = retentionLabel(dest.root.ConfigDir, days, source)
-		renderImportSummary(errOut, s)
+		req.Rules = append(req.Rules, renderImportSummaryAsk(errOut, &s, newPlacementAsker(pr, tty && !req.Yes && !req.AsIs && !req.DryRun))...)
 		if req.DryRun {
 			fmt.Fprintln(errOut, "dry run: nothing is written")
 			return true, nil
@@ -1151,6 +1367,12 @@ func runImportFromHost(cmd *cobra.Command, dir string, env *catalogEnv, dest imp
 			Live:                 live,
 			LaunchEnv:            os.Environ(),
 			StreamMode:           true,
+			Map:                  req.Rules,
+			Into:                 req.Into,
+			CarryTrust:           req.CarryTrust,
+			SetLastSession:       req.SetLastSession,
+			ForceStamp:           req.ForceStamp,
+			NoRewriteMemory:      req.NoRewriteMemory,
 		}
 		start := time.Now()
 		rep, sinkErr = porter.Import(ctx, dir, bufio.NewReaderSize(body, 256<<10), opts)
@@ -1297,4 +1519,34 @@ func (p *fetchPrinter) end() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.bar.end()
+}
+
+// rehomedTo is the directory a rehomed (mapped) session was placed for,
+// "" for every other status.
+func rehomedTo(s imports.Session) string {
+	if s.Status == imports.StatusRehomed {
+		return s.NewCwd
+	}
+	return ""
+}
+
+// mergedMemory reports whether dir was merged rather than side-filed: the
+// memory mode allowed a merge and at least one session of the import was
+// placed by a confirmed mapping (an unconfirmed placement never merges).
+func (r importReceipt) mergedMemory(dir string) bool {
+	switch rehome.MemoryMode(r.MemoryMode) {
+	case "", rehome.MemoryMerge:
+	default:
+		return false
+	}
+	if r.Record == nil {
+		return false
+	}
+	for _, s := range r.Record.Sessions {
+		if s.Status == imports.StatusRehomed {
+			return true
+		}
+	}
+	_ = dir
+	return false
 }

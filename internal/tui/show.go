@@ -191,14 +191,16 @@ func presence(exists bool) string {
 // owning account; on an orphan root with the config dir itself.
 func resumeLine(s transcripts.Session) string {
 	var sb strings.Builder
+	if cwd := transcripts.Sanitize(s.Cwd); cwd != "" {
+		sb.WriteString("cd " + shellWord(cwd) + " && ")
+	}
+	// The assignment sits on the claude word: a leading `A=1 cd X && claude`
+	// would bind the variable to cd only.
 	switch {
 	case s.Root.Orphan:
 		sb.WriteString("CLAUDE_CONFIG_DIR=" + shellWord(s.Root.ConfigDir) + " ")
 	case s.Root.Owner != "":
 		sb.WriteString("BFFS_ACCOUNT=" + shellWord(s.Root.Owner) + " ")
-	}
-	if cwd := transcripts.Sanitize(s.Cwd); cwd != "" {
-		sb.WriteString("cd " + shellWord(cwd) + " && ")
 	}
 	sb.WriteString("claude --resume " + s.ID)
 	return sb.String()

@@ -373,6 +373,34 @@ Every import ends with the command that verifies it (`cd <dir> && claude
 `bffs usage` uses to attribute the imported sessions to the account chosen
 at import time.
 
+### Placing sessions on another machine
+
+When a bundle's directories do not exist on the importing machine, tell
+`bffs import` where they live:
+
+- `--map OLD=NEW` (repeatable) is a prefix rule: sessions and memory recorded
+  under `OLD`, or below it, land under `NEW`, which must exist here. The
+  longest matching rule wins, so `--map /Users/jonas=/home/jonas` covers every
+  project of the old home at once. `~` works on both sides.
+- `--into <dir>` is the single-project shorthand for one rule.
+- Without a rule, an interactive import asks per project: a candidate list
+  (same git remote, same path relative to home, same folder name), a typed
+  path, or import as-is and rehome later with `bffs rehome` or `/bffs-rehome`
+  in claude. `-y` and non-interactive runs never ask.
+
+A mapped or confirmed placement appends Claude's own `relocated` record to the
+transcript, merges memory into the new project's memory directory (`--memory
+merge` is the default there; conflicts are kept as `*.imported-<id>.md`,
+`MEMORY.md` gains an index section) and rewrites old absolute paths inside the
+merged memory files (`--no-rewrite-memory` keeps them). Two opt-ins follow a
+confirmed placement, and their effect is printed before the confirmation:
+`--carry-trust` copies the source's folder-trust and external-imports answers
+for the mapped directory into the target account's `.claude.json` (never for
+`--as-is`), and `--set-last-session` points the account's `lastSessionId` at
+the newest imported session. A transcript exported from a session that was
+still writing may end mid-line; such a session lands as-is unless
+`--force-stamp` is given.
+
 ### Same machine: copy or move between accounts
 
 Under the default partial isolation every oauth account shares one `projects/`

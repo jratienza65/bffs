@@ -99,7 +99,7 @@ func TestRowsSanitize(t *testing.T) {
 	if strings.Contains(lines, "\x1b") {
 		t.Errorf("escape reached the detail: %q", lines)
 	}
-	if !strings.Contains(lines, "resume:       BFFS_ACCOUNT=work cd /tmp/x && claude --resume "+s.ID) {
+	if !strings.Contains(lines, "resume:       cd /tmp/x && BFFS_ACCOUNT=work claude --resume "+s.ID) {
 		t.Errorf("resume line:\n%s", lines)
 	}
 	if !strings.Contains(lines, "title:        Plan: session export  (") {

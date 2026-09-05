@@ -31,6 +31,8 @@ var (
 	rehomeAccount         string
 	rehomeMemory          string
 	rehomeNoRewriteMemory bool
+	rehomeRewriteCwd      bool
+	rehomeRewriteFH       bool
 	rehomeSetLastSession  bool
 	rehomeForceStamp      bool
 	rehomeDryRun          bool
@@ -76,22 +78,24 @@ name) without changing anything.`,
 			return err
 		}
 		req := rehomeRequest{
-			Bundle:          rehomeBundle,
-			Sessions:        rehomeSessions,
-			Maps:            rehomeMaps,
-			Into:            rehomeInto,
-			Project:         rehomeProject,
-			Account:         rehomeAccount,
-			Memory:          rehomeMemory,
-			NoRewriteMemory: rehomeNoRewriteMemory,
-			SetLastSession:  rehomeSetLastSession,
-			ForceStamp:      rehomeForceStamp,
-			DryRun:          rehomeDryRun,
-			Yes:             rehomeYes,
-			Suggest:         rehomeSuggest,
-			ClaudeDir:       rehomeClaudeDir,
-			Cwd:             cwd,
-			Now:             time.Now(),
+			Bundle:             rehomeBundle,
+			Sessions:           rehomeSessions,
+			Maps:               rehomeMaps,
+			Into:               rehomeInto,
+			Project:            rehomeProject,
+			Account:            rehomeAccount,
+			Memory:             rehomeMemory,
+			NoRewriteMemory:    rehomeNoRewriteMemory,
+			RewriteCwd:         rehomeRewriteCwd,
+			RewriteFileHistory: rehomeRewriteFH,
+			SetLastSession:     rehomeSetLastSession,
+			ForceStamp:         rehomeForceStamp,
+			DryRun:             rehomeDryRun,
+			Yes:                rehomeYes,
+			Suggest:            rehomeSuggest,
+			ClaudeDir:          rehomeClaudeDir,
+			Cwd:                cwd,
+			Now:                time.Now(),
 		}
 		pr := newPrompter(cmd.InOrStdin(), cmd.OutOrStdout())
 		return runRehome(cmd, dir, pr, req, isTTY())
@@ -108,6 +112,8 @@ func init() {
 	f.StringVar(&rehomeAccount, "account", "", "root to rehome in (default: the account claude would use here; \"home\" = ~/.claude)")
 	f.StringVar(&rehomeMemory, "memory", string(rehome.MemoryMerge), `what to do with the old memory directory: "merge" into the new one, "skip", or "overwrite" (existing set aside, never deleted)`)
 	f.BoolVar(&rehomeNoRewriteMemory, "no-rewrite-memory", false, "keep old paths in the merged memory files as they are")
+	f.BoolVar(&rehomeRewriteCwd, "rewrite-cwd", false, "also replace the old directory in the top-level cwd of every moved record (changes historical records; off by default — the relocated stamp alone is what claude reads)")
+	f.BoolVar(&rehomeRewriteFH, "rewrite-file-history", false, "also re-prefix the absolute paths in file-history records so /rewind finds the files in the new directory (changes historical records; off by default)")
 	f.BoolVar(&rehomeSetLastSession, "set-last-session", false, "point the account's lastSessionId for the new directory at the newest moved session (claude --continue)")
 	f.BoolVar(&rehomeForceStamp, "force-stamp", false, "stamp a transcript whose last line is incomplete (a crashed session) instead of refusing it")
 	f.BoolVar(&rehomeDryRun, "dry-run", false, "show the plan and write nothing")
@@ -121,22 +127,24 @@ func init() {
 // rehomeRequest is one resolved `bffs rehome` invocation, independent of
 // the flag variables so tests can drive runRehome directly.
 type rehomeRequest struct {
-	Bundle          string
-	Sessions        []string
-	Maps            []string
-	Into            string
-	Project         string
-	Account         string
-	Memory          string
-	NoRewriteMemory bool
-	SetLastSession  bool
-	ForceStamp      bool
-	DryRun          bool
-	Yes             bool
-	Suggest         bool
-	ClaudeDir       string
-	Cwd             string
-	Now             time.Time
+	Bundle             string
+	Sessions           []string
+	Maps               []string
+	Into               string
+	Project            string
+	Account            string
+	Memory             string
+	NoRewriteMemory    bool
+	RewriteCwd         bool
+	RewriteFileHistory bool
+	SetLastSession     bool
+	ForceStamp         bool
+	DryRun             bool
+	Yes                bool
+	Suggest            bool
+	ClaudeDir          string
+	Cwd                string
+	Now                time.Time
 }
 
 // parseRehomeMappings turns --map values and the --into/--project pair
@@ -297,22 +305,24 @@ func runRehome(cmd *cobra.Command, dir string, pr *prompter, req rehomeRequest, 
 	}
 	days, _ := transcripts.CleanupPeriodDays(target.root.ConfigDir)
 	opts := rehome.Options{
-		Sessions:       req.Sessions,
-		BundleID:       bundleID,
-		RewriteMemory:  !req.NoRewriteMemory,
-		SetLastSession: req.SetLastSession,
-		ForceStamp:     req.ForceStamp,
-		Memory:         memory,
-		Mtime:          rehome.MtimePolicy{CleanupPeriodDays: days, Now: req.Now},
-		ClaudeJSON:     target.claudeJSON,
-		OldHome:        oldHome,
-		NewHome:        newHome,
-		Now:            req.Now,
-		DryRun:         req.DryRun,
-		CfgDir:         dir,
-		StagingDir:     filepath.Join(dir, porter.StagingSubdir),
-		Account:        target.account,
-		Env:            os.Environ(),
+		Sessions:           req.Sessions,
+		BundleID:           bundleID,
+		RewriteMemory:      !req.NoRewriteMemory,
+		RewriteCwd:         req.RewriteCwd,
+		RewriteFileHistory: req.RewriteFileHistory,
+		SetLastSession:     req.SetLastSession,
+		ForceStamp:         req.ForceStamp,
+		Memory:             memory,
+		Mtime:              rehome.MtimePolicy{CleanupPeriodDays: days, Now: req.Now},
+		ClaudeJSON:         target.claudeJSON,
+		OldHome:            oldHome,
+		NewHome:            newHome,
+		Now:                req.Now,
+		DryRun:             req.DryRun,
+		CfgDir:             dir,
+		StagingDir:         filepath.Join(dir, porter.StagingSubdir),
+		Account:            target.account,
+		Env:                os.Environ(),
 	}
 	plan, err := rehome.PlanRehome(ctx, target.root, live, maps, opts)
 	if err != nil {
@@ -569,6 +579,9 @@ func renderRehomeResult(w io.Writer, res rehome.Result) {
 	if n := len(res.Moves) - len(res.Moved); n > 0 {
 		fmt.Fprintf(w, "%s not moved (see the error)\n", countNoun(n, "session"))
 	}
+	if line := rewriteResultLine(res.Rewrites); line != "" {
+		fmt.Fprintln(w, line)
+	}
 	for _, m := range res.Memory {
 		fmt.Fprintln(w, memoryResultLine(res, m))
 		for _, warn := range m.Warnings {
@@ -682,4 +695,26 @@ func rehomeProjectOf(res rehome.Result, m rehome.MemoryMove) string {
 		return newCwd
 	}
 	return filepath.Dir(filepath.Dir(m.To))
+}
+
+// rewriteResultLine summarises what --rewrite-cwd / --rewrite-file-history
+// changed: "rewrote cwd in N records and M file-history paths across K
+// transcripts", or "" when nothing was rewritten.
+func rewriteResultLine(rws []rehome.TranscriptRewrite) string {
+	var cwd, paths int
+	for _, rw := range rws {
+		cwd += rw.CwdRecords
+		paths += rw.FileHistoryPaths
+	}
+	if cwd+paths == 0 {
+		return ""
+	}
+	var parts []string
+	if cwd > 0 {
+		parts = append(parts, "cwd in "+countNoun(cwd, "record"))
+	}
+	if paths > 0 {
+		parts = append(parts, countNoun(paths, "file-history path"))
+	}
+	return fmt.Sprintf("rewrote %s across %s (historical records changed as requested)", strings.Join(parts, " and "), countNoun(len(rws), "transcript"))
 }

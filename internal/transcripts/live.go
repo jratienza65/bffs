@@ -19,12 +19,22 @@ import (
 // (ps missing, or no reference start time in the file); such a session is
 // still treated as live — bffs never moves a transcript it cannot prove
 // closed.
+//
+// Account and AccountKnown are filled by LiveAccounts, never by Live:
+// AccountKnown reports that the process's environment could be read, and
+// Account is then the oauth account whose session dir is its
+// CLAUDE_CONFIG_DIR, HomeName when the variable is absent (an unmanaged or
+// api_key launch against ~/.claude), or "" for a config dir bffs does not
+// manage.
 type LiveSession struct {
 	PID       int
 	SessionID string
 	Cwd       string
 	ConfigDir string // the config dir whose sessions/ named it
 	Verified  bool
+
+	Account      string
+	AccountKnown bool
 }
 
 // ProcStart returns the OS start time of pid in the form Claude records

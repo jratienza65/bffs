@@ -22,6 +22,8 @@ import (
 // other refusals; LastSessionSet is the session --set-last-session pointed
 // the newest mapped directory at; Verify holds one VerifyCommand line per
 // mapped directory. JournalDir names the journal kept after a failure.
+// Rewrites lists, per moved transcript that changed, what
+// Options.RewriteCwd / RewriteFileHistory replaced.
 type Result struct {
 	Plan
 	Held, Skipped  []string
@@ -30,6 +32,7 @@ type Result struct {
 
 	Moved      []string
 	JournalDir string
+	Rewrites   []TranscriptRewrite
 }
 
 // Lock parameters for the .claude.json write of --set-last-session:
@@ -121,6 +124,7 @@ func Apply(ctx context.Context, root transcripts.Root, p Plan, opts Options) (Re
 		policy.Now = now
 	}
 	var moved []Move
+	var errs []error
 	for _, mv := range p.Moves {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -130,9 +134,36 @@ func Apply(ctx context.Context, root transcripts.Root, p Plan, opts Options) (Re
 		}
 		res.Moved = append(res.Moved, mv.SessionID)
 		moved = append(moved, mv)
+		if !opts.RewriteCwd && !opts.RewriteFileHistory {
+			continue
+		}
+		// The session has landed; the rewrite is a separate, atomic pass
+		// over the final file (tmp + rename, mtime restored), so a failure
+		// here leaves a moved, stamped, unrewritten transcript.
+		rel, err := filepath.Rel(root.ConfigDir, mv.To)
+		if err != nil {
+			errs = append(errs, err)
+			warn("transcript of %s not rewritten: %v", mv.SessionID, err)
+			continue
+		}
+		rules := TranscriptRules{
+			OldCwd:      mv.OldCwd,
+			NewCwd:      mv.NewCwd,
+			Paths:       rewritePairs(p.Mappings, mv.OldCwd, opts),
+			Cwd:         opts.RewriteCwd,
+			FileHistory: opts.RewriteFileHistory,
+		}
+		rw, err := rewriteTranscriptIn(dest, rel, rules)
+		if err != nil {
+			errs = append(errs, err)
+			warn("transcript of %s not rewritten: %v", mv.SessionID, err)
+			continue
+		}
+		if rw.CwdRecords > 0 || rw.FileHistoryPaths > 0 {
+			res.Rewrites = append(res.Rewrites, rw)
+		}
 	}
 
-	var errs []error
 	for i := range res.Memory {
 		m := &res.Memory[i]
 		mode := m.Mode

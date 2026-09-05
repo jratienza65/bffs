@@ -1,7 +1,7 @@
 package transcripts
 
 import (
-	"errors"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,60 +100,116 @@ func TestMemoryDirFor(t *testing.T) {
 	}
 }
 
-func TestMemoryDirForEnvOverride(t *testing.T) {
-	for _, env := range []string{EnvRemoteMemoryDir, EnvCoworkMemoryPathOverride} {
-		t.Run(env, func(t *testing.T) {
-			clearMemoryEnv(t)
-			t.Setenv(env, filepath.Join(t.TempDir(), "elsewhere"))
-			cfg := t.TempDir()
-			_, err := MemoryDirFor(Root{Dir: filepath.Join(cfg, "projects"), ConfigDir: cfg}, t.TempDir())
-			if !errors.Is(err, ErrMemoryDirOverridden) {
-				t.Fatalf("err = %v, want ErrMemoryDirOverridden", err)
-			}
-			if !strings.Contains(err.Error(), env) {
-				t.Errorf("error %q should name %s", err, env)
-			}
-		})
+func TestMemoryDirForCoworkOverride(t *testing.T) {
+	clearMemoryEnv(t)
+	want := filepath.Join(t.TempDir(), "elsewhere")
+	t.Setenv(EnvCoworkMemoryPathOverride, want+string(filepath.Separator))
+	cfg := t.TempDir()
+	// The override beats settings and the remote root, and does not depend
+	// on the project directory (which need not even exist).
+	writeFile(t, filepath.Join(cfg, LocalSettingsFile), `{"autoMemoryDirectory": "/srv/mem"}`)
+	t.Setenv(EnvRemoteMemoryDir, t.TempDir())
+	root := Root{Dir: filepath.Join(cfg, "projects"), ConfigDir: cfg}
+	for _, dir := range []string{t.TempDir(), filepath.Join(t.TempDir(), "missing")} {
+		got, err := MemoryDirFor(root, dir)
+		if err != nil || got != want {
+			t.Errorf("MemoryDirFor(%s) = (%q, %v), want %q", dir, got, err, want)
+		}
+	}
+
+	t.Setenv(EnvCoworkMemoryPathOverride, "relative/mem")
+	if _, err := MemoryDirFor(root, t.TempDir()); err == nil || !strings.Contains(err.Error(), EnvCoworkMemoryPathOverride) {
+		t.Errorf("relative override: err = %v, want one naming %s", err, EnvCoworkMemoryPathOverride)
+	}
+}
+
+func TestMemoryDirForRemoteRoot(t *testing.T) {
+	clearMemoryEnv(t)
+	t.Setenv(EnvRemoteMemoryDir, t.TempDir())
+	cfg := t.TempDir()
+	root := Root{Dir: filepath.Join(cfg, "projects"), ConfigDir: cfg}
+	// Claude keys memory under the remote dir with a slug function bffs has
+	// not verified (disk.md §5): refuse rather than guess, naming the
+	// variable so callers can say why no memory is placed.
+	_, err := MemoryDirFor(root, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), ErrMemoryDirOverridden.Error()) || !strings.Contains(err.Error(), EnvRemoteMemoryDir) {
+		t.Errorf("MemoryDirFor = %v, want ErrMemoryDirOverridden naming %s", err, EnvRemoteMemoryDir)
+	}
+	// A settings autoMemoryDirectory comes before the default layout, so it
+	// still wins over the remote dir.
+	want := filepath.Join(t.TempDir(), "mem")
+	quoted, _ := json.Marshal(want)
+	writeFile(t, filepath.Join(cfg, SettingsFile), `{"autoMemoryDirectory": `+string(quoted)+`}`)
+	if got, err := MemoryDirFor(root, t.TempDir()); err != nil || got != want {
+		t.Errorf("settings over remote: (%q, %v), want %q", got, err, want)
 	}
 }
 
 func TestMemoryDirForSettingsOverride(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	abs := filepath.Join(t.TempDir(), "srv", "mem")
 	cases := []struct {
-		name    string
-		file    string
-		content string
-		wantErr bool
+		name  string
+		files map[string]string
+		want  string // "" = the default under root.Dir
 	}{
-		{"user settings", SettingsFile, `{"autoMemoryDirectory": "~/mem"}`, true},
-		{"local settings", LocalSettingsFile, `{"autoMemoryDirectory": "/srv/mem"}`, true},
-		{"empty string is unset", SettingsFile, `{"autoMemoryDirectory": ""}`, false},
-		{"other keys only", SettingsFile, `{"cleanupPeriodDays": 3}`, false},
-		{"invalid json ignored", SettingsFile, `{oops`, false},
+		{"user settings", map[string]string{SettingsFile: `{"autoMemoryDirectory": ` + quoteJSON(abs) + `}`}, abs},
+		{"local over user", map[string]string{
+			SettingsFile:      `{"autoMemoryDirectory": ` + quoteJSON(filepath.Join(abs, "user")) + `}`,
+			LocalSettingsFile: `{"autoMemoryDirectory": ` + quoteJSON(filepath.Join(abs, "local")) + `}`,
+		}, filepath.Join(abs, "local")},
+		{"tilde expands to home", map[string]string{SettingsFile: `{"autoMemoryDirectory": "~/mem/dir/"}`}, filepath.Join(home, "mem", "dir")},
+		{"rejected local falls through to user", map[string]string{
+			LocalSettingsFile: `{"autoMemoryDirectory": "/a/../b"}`,
+			SettingsFile:      `{"autoMemoryDirectory": ` + quoteJSON(abs) + `}`,
+		}, abs},
+		{"empty string is unset", map[string]string{SettingsFile: `{"autoMemoryDirectory": ""}`}, ""},
+		{"too short", map[string]string{SettingsFile: `{"autoMemoryDirectory": "~/"}`}, ""},
+		{"dotdot", map[string]string{SettingsFile: `{"autoMemoryDirectory": "~/../x"}`}, ""},
+		{"filesystem root", map[string]string{SettingsFile: `{"autoMemoryDirectory": ` + quoteJSON(filepath.VolumeName(abs)+strings.Repeat(string(filepath.Separator), 3)) + `}`}, ""},
+		{"relative", map[string]string{SettingsFile: `{"autoMemoryDirectory": "mem/dir"}`}, ""},
+		{"other keys only", map[string]string{SettingsFile: `{"cleanupPeriodDays": 3}`}, ""},
+		{"invalid json ignored", map[string]string{SettingsFile: `{oops`}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			clearMemoryEnv(t)
 			cfg := t.TempDir()
-			writeFile(t, filepath.Join(cfg, c.file), c.content)
-			root := Root{Dir: filepath.Join(cfg, "projects"), ConfigDir: cfg}
-			got, err := MemoryDirFor(root, t.TempDir())
-			if c.wantErr {
-				if !errors.Is(err, ErrMemoryDirOverridden) {
-					t.Fatalf("err = %v, want ErrMemoryDirOverridden", err)
-				}
-				if !strings.Contains(err.Error(), c.file) {
-					t.Errorf("error %q should name %s", err, c.file)
-				}
-				return
+			for name, content := range c.files {
+				writeFile(t, filepath.Join(cfg, name), content)
 			}
+			root := Root{Dir: filepath.Join(cfg, "projects"), ConfigDir: cfg}
+			proj := t.TempDir()
+			got, err := MemoryDirFor(root, proj)
 			if err != nil {
 				t.Fatalf("MemoryDirFor: %v", err)
 			}
-			if !strings.HasPrefix(got, root.Dir) {
-				t.Errorf("memory dir %q not under root %q", got, root.Dir)
+			want := c.want
+			if want == "" {
+				slug, err := MemorySlug(proj)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = filepath.Join(root.Dir, slug, MemorySubdir)
+			}
+			if got != want {
+				t.Errorf("MemoryDirFor = %q, want %q", got, want)
 			}
 		})
 	}
+}
+
+// quoteJSON quotes s as a JSON string literal (backslashes escaped for
+// Windows paths).
+func quoteJSON(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 func TestMemoryDirForEmptyConfigDirSkipsSettings(t *testing.T) {

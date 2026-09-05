@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -17,10 +18,17 @@ const (
 	LocalSettingsFile = "settings.local.json"
 
 	// EnvRemoteMemoryDir and EnvCoworkMemoryPathOverride relocate Claude's
-	// auto-memory tree when set in claude's environment. bffs does not model
-	// either; MemoryDirFor refuses when they are present.
+	// auto-memory tree when set in claude's environment (disk.md §5).
+	// MemoryDirFor honours the cowork override, which names the one memory
+	// directory verbatim; the remote dir replaces the config dir as the
+	// root of the default projects/<slug>/memory layout but with a slug
+	// function bffs has not verified, so MemoryDirFor refuses it.
 	EnvRemoteMemoryDir          = "CLAUDE_CODE_REMOTE_MEMORY_DIR"
 	EnvCoworkMemoryPathOverride = "CLAUDE_COWORK_MEMORY_PATH_OVERRIDE"
+
+	// minAutoMemoryDirLen is the shortest autoMemoryDirectory value Claude
+	// accepts; shorter ones are ignored.
+	minAutoMemoryDirLen = 3
 
 	// DefaultCleanupPeriodDays is Claude's retention window when no settings
 	// file sets cleanupPeriodDays.
@@ -72,26 +80,43 @@ func CleanupPeriodDays(configDir string) (int, string) {
 }
 
 // MemoryDirFor returns the auto-memory directory Claude would use for dir
-// under root: <root.Dir>/<MemorySlug(dir)>/memory. It returns an error
-// wrapping ErrMemoryDirOverridden when EnvRemoteMemoryDir or
-// EnvCoworkMemoryPathOverride is set in this process's environment, or when
-// root.ConfigDir's settings.local.json or settings.json sets a non-empty
-// autoMemoryDirectory — cases where Claude keeps memory somewhere this
-// function does not compute. A settings file that cannot be parsed is
-// ignored here (Claude ignores it too); use CleanupPeriodDays to surface it.
+// under root, resolved in Claude's own order (disk.md §5):
+//
+//  1. EnvCoworkMemoryPathOverride in this process's environment names the
+//     directory verbatim (absolute; no "~" expansion) — one directory for
+//     every project.
+//  2. autoMemoryDirectory in root.ConfigDir's settings.local.json, else
+//     settings.json, names it for every project: a leading "~/" expands to
+//     the home directory; a value containing "..", naming a filesystem
+//     root, shorter than three characters or not absolute after expansion
+//     is ignored the way Claude ignores it, and the search continues.
+//  3. Otherwise <root.Dir>/<MemorySlug(dir)>/memory. When EnvRemoteMemoryDir
+//     is set Claude uses <remote>/projects/<slug>/memory instead, keyed by
+//     a slug function bffs has not verified (disk.md §5, `sC`); rather than
+//     guess, the result is an error wrapping ErrMemoryDirOverridden that
+//     names the variable, and callers place no memory.
+//
+// Only the third form depends on dir, so a caller placing memory for
+// several projects must expect the same answer for all of them under an
+// override (rehome's planner drops a memory move whose source and target
+// coincide). A settings file that cannot be parsed is ignored here (Claude
+// ignores it too); use CleanupPeriodDays to surface it.
 func MemoryDirFor(root Root, dir string) (string, error) {
-	for _, env := range []string{EnvRemoteMemoryDir, EnvCoworkMemoryPathOverride} {
-		if os.Getenv(env) != "" {
-			return "", fmt.Errorf("%w: %s is set", ErrMemoryDirOverridden, env)
+	if v := os.Getenv(EnvCoworkMemoryPathOverride); v != "" {
+		if !filepath.IsAbs(v) {
+			return "", fmt.Errorf("%s=%q is not an absolute path", EnvCoworkMemoryPathOverride, v)
 		}
+		return filepath.Clean(v), nil
 	}
 	if root.ConfigDir != "" {
 		for _, name := range []string{LocalSettingsFile, SettingsFile} {
-			path := filepath.Join(root.ConfigDir, name)
-			if autoMemoryDirectorySet(path) {
-				return "", fmt.Errorf("%w: autoMemoryDirectory is set in %s", ErrMemoryDirOverridden, path)
+			if d, ok := autoMemoryDirectory(filepath.Join(root.ConfigDir, name)); ok {
+				return d, nil
 			}
 		}
+	}
+	if os.Getenv(EnvRemoteMemoryDir) != "" {
+		return "", fmt.Errorf("%w: %s is set (claude keys memory there by a slug bffs does not compute)", ErrMemoryDirOverridden, EnvRemoteMemoryDir)
 	}
 	slug, err := MemorySlug(dir)
 	if err != nil {
@@ -100,18 +125,41 @@ func MemoryDirFor(root Root, dir string) (string, error) {
 	return filepath.Join(root.Dir, slug, MemorySubdir), nil
 }
 
-// autoMemoryDirectorySet reports whether the settings file at path sets a
-// non-empty autoMemoryDirectory. Missing or unparsable files read as unset.
-func autoMemoryDirectorySet(path string) bool {
+// autoMemoryDirectory returns the usable autoMemoryDirectory the settings
+// file at path sets, expanded and cleaned, or ok=false when the file is
+// missing, unparsable, does not set it, or sets a value Claude rejects.
+func autoMemoryDirectory(path string) (dir string, ok bool) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return false
+		return "", false
 	}
 	var doc struct {
 		Dir string `json:"autoMemoryDirectory"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return false
+		return "", false
 	}
-	return doc.Dir != ""
+	return expandAutoMemoryDirectory(doc.Dir)
+}
+
+// expandAutoMemoryDirectory applies Claude's validation to one
+// autoMemoryDirectory value: "~/" expands to the home directory, and values
+// containing "..", shorter than minAutoMemoryDirLen, relative after
+// expansion, or naming a filesystem root are rejected.
+func expandAutoMemoryDirectory(v string) (string, bool) {
+	if len(v) < minAutoMemoryDirLen || strings.Contains(v, "..") {
+		return "", false
+	}
+	if strings.HasPrefix(v, "~/") || strings.HasPrefix(v, `~\`) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		v = filepath.Join(home, v[2:])
+	}
+	v = filepath.Clean(v)
+	if !filepath.IsAbs(v) || filepath.Dir(v) == v {
+		return "", false
+	}
+	return v, true
 }

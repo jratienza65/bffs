@@ -89,15 +89,16 @@ func TestParseCodeRoundTripAndFolding(t *testing.T) {
 func TestParseCodeRejects(t *testing.T) {
 	bad := []string{
 		"",
-		"7K3Q-M9X",      // 7 symbols
-		"7K3Q-M9XDA",    // 9 symbols
-		"7K3Q-M9XU",     // U is not in the alphabet
-		"7K3Q-M9X!",     // punctuation
-		"7K3Q_M9XD",     // underscore is not a separator
-		"7K3Q-M9XÉ",     // non-ASCII
-		"7K3Q-M9XD-7K3", // too long
-		"7K3Q-M9X\x00D", // NUL
-		"७K3Q-M9XD",     // Devanagari digit
+		"7K3Q-M9X",            // 7 symbols
+		"7K3Q-M9XDA",          // 9 symbols
+		"7K3Q-M9XU",           // U is not in the alphabet
+		"7K3Q-M9X!",           // punctuation
+		"7K3Q_M9XD",           // underscore is not a separator
+		"7K3Q-M9XÉ",           // non-ASCII
+		"7K3Q-M9XD-7K3",       // 11 symbols: neither length
+		"7K3Q-M9XD-7K3Q-M9XD", // 16 symbols
+		"7K3Q-M9X\x00D",       // NUL
+		"७K3Q-M9XD",           // Devanagari digit
 	}
 	for _, in := range bad {
 		c, err := ParseCode(in)
@@ -108,7 +109,7 @@ func TestParseCodeRejects(t *testing.T) {
 			t.Errorf("ParseCode(%q) returned a non-zero code on error", in)
 		}
 	}
-	if got := ErrInvalidCode.Error(); got != "invalid pairing code: use the 8 characters shown on the other machine" {
+	if got := ErrInvalidCode.Error(); got != "invalid pairing code: use the 8 (or 12) characters shown on the other machine" {
 		t.Fatalf("ErrInvalidCode text = %q", got)
 	}
 }

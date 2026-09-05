@@ -694,7 +694,16 @@ func loopbackLinks() []transfer.LinkAddr {
 // restored at cleanup.
 func loopbackTransfer(t *testing.T, code transfer.Code) <-chan netip.AddrPort {
 	t.Helper()
+	addrCh, _ := loopbackTransferN(t, code)
+	return addrCh
+}
+
+// loopbackTransferN is loopbackTransfer that also reports, on the second
+// channel, the symbol count the serve asked the code generator for.
+func loopbackTransferN(t *testing.T, code transfer.Code) (<-chan netip.AddrPort, <-chan int) {
+	t.Helper()
 	addrCh := make(chan netip.AddrPort, 1)
+	symbolsCh := make(chan int, 1)
 	oldListen, oldLocal, oldGen, oldFetchLocal := serveListen, serveLocal, serveGenerate, fetchLocal
 	serveListen = func(network, addr string) (net.Listener, error) {
 		ln, err := net.Listen(network, addr)
@@ -708,11 +717,17 @@ func loopbackTransfer(t *testing.T, code transfer.Code) <-chan netip.AddrPort {
 	}
 	lo := func(transfer.LANOptions) ([]transfer.LinkAddr, error) { return loopbackLinks(), nil }
 	serveLocal, fetchLocal = lo, lo
-	serveGenerate = func() (transfer.Code, error) { return code, nil }
+	serveGenerate = func(symbols int) (transfer.Code, error) {
+		select {
+		case symbolsCh <- symbols:
+		default:
+		}
+		return code, nil
+	}
 	t.Cleanup(func() {
 		serveListen, serveLocal, serveGenerate, fetchLocal = oldListen, oldLocal, oldGen, oldFetchLocal
 	})
-	return addrCh
+	return addrCh, symbolsCh
 }
 
 func mustParseCode(t *testing.T, s string) transfer.Code {
@@ -1131,5 +1146,67 @@ func TestExportServeImportFromHost(t *testing.T) {
 	keyB := keyFromText(lineContaining(bOutputs[1], "peer key "), "peer key ")
 	if len(keyA) != 8 || keyA != keyB {
 		t.Errorf("key fingerprints differ: A %q, B %q", keyA, keyB)
+	}
+}
+
+func TestExportLongCode(t *testing.T) {
+	fl := exportCmd.Flags().Lookup("long-code")
+	if fl == nil || fl.DefValue != "false" || !strings.Contains(fl.Usage, "--serve") {
+		t.Fatalf("--long-code: %+v", fl)
+	}
+
+	a := newExportFixture(t)
+	code := mustParseCode(t, "7K3Q-M9XD-2PNW")
+	addrCh, symbolsCh := loopbackTransferN(t, code)
+
+	aOut, aErr := &syncBuffer{}, &syncBuffer{}
+	ac := &cobra.Command{}
+	ac.SetOut(aOut)
+	ac.SetErr(aErr)
+	ac.SetIn(strings.NewReader(""))
+	areq := a.request("")
+	areq.Out, areq.Serve, areq.LongCode, areq.Port, areq.TTL, areq.AllowLoopback = "", true, true, 0, time.Minute, true
+	areq.Host, areq.User = "mac-a", "jonas"
+	served := make(chan error, 1)
+	go func() { served <- runExport(ac, a.cfgDir, newPrompter(ac.InOrStdin(), aErr), areq, false) }()
+	var addr netip.AddrPort
+	select {
+	case addr = <-addrCh:
+	case err := <-served:
+		t.Fatalf("serve ended before binding: %v\n%s", err, aErr.String())
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve never bound")
+	}
+	if got := <-symbolsCh; got != transfer.LongCodeSymbols {
+		t.Errorf("serve asked for %d symbols, want %d", got, transfer.LongCodeSymbols)
+	}
+
+	b := newImportMachine(t)
+	breq := b.request(addr.String())
+	breq.AllowLoopback = true
+	breq.Host, breq.User = "mac-b", "jonas"
+	t.Setenv(envTransferCode, "7k3q m9xd 2pnw") // folded and regrouped by ParseCode
+	c, pr, out, errOut := newImportCmd("")
+	if err := runImport(c, b.cfgDir, pr, breq, false); err != nil {
+		t.Fatalf("import: %v\nstdout: %s\nstderr: %s", err, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(b.claudeDir, "projects", a.slug, testSID1+".jsonl")); err != nil {
+		t.Errorf("transcript not landed: %v", err)
+	}
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("serve: %v\n%s", err, aErr.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("serve did not end after the delivery")
+	}
+	if !strings.Contains(aErr.String(), "Pairing code:   7K3Q-M9XD-2PNW") {
+		t.Errorf("banner lacks the long code:\n%s", aErr.String())
+	}
+	for _, text := range []string{aErr.String(), out.String(), errOut.String()} {
+		if strings.Contains(text, "7K3Q-M9XD-2PNW") && text != aErr.String() {
+			t.Errorf("the code leaked into B's output:\n%s", text)
+		}
 	}
 }

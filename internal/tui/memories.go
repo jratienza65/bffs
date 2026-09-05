@@ -133,7 +133,14 @@ func (s *memoriesScreen) loading() bool        { return s.busy }
 func (s *memoriesScreen) capturingInput() bool { return s.list.SettingFilter() }
 
 func (s *memoriesScreen) Keys() []key.Binding {
-	return append([]key.Binding{keys.Up, keys.Down, keys.Open, keys.Tab, keys.ScanPaths, keys.Filter}, filterKeys(s.list)...)
+	ks := []key.Binding{keys.Up, keys.Down, keys.Open, keys.Tab, keys.ScanPaths, keys.Filter}
+	ks = append(ks, actionKeys(false)...)
+	return append(ks, filterKeys(s.list)...)
+}
+
+// target is the whole project: its sessions and its memory.
+func (s *memoriesScreen) target() actionTarget {
+	return actionTarget{root: s.root, slug: s.slug, project: s.project}
 }
 
 // pick chooses the memory directory of the project among the root's:
@@ -165,6 +172,12 @@ func (s *memoriesScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.list.SetSize(msg.Width, msg.Height-1)
 		s.list.Title = memoriesHeader(msg.Width - 2)
 		return s, nil
+
+	case refreshMsg:
+		s.busy = true
+		s.mem = nil
+		delete(s.svc.memories, s.root.Dir)
+		return s, loadMemories(s.svc.ctx, s.root)
 
 	case memoriesLoadedMsg:
 		if msg.rootDir != s.root.Dir {
@@ -202,6 +215,23 @@ func (s *memoriesScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 				return s, status("no memory dir for " + s.projectLabel())
 			}
 			return s, pushScreen(newScanPathsScreen(s.svc, s.mem.Dir))
+		case key.Matches(msg, keys.Export):
+			return s, pushScreen(newExportScreen(s.svc, s.target()))
+		case key.Matches(msg, keys.Send):
+			sc, err := newServeScreen(s.svc, s.target())
+			if err != nil {
+				return s, statusError(err)
+			}
+			return s, pushScreen(sc)
+		case key.Matches(msg, keys.Receive):
+			return s, receiveInto(s.svc, s.root)
+		case key.Matches(msg, keys.Copy):
+			return s, pushScreen(newCopyScreen(s.svc, s.target()))
+		case key.Matches(msg, keys.Trust):
+			if s.project == "" {
+				return s, status("no cwd recorded for this project; nothing to trust")
+			}
+			return s, pushScreen(newTrustScreen(s.svc, s.project))
 		}
 	}
 	var cmd tea.Cmd

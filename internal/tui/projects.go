@@ -164,7 +164,7 @@ func (s *projectsScreen) loading() bool        { return s.busy }
 func (s *projectsScreen) capturingInput() bool { return s.list.SettingFilter() }
 
 func (s *projectsScreen) Keys() []key.Binding {
-	return append([]key.Binding{keys.Up, keys.Down, keys.Open, keys.Filter}, filterKeys(s.list)...)
+	return append([]key.Binding{keys.Up, keys.Down, keys.Open, keys.Filter, keys.Receive}, filterKeys(s.list)...)
 }
 
 func (s *projectsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
@@ -174,6 +174,10 @@ func (s *projectsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.list.SetSize(msg.Width, msg.Height-1)
 		s.list.Title = projectsHeader(msg.Width - 2)
 		return s, nil
+
+	case refreshMsg:
+		s.busy = true
+		return s, loadProjects(s.svc.ctx, s.root, s.svc.now)
 
 	case projectsLoadedMsg:
 		if msg.rootDir != s.root.Dir {
@@ -195,7 +199,11 @@ func (s *projectsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		return s, cmd
 
 	case tea.KeyPressMsg:
-		if !s.list.SettingFilter() && key.Matches(msg, keys.Open) {
+		if s.list.SettingFilter() {
+			break
+		}
+		switch {
+		case key.Matches(msg, keys.Open):
 			r, ok := s.list.SelectedItem().(*projectRow)
 			if !ok {
 				return s, nil
@@ -204,6 +212,8 @@ func (s *projectsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 				return s, pushScreen(newMemoriesScreen(s.svc, s.root, r.slug, r.cwd))
 			}
 			return s, pushScreen(newSessionsScreen(s.svc, s.root, r.slug, r.cwd))
+		case key.Matches(msg, keys.Receive):
+			return s, receiveInto(s.svc, s.root)
 		}
 	}
 	var cmd tea.Cmd

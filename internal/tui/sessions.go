@@ -188,7 +188,84 @@ func (s *sessionsScreen) loading() bool        { return s.busy }
 func (s *sessionsScreen) capturingInput() bool { return s.list.SettingFilter() }
 
 func (s *sessionsScreen) Keys() []key.Binding {
-	return append([]key.Binding{keys.Up, keys.Down, keys.Open, keys.Select, keys.SelectAll, keys.Tab, keys.ScanPaths, keys.Filter}, filterKeys(s.list)...)
+	ks := []key.Binding{keys.Up, keys.Down, keys.Open, keys.Select, keys.SelectAll, keys.Tab, keys.ScanPaths, keys.Filter}
+	ks = append(ks, actionKeys(true)...)
+	return append(ks, filterKeys(s.list)...)
+}
+
+// target is what an action pushed from here works on: the root, the
+// project, every session in row order and the selected ones.
+func (s *sessionsScreen) target() actionTarget {
+	t := actionTarget{root: s.root, slug: s.slug, project: s.project}
+	for _, r := range s.rows {
+		t.rows = append(t.rows, r.s)
+		if s.sel[r.s.ID] {
+			t.ids = append(t.ids, r.s.ID)
+		}
+	}
+	return t
+}
+
+// chosen are the sessions a rehome works on: the selection, else the
+// project's pending imports (an import record and no directory here).
+func (s *sessionsScreen) chosen() []transcripts.Session {
+	var sel, pending []transcripts.Session
+	for _, r := range s.rows {
+		switch {
+		case s.sel[r.s.ID]:
+			sel = append(sel, r.s)
+		case r.s.Import != nil && !r.s.CwdExists:
+			pending = append(pending, r.s)
+		}
+	}
+	if len(sel) > 0 {
+		return sel
+	}
+	return pending
+}
+
+// clearSelection empties the selection set the rows share.
+func (s *sessionsScreen) clearSelection() {
+	for id := range s.sel {
+		delete(s.sel, id)
+	}
+}
+
+// action opens the screen behind an action key, or explains in the
+// status line why it cannot.
+func (s *sessionsScreen) action(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch {
+	case key.Matches(msg, keys.Export):
+		return pushScreen(newExportScreen(s.svc, s.target())), true
+	case key.Matches(msg, keys.Send):
+		sc, err := newServeScreen(s.svc, s.target())
+		if err != nil {
+			return statusError(err), true
+		}
+		return pushScreen(sc), true
+	case key.Matches(msg, keys.Receive):
+		return receiveInto(s.svc, s.root), true
+	case key.Matches(msg, keys.Copy):
+		return pushScreen(newCopyScreen(s.svc, s.target())), true
+	case key.Matches(msg, keys.Rehome):
+		chosen := s.chosen()
+		if len(chosen) == 0 {
+			return status("nothing to rehome: select sessions with space (the project has no pending imports)"), true
+		}
+		return pushScreen(newRehomeScreen(s.svc, s.target(), chosen)), true
+	case key.Matches(msg, keys.Resume):
+		r, ok := s.list.SelectedItem().(*sessionRow)
+		if !ok {
+			return nil, true
+		}
+		return resume(s.svc, r.s), true
+	case key.Matches(msg, keys.Trust):
+		if s.project == "" {
+			return status("no cwd recorded for this project; nothing to trust"), true
+		}
+		return pushScreen(newTrustScreen(s.svc, s.project)), true
+	}
+	return nil, false
 }
 
 // memoryDir is where this project's auto-memory lives when it has any:
@@ -242,6 +319,23 @@ func (s *sessionsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		cmd := s.list.SetItems(items)
 		return s, tea.Batch(cmd, s.requestTitles())
+
+	case refreshMsg:
+		// An action changed the pool: list again, selection cleared.
+		s.clearSelection()
+		s.busy = true
+		return s, loadSessions(s.svc.ctx, s.svc, s.root, s.slug)
+
+	case resumeDoneMsg:
+		// claude ran in this terminal and exited; the transcript changed.
+		s.busy = true
+		var note tea.Cmd
+		if msg.err != nil {
+			note = statusError(fmt.Errorf("claude --resume %s: %w", shortID(msg.id), msg.err))
+		} else {
+			note = status("claude exited; listing again")
+		}
+		return s, tea.Batch(note, loadSessions(s.svc.ctx, s.svc, s.root, s.slug))
 
 	case titlesResolvedMsg:
 		if msg.slug != s.slug {
@@ -321,10 +415,22 @@ func (s *sessionsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			// A filter searches titles, so every title is needed now.
 			return s, tea.Batch(cmd, s.requestAllTitles())
 		}
+		if cmd, ok := s.action(msg); ok {
+			return s, cmd
+		}
 	}
 	var cmd tea.Cmd
 	s.list, cmd = s.list.Update(msg)
 	return s, tea.Batch(cmd, s.requestTitles())
+}
+
+// receiveInto opens the Receive screen for root, unless the root is an
+// orphan session dir (read-only: no account would ever read the import).
+func receiveInto(svc *services, root transcripts.Root) tea.Cmd {
+	if root.Orphan {
+		return status("orphan session dir " + transcripts.Sanitize(root.Owner) + " is read-only; receive into an account's root instead")
+	}
+	return pushScreen(newReceiveScreen(svc, root))
 }
 
 // applyMeta completes a row from its windows and refines attribution

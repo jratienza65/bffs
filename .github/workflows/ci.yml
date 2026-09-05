@@ -64,6 +64,20 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+      # Short fuzz runs on the bundle reader and name grammar, the two
+      # surfaces that parse bytes from another machine. 20 s each is a
+      # smoke test, not a campaign; `make fuzz` runs longer locally.
+      # Minimization is off: with the default 60 s per new interesting
+      # input every worker ends up minimizing (FuzzUnpack stages files on
+      # disk per exec) and mutation stops within seconds. Measured: 3k vs 0
+      # execs/s for FuzzUnpack, 100k vs 0 for FuzzValidateEntryName. Inputs
+      # are a few KiB, so an unminimized crasher reproduces just as well.
+      - name: Fuzz smoke
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          go test ./internal/bundle -run '^$' -fuzz FuzzUnpack -fuzztime 20s -fuzzminimizetime 0
+          go test ./internal/bundle -run '^$' -fuzz FuzzValidateEntryName -fuzztime 20s -fuzzminimizetime 0
+
       # Only writes when the exact key is absent, so this is one save per
       # (os, arch, job, go.sum) rather than a new copy every commit.
       - name: Save Go cache

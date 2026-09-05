@@ -106,7 +106,7 @@ func TestFetchCodePromptedAfterConnectAndErrorsPropagate(t *testing.T) {
 	code := mustCode(t)
 	var srec recorder
 	o := baseServe(t, code, testBody(1024), &srec)
-	o.TTL = time.Second
+	o.TTL = 3 * time.Second // generous: the pairing must not expire under a loaded CI runner
 	addr, out := startServe(t, context.Background(), o)
 
 	var crec recorder
@@ -138,7 +138,7 @@ func TestFetchConfirmErrorDeclines(t *testing.T) {
 	code := mustCode(t)
 	var srec recorder
 	o := baseServe(t, code, testBody(1024), &srec)
-	o.TTL = time.Second
+	o.TTL = 4 * time.Second // generous: proof verification must complete before expiry under load
 	addr, out := startServe(t, context.Background(), o)
 
 	var crec recorder

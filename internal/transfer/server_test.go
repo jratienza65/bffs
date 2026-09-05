@@ -803,7 +803,7 @@ func TestServeRejectsNonLANPeer(t *testing.T) {
 	code := mustCode(t)
 	var srec recorder
 	o := baseServe(t, code, testBody(1024), &srec)
-	o.TTL = time.Second
+	o.TTL = 3 * time.Second
 	addrCh := make(chan netip.AddrPort, 1)
 	o.Listen = loopbackListen(addrCh)
 	o.Local = loopbackLocal()

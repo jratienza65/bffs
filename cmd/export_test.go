@@ -5,9 +5,12 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 	"github.com/jratienza65/bffs/internal/porter"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
+	"github.com/jratienza65/bffs/internal/transfer"
 )
 
 const testBundleID = "6f1e2c0a-0000-4000-8000-000000000001"
@@ -657,5 +661,475 @@ func TestExportWriteError(t *testing.T) {
 	}
 	if exportWriteError(nil, live) != nil {
 		t.Error("nil error wrapped")
+	}
+}
+
+// ---- --serve (M5) ----
+
+// syncBuffer is a bytes.Buffer safe for the serve goroutine's printers.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func loopbackLinks() []transfer.LinkAddr {
+	return []transfer.LinkAddr{{Addr: netip.MustParseAddr("127.0.0.1"), Prefix: netip.MustParsePrefix("127.0.0.0/8"), Iface: "lo"}}
+}
+
+// loopbackTransfer points both sides at loopback: the serve binds
+// 127.0.0.1 on the requested port and reports the bound address, both
+// address sets are loopback, and the code is the one given. Everything is
+// restored at cleanup.
+func loopbackTransfer(t *testing.T, code transfer.Code) <-chan netip.AddrPort {
+	t.Helper()
+	addrCh := make(chan netip.AddrPort, 1)
+	oldListen, oldLocal, oldGen, oldFetchLocal := serveListen, serveLocal, serveGenerate, fetchLocal
+	serveListen = func(network, addr string) (net.Listener, error) {
+		ln, err := net.Listen(network, addr)
+		if err == nil {
+			select {
+			case addrCh <- netip.MustParseAddrPort(ln.Addr().String()):
+			default:
+			}
+		}
+		return ln, err
+	}
+	lo := func(transfer.LANOptions) ([]transfer.LinkAddr, error) { return loopbackLinks(), nil }
+	serveLocal, fetchLocal = lo, lo
+	serveGenerate = func() (transfer.Code, error) { return code, nil }
+	t.Cleanup(func() {
+		serveListen, serveLocal, serveGenerate, fetchLocal = oldListen, oldLocal, oldGen, oldFetchLocal
+	})
+	return addrCh
+}
+
+func mustParseCode(t *testing.T, s string) transfer.Code {
+	t.Helper()
+	c, err := transfer.ParseCode(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// The A-side banner: the port is omitted when it is the default, the key
+// fingerprint sits beside the code, --show-ipv6 lists link-local
+// addresses without a zone and says how to add one.
+func TestRenderServeBanner(t *testing.T) {
+	local := []transfer.LinkAddr{
+		{Addr: netip.MustParseAddr("192.168.1.20"), Prefix: netip.MustParsePrefix("192.168.1.0/24"), Iface: "en0"},
+		{Addr: netip.MustParseAddr("fe80::1c2d:3e4f").WithZone("en0"), Prefix: netip.MustParsePrefix("fe80::/64"), Iface: "en0"},
+	}
+	var sb strings.Builder
+	renderServeBanner(&sb, serveBanner{Code: "7K3Q-M9XD", Key: "3f9a1c2e", Addr: local[0].Addr, Port: 7345, Local: local, TTL: 10 * time.Minute, Attempts: 3})
+	for _, want := range []string{
+		"\nOn the other machine, run:    bffs import --from 192.168.1.20\n",
+		"\nPairing code:   7K3Q-M9XD          (this machine's key: 3f9a1c2e — the other side shows it as \"peer key\")\n",
+		"\nWaiting for the other machine…  code valid for 10:00, 3 attempts, one transfer.   (Ctrl-C cancels; --show-ipv6 lists link-local addresses)\n",
+	} {
+		if !strings.Contains(sb.String(), want) {
+			t.Errorf("banner missing %q:\n%s", want, sb.String())
+		}
+	}
+	if strings.Contains(sb.String(), "fe80") || strings.Contains(sb.String(), ":7345") {
+		t.Errorf("default port or IPv6 shown without --show-ipv6:\n%s", sb.String())
+	}
+
+	sb.Reset()
+	renderServeBanner(&sb, serveBanner{Code: "7K3Q-M9XD", Key: "3f9a1c2e", Addr: local[0].Addr, Port: 51234, Local: local, TTL: 90 * time.Second, Attempts: 3, ShowIPv6: true})
+	for _, want := range []string{
+		"bffs import --from 192.168.1.20:51234\n",
+		"bffs import --from [fe80::1c2d:3e4f]:51234   (append %<your interface> to the address, e.g. %en0)\n",
+		"code valid for 1:30, 3 attempts",
+	} {
+		if !strings.Contains(sb.String(), want) {
+			t.Errorf("banner missing %q:\n%s", want, sb.String())
+		}
+	}
+	if strings.Contains(sb.String(), "%en0]") {
+		t.Errorf("link-local address printed with a zone:\n%s", sb.String())
+	}
+
+	// Helpers the banner and the B side share.
+	if got := fromTarget(netip.MustParseAddr("fe80::1").WithZone("en0"), 7345); got != "[fe80::1%en0]" {
+		t.Errorf("fromTarget with zone = %q", got)
+	}
+	if got := keyFromText("listening on 192.168.1.20:7345 (en0), key 3f9a1c2e", "key "); got != "3f9a1c2e" {
+		t.Errorf("keyFromText = %q", got)
+	}
+	if got := keyFromText("connected to x (TLS 1.3, peer key 3f9a1c2e)", "peer key "); got != "3f9a1c2e" {
+		t.Errorf("keyFromText peer = %q", got)
+	}
+	if got := keyFromText("no key here", "key "); got != "unknown" {
+		t.Errorf("keyFromText without = %q", got)
+	}
+}
+
+// The A-side printer: the banner once on the first listen event, one
+// timestamped line per event with the plan's wording, peer text
+// sanitised, the code nowhere but the banner.
+func TestServePrinterLines(t *testing.T) {
+	code := mustParseCode(t, "7K3Q-M9XD")
+	var sb strings.Builder
+	p := &servePrinter{w: &sb, code: code, local: loopbackLinks(), ttl: 10 * time.Minute, manifestSize: 12_345, bar: newProgressBar(&sb, "sending", false)}
+	at := catalogNow
+	ev := func(kind, peer, text string) transfer.Event {
+		return transfer.Event{Time: at, Kind: kind, Peer: peer, Text: text}
+	}
+	p.event(ev("listen", "192.168.1.20:7345", "listening on 192.168.1.20:7345 (en0), key 3f9a1c2e"))
+	p.event(ev("listen", "[fe80::1%en0]:7345", "listening on [fe80::1%en0]:7345 (en0), key 3f9a1c2e"))
+	p.event(ev("connect", "192.168.1.31:50001", "192.168.1.31 connected (TLS 1.3)"))
+	p.event(ev("bad-code", "192.168.1.31:50001", "192.168.1.31 tried a wrong code (2 attempts left)"))
+	p.event(ev("code-ok", "192.168.1.31:50002", "192.168.1.31 gave the right code"))
+	p.event(ev("manifest-sent", "192.168.1.31:50002", "manifest sent to 192.168.1.31 (12345 bytes)"))
+	p.event(ev("reject", "192.168.1.31:50002", "mac-b"+osc52+" declined"))
+	p.event(ev("accept", "192.168.1.31:50003", "mac-b accepted"))
+	p.event(ev("sending", "192.168.1.31:50003", "sending to mac-b"))
+	p.event(ev("progress", "192.168.1.31:50003", "sent 16 MiB to mac-b"))
+	p.event(ev("done", "192.168.1.31:50003", "mac-b received 137 entries (148213311 bytes)"))
+	p.event(ev("expired", "", "code expired after 10:00; no pairing happened"))
+	out := sb.String()
+	for _, want := range []string{
+		"On the other machine, run:    bffs import --from 192.168.1.20\n",
+		"  12:00:00  192.168.1.31 connected — waiting for its code\n",
+		"  12:00:00  192.168.1.31 tried a wrong code (2 attempts left)\n",
+		"  12:00:00  192.168.1.31 code accepted; manifest sent (12 KB) — waiting for the other side to review\n",
+		"  12:00:00  mac-b declined\n",
+		"  12:00:00  manifest accepted by mac-b\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("printer missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Count(out, "Pairing code:") != 1 || strings.Count(out, "7K3Q-M9XD") != 1 {
+		t.Errorf("banner or code not printed exactly once:\n%s", out)
+	}
+	// An expiry ends the serve with ErrExpired carrying the same text, so
+	// the event line is not printed on top of the error.
+	for _, absent := range []string{"fe80", "gave the right code", "sending to", "sent 16 MiB", "received 137", "code expired", "\x1b"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("printer must not print %q:\n%s", absent, out)
+		}
+	}
+	if p.acceptedAt.IsZero() {
+		t.Error("accept did not start the transfer clock")
+	}
+	sb.Reset()
+	if _, err := p.uiWriter().Write([]byte("no connection yet — allow the firewall\n")); err != nil {
+		t.Fatal(err)
+	}
+	if sb.String() != "  no connection yet — allow the firewall\n" {
+		t.Errorf("ui hint = %q", sb.String())
+	}
+}
+
+// Without a terminal the progress bar prints one final line only; the
+// verified variant names the files instead of a rate.
+func TestProgressBarNonTTY(t *testing.T) {
+	var sb strings.Builder
+	clock := catalogNow
+	b := newProgressBar(&sb, "sending", false)
+	b.now = func() time.Time { return clock }
+	b.update(bundle.Progress{Phase: "hash", Bytes: 1, TotalBytes: 2})
+	if sb.Len() != 0 || !b.started.IsZero() {
+		t.Errorf("the hashing pre-pass moved the bar: %q", sb.String())
+	}
+	b.update(bundle.Progress{Phase: "build", Files: 1, TotalFiles: 3, Bytes: 40_000_000, TotalBytes: 148_200_000})
+	clock = clock.Add(2 * time.Second)
+	b.update(bundle.Progress{Phase: "build", Files: 2, TotalFiles: 3, Bytes: 100_000_000, TotalBytes: 148_200_000})
+	if sb.Len() != 0 {
+		t.Errorf("partial bar printed without a terminal: %q", sb.String())
+	}
+	clock = clock.Add(time.Second)
+	b.update(bundle.Progress{Phase: "build", Files: 3, TotalFiles: 3, Bytes: 148_200_000, TotalBytes: 148_200_000})
+	if want := "  sending ████████████████████ 100%   148.2 MB   49.4 MB/s\n"; sb.String() != want {
+		t.Errorf("final bar = %q, want %q", sb.String(), want)
+	}
+	b.end()
+	b.interrupt()
+	if strings.Count(sb.String(), "\n") != 1 {
+		t.Errorf("end/interrupt after the final line printed again: %q", sb.String())
+	}
+
+	sb.Reset()
+	v := newProgressBar(&sb, "receiving", false)
+	v.now = func() time.Time { return clock }
+	v.verified = true
+	v.update(bundle.Progress{Phase: "unpack", Files: 137, TotalFiles: 137, Bytes: 148_213_311, TotalBytes: 148_213_311})
+	if want := "  receiving ████████████████████ 100%   148.2 MB   137 files verified (sha256)\n"; sb.String() != want {
+		t.Errorf("verified bar = %q, want %q", sb.String(), want)
+	}
+	if got := barBlocks(42); got != "████████░░░░░░░░░░░░" {
+		t.Errorf("barBlocks(42) = %q", got)
+	}
+}
+
+// On a terminal the bar is redrawn in place with "\r" at most every
+// 200 ms, a shorter redraw is padded over the previous one, and an event
+// line interrupts a partial bar with a newline.
+func TestProgressBarRedraw(t *testing.T) {
+	var sb strings.Builder
+	clock := catalogNow
+	b := newProgressBar(&sb, "sending", true)
+	b.now = func() time.Time { return clock }
+	b.update(bundle.Progress{Phase: "build", Bytes: 10_000_000, TotalBytes: 100_000_000})
+	if got := sb.String(); got != "  sending ██░░░░░░░░░░░░░░░░░░  10%   10.0 MB" {
+		t.Errorf("first draw = %q", got)
+	}
+	clock = clock.Add(100 * time.Millisecond)
+	b.update(bundle.Progress{Phase: "build", Bytes: 20_000_000, TotalBytes: 100_000_000})
+	if strings.Contains(sb.String(), "\r") {
+		t.Errorf("redrawn within 200 ms: %q", sb.String())
+	}
+	clock = clock.Add(900 * time.Millisecond)
+	b.update(bundle.Progress{Phase: "build", Bytes: 20_000_000, TotalBytes: 100_000_000})
+	second := "\r  sending ████░░░░░░░░░░░░░░░░  20%   20.0 MB   20.0 MB/s"
+	if !strings.HasSuffix(sb.String(), second) {
+		t.Errorf("second draw: %q", sb.String())
+	}
+	// The rate fell (20.0 MB/s → 0.3 MB/s): the shorter redraw is padded
+	// to the width of the widest line drawn so far.
+	clock = clock.Add(100 * time.Second)
+	b.update(bundle.Progress{Phase: "build", Bytes: 30_000_000, TotalBytes: 100_000_000})
+	third := "\r  sending ██████░░░░░░░░░░░░░░  30%   30.0 MB   0.3 MB/s "
+	if !strings.HasSuffix(sb.String(), third) {
+		t.Errorf("third draw: %q", sb.String())
+	}
+	if got, want := len([]rune(third)), len([]rune(second)); got != want {
+		t.Errorf("third draw width %d, second %d", got, want)
+	}
+	b.interrupt()
+	if !strings.HasSuffix(sb.String(), third+"\n") || b.onLine {
+		t.Errorf("interrupt did not end the line: %q", sb.String())
+	}
+	b.update(bundle.Progress{Phase: "build", Bytes: 100_000_000, TotalBytes: 100_000_000})
+	if !strings.HasSuffix(sb.String(), "\n  sending ████████████████████ 100%   100.0 MB   1.0 MB/s\n") {
+		t.Errorf("final line after an interrupt: %q", sb.String())
+	}
+}
+
+// --serve refuses a TTL above the cap and a machine without any
+// local-network address before building the selection, let alone showing
+// a code.
+func TestServeValidation(t *testing.T) {
+	a := newExportFixture(t)
+	code := mustParseCode(t, "7K3Q-M9XD")
+	loopbackTransfer(t, code)
+	req := a.request("")
+	req.Out, req.Serve, req.AllowLoopback = "", true, true
+	req.Host, req.User = "mac-a", "jonas"
+
+	req.TTL = time.Hour
+	c, pr, _, errOut := newSplitCmd("")
+	err := runExport(c, a.cfgDir, pr, req, false)
+	if err == nil || !strings.Contains(err.Error(), "invalid --ttl 1h0m0s") {
+		t.Errorf("ttl: err = %v", err)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("output before the flag check:\n%s", errOut.String())
+	}
+
+	req.TTL = time.Minute
+	req.Port = 70000
+	c, pr, _, errOut = newSplitCmd("")
+	err = runExport(c, a.cfgDir, pr, req, false)
+	if err == nil || !strings.Contains(err.Error(), "invalid --port 70000") || errOut.Len() != 0 {
+		t.Errorf("port: err = %v, stderr %q", err, errOut.String())
+	}
+
+	req.Port = 0
+	old := serveLocal
+	serveLocal = func(transfer.LANOptions) ([]transfer.LinkAddr, error) { return nil, nil }
+	t.Cleanup(func() { serveLocal = old })
+	c, pr, _, errOut = newSplitCmd("")
+	err = runExport(c, a.cfgDir, pr, req, false)
+	if err == nil || err.Error() != "no local-network address found (only loopback/VPN interfaces are up); connect to Wi-Fi/Ethernet or use --out file.bffs" || exitCode(err) != 1 {
+		t.Errorf("no address: err = %v (exit %d)", err, exitCode(err))
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("selection work before the network check:\n%s", errOut.String())
+	}
+}
+
+// End to end over loopback: machine A serves its project, machine B
+// first tries a wrong code (exit 2, A keeps serving), then declines
+// without a terminal (exit 1, nothing written, A keeps serving), then
+// pairs with the code from $BFFS_TRANSFER_CODE and lands the session. The
+// code appears once on A's screen and never on B's.
+func TestExportServeImportFromHost(t *testing.T) {
+	a := newExportFixture(t)
+	code := mustParseCode(t, "7K3Q-M9XD")
+	addrCh := loopbackTransfer(t, code)
+
+	aOut, aErr := &syncBuffer{}, &syncBuffer{}
+	ac := &cobra.Command{}
+	ac.SetOut(aOut)
+	ac.SetErr(aErr)
+	ac.SetIn(strings.NewReader(""))
+	areq := a.request("")
+	areq.Out, areq.Serve, areq.Port, areq.TTL, areq.AllowLoopback = "", true, 0, time.Minute, true
+	areq.Host, areq.User = "mac-a", "jonas"
+	served := make(chan error, 1)
+	go func() { served <- runExport(ac, a.cfgDir, newPrompter(ac.InOrStdin(), aErr), areq, false) }()
+	var addr netip.AddrPort
+	select {
+	case addr = <-addrCh:
+	case err := <-served:
+		t.Fatalf("serve ended before binding: %v\n%s", err, aErr.String())
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve never bound")
+	}
+
+	b := newImportMachine(t)
+	breq := b.request(addr.String())
+	breq.AllowLoopback = true
+	breq.Host, breq.User = "mac-b", "jonas"
+	var bOutputs []string
+	noWrite := func(step string) {
+		t.Helper()
+		if _, err := os.Stat(filepath.Join(b.claudeDir, "projects")); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s: destination written: %v", step, err)
+		}
+		if recs, _ := imports.Load(b.cfgDir); len(recs) != 0 {
+			t.Errorf("%s: record written: %v", step, recs)
+		}
+	}
+
+	// 1. A wrong code: exit 2, the connection line named the peer key.
+	t.Setenv(envTransferCode, "ZZZZ-ZZZZ")
+	c, pr, out, errOut := newImportCmd("")
+	err := runImport(c, b.cfgDir, pr, breq, false)
+	bOutputs = append(bOutputs, out.String(), errOut.String())
+	if err == nil || exitCode(err) != 2 || !errors.Is(err, transfer.ErrBadCode) || !strings.Contains(err.Error(), "rejected the code (2 attempts left there). Run bffs import again.") {
+		t.Errorf("wrong code: err = %v (exit %d)", err, exitCode(err))
+	}
+	if !strings.Contains(errOut.String(), "connected to "+addr.String()+" (TLS 1.3, peer key ") || !strings.Contains(errOut.String(), "(from $BFFS_TRANSFER_CODE)") {
+		t.Errorf("wrong code stderr:\n%s", errOut.String())
+	}
+	if _, ok := os.LookupEnv(envTransferCode); ok {
+		t.Error("the code variable survived the read")
+	}
+	noWrite("wrong code")
+
+	// 2. The right code but no terminal and no -y: the summary is shown,
+	// the import is declined before any write, A keeps serving.
+	t.Setenv(envTransferCode, code.Display())
+	decline := breq
+	decline.Yes = false
+	c, pr, out, errOut = newImportCmd("")
+	err = runImport(c, b.cfgDir, pr, decline, false)
+	bOutputs = append(bOutputs, out.String(), errOut.String())
+	if err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "refusing to import: stdin is not a terminal; pass -y") {
+		t.Errorf("non-tty decline: err = %v (exit %d)", err, exitCode(err))
+	}
+	for _, want := range []string{
+		"code accepted — the other machine proved it knows the code too",
+		"Bundle ", " from ", "bffs 0.4.0-test",
+		"  project " + a.project + "        exists here ✓ (same directory — no rehome needed)",
+		"Target: home (" + short(b.claudeDir) + ", unmanaged claude)   limit 2.0 GB   retention: 30 days (default)",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("decline stderr missing %q:\n%s", want, errOut.String())
+		}
+	}
+	noWrite("decline")
+
+	// 3. The transfer.
+	t.Setenv(envTransferCode, code.Display())
+	c, pr, out, errOut = newImportCmd("")
+	if err := runImport(c, b.cfgDir, pr, breq, false); err != nil {
+		t.Fatalf("import: %v\nstdout: %s\nstderr: %s", err, out.String(), errOut.String())
+	}
+	bOutputs = append(bOutputs, out.String(), errOut.String())
+	if out.Len() != 0 {
+		t.Errorf("stdout must stay empty on the host path: %q", out.String())
+	}
+	recs, err := imports.Load(b.cfgDir)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("records = %v, %v", recs, err)
+	}
+	for _, want := range []string{
+		"  receiving ████████████████████ 100%   ",
+		" files verified (sha256)\n",
+		"  sessions   1 committed to projects/" + a.slug + "/; 0 skipped",
+		"Done in ", ". Check it:",
+		"    cd " + shellWord(a.project) + " && claude --resume " + testSID1,
+		"Import record: " + short(imports.Path(b.cfgDir, recs[0].BundleID)) + "  (bffs sessions imports)",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("receipt missing %q:\n%s", want, errOut.String())
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(b.claudeDir, "projects", a.slug, testSID1+".jsonl"))
+	if err != nil {
+		t.Fatalf("transcript not landed: %v", err)
+	}
+	orig, _ := os.ReadFile(filepath.Join(a.claudeDir, "projects", a.slug, testSID1+".jsonl"))
+	if !bytes.Equal(got, orig) {
+		t.Errorf("landed transcript differs from the source")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(b.cfgDir, "staging")); len(entries) != 0 {
+		t.Errorf("staging not cleaned: %v", entries)
+	}
+
+	// A: delivered once, exit 0, the banner with the code and key, the
+	// event lines for every attempt.
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Fatalf("serve: %v\n%s", err, aErr.String())
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("serve did not end after the delivery")
+	}
+	aText := aErr.String()
+	if aOut.String() != "" {
+		t.Errorf("serve wrote to stdout: %q", aOut.String())
+	}
+	for _, want := range []string{
+		"Exporting from ",
+		"On the other machine, run:    bffs import --from " + addr.String() + "\n",
+		"Pairing code:   7K3Q-M9XD          (this machine's key: ",
+		"Waiting for the other machine…  code valid for 1:00, 3 attempts, one transfer.",
+		"127.0.0.1 connected — waiting for its code",
+		"127.0.0.1 tried a wrong code (2 attempts left)",
+		"127.0.0.1 code accepted; manifest sent (",
+		"mac-b declined",
+		"manifest accepted by mac-b",
+		"  sending ████████████████████ 100%   ",
+		"  delivered: ", " verified by mac-b in ",
+		"Done.\n",
+	} {
+		if !strings.Contains(aText, want) {
+			t.Errorf("serve stderr missing %q:\n%s", want, aText)
+		}
+	}
+	// The code is on A's screen exactly once, in the banner, and never
+	// on B's (either form).
+	if strings.Count(aText, "7K3Q-M9XD") != 1 || strings.Contains(aText, "7K3QM9XD") {
+		t.Errorf("code printed elsewhere than the banner:\n%s", aText)
+	}
+	for i, s := range bOutputs {
+		if strings.Contains(s, "7K3Q-M9XD") || strings.Contains(s, "7K3QM9XD") || strings.Contains(strings.ToLower(s), "7k3q") {
+			t.Errorf("B output %d shows the code:\n%s", i, s)
+		}
+	}
+	// The key fingerprint matches on both sides.
+	keyA := keyFromText(lineContaining(aText, "this machine's key: "), "this machine's key: ")
+	keyB := keyFromText(lineContaining(bOutputs[1], "peer key "), "peer key ")
+	if len(keyA) != 8 || keyA != keyB {
+		t.Errorf("key fingerprints differ: A %q, B %q", keyA, keyB)
 	}
 }

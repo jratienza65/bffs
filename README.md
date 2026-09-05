@@ -371,9 +371,121 @@ one. Sidecar, file-history and plan files get a fresh mtime
 Every import ends with the command that verifies it (`cd <dir> && claude
 --resume <id>`) and writes a record under `<config>/imports/`, which
 `bffs usage` uses to attribute the imported sessions to the account chosen
-at import time. Receiving directly from another machine on the LAN
-(`bffs export --serve` / `bffs import --from <host>`) arrives in the next
-milestone.
+at import time.
+
+## Transfer between machines
+
+Two machines on the same Wi-Fi or Ethernet can hand a bundle over directly:
+one serves, the other pulls, and a short pairing code read off the first
+screen and typed on the second is the whole secret. Nothing is written to
+disk in between and nothing leaves the local network.
+
+**Machine A** (the one that has the sessions):
+
+```
+A$ cd ~/build/projects/bffs && bffs export --serve
+Exporting from the shared pool (~/.claude; partial isolation: aviate, innomind):
+  project ~/build/projects/bffs
+    12 sessions   (newest: "Plan: session export", 2h ago)   148.2 MB   1 live (may be truncated)
+      tool-results 96 MB (saved tool outputs — may contain pasted secrets)   file-history 11 MB (backups of files Claude edited)   history 41 lines (prompt history)
+    memory        6 files   14 KB
+  total 148.2 MB
+Proceed? [y/N] y
+
+On the other machine, run:    bffs import --from 192.168.1.20
+
+Pairing code:   7K3Q-M9XD          (this machine's key: 3f9a1c2e — the other side shows it as "peer key")
+
+Waiting for the other machine…  code valid for 10:00, 3 attempts, one transfer.   (Ctrl-C cancels; --show-ipv6 lists link-local addresses)
+  22:41:03  192.168.1.31 connected — waiting for its code
+  22:41:11  192.168.1.31 code accepted; manifest sent (12 KB) — waiting for the other side to review
+  22:41:39  manifest accepted by mac-b
+  sending ████████████████████ 100%   148.2 MB   42.0 MB/s
+  22:41:45  delivered: 137 files verified by mac-b in 4.1s
+Done.
+```
+
+**Machine B** (the one that wants them):
+
+```
+B$ bffs import --from 192.168.1.20
+connected to 192.168.1.20 (TLS 1.3, peer key 3f9a1c2e) — it asks for the pairing code: ********
+code accepted — the other machine proved it knows the code too
+Bundle 6f1e2c0a from mac-a (jonas, darwin/arm64, bffs 0.3.0, claude 2.1.259, account "aviate", partial):
+  project /Users/jonas/build/projects/bffs        exists here ✓ (same directory — no rehome needed)
+    12 sessions  148.2 MB   memory 6 files   (trust: accepted on mac-a — informational)
+    note: memory files in this bundle will be loaded into every future claude session for /Users/jonas/build/projects/bffs
+          (pinned files arrive unpinned; --trust-memory keeps them pinned)
+Target: account "work" (resolved for ~/build/projects/bffs → shared pool ~/.claude)   limit 2.0 GB   retention: 30 days (default)
+Import into ~/.claude? [y/N] y
+  receiving ████████████████████ 100%   148.2 MB   137 files verified (sha256)
+  sessions   12 committed to projects/-Users-jonas-build-projects-bffs/; 0 skipped
+  memory     6 files into ~/.claude/projects/-Users-jonas-build-projects-bffs/memory (side files: *.imported-6f1e2c0a.md; MEMORY.md untouched)
+  history    41 prompt lines added
+Done in 2.8s. Check it:
+
+    claude --resume 1e005053-380a-4245-a145-52c2715afa73
+    bffs sessions list --project /Users/jonas/build/projects/bffs
+
+note: the first claude launch there asks about folder trust (and external CLAUDE.md imports, if the project's CLAUDE.md
+      imports files outside the directory) — once per bffs account. `bffs trust sync --to <acct>` carries the answer to other accounts.
+Import record: ~/Library/Application Support/bffs/imports/6f1e2c0a-….json  (bffs sessions imports)
+```
+
+The code is asked for only once the connection is up, so a wrong address
+fails first (`could not reach 192.168.1.99:7345 within 10s — is bffs export
+--serve still running there …`). A wrong code exits 2 and burns one of the
+three attempts on A; three wrong codes end the serve. The importing side
+shows the whole manifest and asks before requesting a single payload byte;
+`--dry-run` reviews the plan and sends a "dry run" reject that A survives.
+For scripts, `BFFS_TRANSFER_CODE=7K3Q-M9XD bffs import --from 192.168.1.20 -y`
+takes the code from the environment (read once, then cleared); there is
+deliberately no `--code` flag, because `ps` shows every argument.
+
+**The pairing model, in two sentences.** The 40-bit code never crosses the
+wire: each side proves it knows the code with an HMAC keyed by a value
+derived from the code *and* this exact TLS connection, and B proves first,
+so a stranger connecting to A gets one guess per connection and three per
+serve, and a relay sitting between the two cannot forward either proof.
+Anyone who can see A's screen within the ten minutes can pull the bundle —
+the code is the whole secret, so treat the screen accordingly.
+
+**"Local network only" means on-link.** A listens only on addresses of up,
+non-loopback, non-point-to-point interfaces (no `utun*`/VPN, no `awdl*`),
+accepts only peers inside those interfaces' own prefixes, and B refuses to
+dial anything outside *its* own prefixes before a byte is sent:
+
+```
+refusing to pair with 203.0.113.5: not on a local network of this machine (--allow-routed for multi-VLAN offices).
+Use bffs export --out file.bffs, or bffs export --out - | ssh host bffs import --from -
+```
+
+Tailscale / CGNAT ranges (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) are refused
+on both sides even with `--allow-routed`, which only relaxes the on-link test
+for offices where the two machines sit on different VLANs of one private
+network (a warning is printed). Names work too (`--from mac-a.local`,
+`--from mac-a`): they are resolved once and every address must pass the
+same check, but any host on the network can answer such a name, so the
+IPv4 address shown on A is the safe form. `--show-ipv6` on A also lists
+link-local addresses; append the interface on B (`[fe80::…%en0]`).
+
+**Firewalls.** A has to accept an inbound connection on port 7345 (`--port`
+changes it, `0` picks a free one). On macOS the application firewall asks
+once per binary; an ad-hoc-signed `/opt/bffs/bffs` asks again after every
+rebuild — allow it for good with
+`sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /opt/bffs/bffs --unblockapp /opt/bffs/bffs`
+(Developer ID signing makes the prompt stick). On Windows a non-administrator
+is blocked silently:
+`netsh advfirewall firewall add rule name=bffs dir=in action=allow program="C:\path\to\bffs.exe" protocol=tcp localport=7345 profile=private`.
+On Linux with ufw: `ufw allow from 192.168.0.0/16 to any port 7345 proto tcp`.
+A prints `no connection yet — if a firewall prompt appeared, allow it` after
+30 s without a connection.
+
+**No inbound port at all?** Use the pipe, which needs nothing but ssh:
+
+```
+A$ bffs export --project . --out - | ssh b 'bffs import --from - -y --as-is'
+```
 
 ## Account resolution order
 

@@ -2,16 +2,23 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -23,6 +30,7 @@ import (
 	"github.com/jratienza65/bffs/internal/resolver"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
+	"github.com/jratienza65/bffs/internal/transfer"
 )
 
 var (
@@ -43,6 +51,8 @@ var (
 	importCarryTrust     bool
 	importSetLastSession bool
 	importForceStamp     bool
+	importAllowRouted    bool
+	importAllowLoopback  bool
 	importClaudeDir      string
 )
 
@@ -51,7 +61,7 @@ var (
 const importDefaultMaxSize = "2G"
 
 var importCmd = &cobra.Command{
-	Use:   "import --from (<file.bffs> | -) [--account <name>] [--as-is] [--dry-run] [-y]",
+	Use:   "import --from (<host>[:port] | <file.bffs> | -) [--account <name>] [--as-is] [--dry-run] [-y]",
 	Short: "Land a .bffs bundle's sessions and auto-memory in a Claude config dir",
 	Long: `Reads a bundle written by ` + "`bffs export`" + ` and commits its sessions and memory
 into the projects/ pool of the target account (the account claude would use in
@@ -69,7 +79,18 @@ from anywhere. An existing session with the same id is skipped unless
 when the project has none yet (--memory overwrite sets the existing directory
 aside); imported memory is prompt content, so its pinned files arrive unpinned
 unless --trust-memory. Old transcripts are raised to half of Claude's
-retention window so they are not swept before they can be resumed.`,
+retention window so they are not swept before they can be resumed.
+
+With --from <host>[:port] the bundle comes straight from a machine running
+` + "`bffs export --serve`" + ` on the same local network: the address is checked to be
+on-link before anything is dialled (--allow-routed for multi-VLAN offices),
+the pairing code shown over there is asked for once the connection is up
+(typed with echo off, or taken from $BFFS_TRANSFER_CODE, which is cleared
+right after reading — there is no --code flag), and the manifest is reviewed
+and confirmed before a single payload byte is requested. Everything is
+printed on stderr. A name (mac-a.local, mac-a) is resolved once; any host on
+the network can answer such a name, so the IPv4 address shown on the other
+machine is the safe form. A wrong code exits 2.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := mustConfigDir(cmd)
@@ -77,7 +98,7 @@ retention window so they are not swept before they can be resumed.`,
 			return fmt.Errorf("%s not available yet: import lands sessions by identity or --as-is for now", strings.Join(later, ", "))
 		}
 		if importFrom == "" {
-			return errors.New(`--from is required: a .bffs file, or "-" for stdin`)
+			return errors.New(`--from is required: a host[:port] shown by bffs export --serve, a .bffs file, or "-" for stdin`)
 		}
 		maxSize, err := parseSize(importMaxSize)
 		if err != nil {
@@ -100,10 +121,13 @@ retention window so they are not swept before they can be resumed.`,
 			CleanStaging:   importCleanStaging,
 			DryRun:         importDryRun,
 			Yes:            importYes,
+			AllowRouted:    importAllowRouted,
+			AllowLoopback:  importAllowLoopback,
 			ClaudeDir:      importClaudeDir,
 			Cwd:            cwd,
 			Now:            time.Now(),
 		}
+		req.Host, req.User = localIdentity()
 		pr := newPrompter(cmd.InOrStdin(), cmd.OutOrStdout())
 		return runImport(cmd, dir, pr, req, isTTY())
 	},
@@ -111,7 +135,7 @@ retention window so they are not swept before they can be resumed.`,
 
 func init() {
 	f := importCmd.Flags()
-	f.StringVar(&importFrom, "from", "", `a .bffs file, or "-" for stdin (a host, next milestone)`)
+	f.StringVar(&importFrom, "from", "", `a host[:port] shown by bffs export --serve, a .bffs file, or "-" for stdin`)
 	f.StringVar(&importAccount, "account", "", "target account (default: the account claude would use here, else the active one; \"home\" = ~/.claude)")
 	f.BoolVar(&importAsIs, "as-is", false, "place every session under its original slug, flagged pending, without looking for its directory here")
 	f.StringVar(&importOnConflict, "on-conflict", string(porter.ConflictSkip), `an existing session with the same id: "skip" or "overwrite" (set aside, never deleted)`)
@@ -128,6 +152,9 @@ func init() {
 	f.BoolVar(&importCarryTrust, "carry-trust", false, "also copy the source's trust answers for mapped directories (next milestones)")
 	f.BoolVar(&importSetLastSession, "set-last-session", false, "point the account's lastSessionId at the newest imported session (next milestones)")
 	f.BoolVar(&importForceStamp, "force-stamp", false, "stamp a transcript whose last line is incomplete (next milestones)")
+	f.BoolVar(&importAllowRouted, "allow-routed", false, "with --from host, pair with a private address that is not on-link (multi-VLAN offices); prints a warning")
+	f.BoolVar(&importAllowLoopback, "allow-loopback", false, "with --from host, allow a loopback address (tests and same-machine trials)")
+	_ = f.MarkHidden("allow-loopback")
 	f.StringVar(&importClaudeDir, "claude-dir", "", "override the shared claude config dir (testing)")
 	_ = f.MarkHidden("claude-dir")
 	rootCmd.AddCommand(importCmd)
@@ -174,6 +201,12 @@ type importRequest struct {
 	Cwd            string
 	Now            time.Time
 	Stdin          io.Reader // the bundle for --from -; nil = cmd.InOrStdin()
+
+	// --from host (plan §8): what counts as the local network, and how
+	// this machine names itself in accept.
+	AllowRouted   bool
+	AllowLoopback bool
+	Host, User    string
 }
 
 // fromKind is the shape of a --from value.
@@ -187,8 +220,8 @@ const (
 
 // parseFrom classifies --from (plan §5.2): "-" is stdin; an existing
 // file, or any name ending in .bffs, is a file (a .bffs name that does not
-// exist is an error — never a host lookup); anything else is a host, which
-// this milestone cannot receive from yet. A file target comes back
+// exist is an error — never a host lookup); anything else is a host[:port]
+// that resolveHost turns into a checked literal. A file target comes back
 // normalised.
 func parseFrom(s string) (fromKind, string, error) {
 	s = strings.TrimSpace(s)
@@ -359,9 +392,6 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 	if err != nil {
 		return err
 	}
-	if kind == fromHost {
-		return exitWith(1, errors.New("receiving over the network arrives in the next milestone; copy the .bffs file instead"))
-	}
 	switch porter.ConflictPolicy(req.OnConflict) {
 	case "", porter.ConflictSkip, porter.ConflictOverwrite:
 	default:
@@ -394,6 +424,12 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 		limits.MaxTotalBytes = req.MaxSize
 	}
 
+	if kind == fromHost {
+		// Same reader, prompts on stderr: stdout stays clean on the host
+		// path, the way it does for a bundle on stdout.
+		pr = &prompter{r: pr.r, out: errOut}
+		out = errOut
+	}
 	if req.CleanStaging {
 		ok, err := cleanStaging(dir, pr, out, req.Yes, tty)
 		if err != nil {
@@ -402,6 +438,9 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 		if !ok {
 			return nil
 		}
+	}
+	if kind == fromHost {
+		return runImportFromHost(cmd, dir, env, dest, limits, pr, req, tty, target)
 	}
 
 	var r io.Reader
@@ -899,4 +938,363 @@ func memoryFileCounts(r importReceipt) map[string]int {
 		i++
 	}
 	return out
+}
+
+// ---- --from host: receive from bffs export --serve on the LAN (plan §8) ----
+
+// envTransferCode carries the pairing code for scripted runs; it is read
+// once and cleared immediately (plan §5.2: there is no --code flag, argv
+// leaks via ps). The transfer package owns no environment variable, so the
+// name lives here.
+const envTransferCode = "BFFS_TRANSFER_CODE"
+
+// Injection seams for the loopback end-to-end test and the resolver
+// table: how a fetch dials (nil is a net.Dialer inside transfer), which
+// local addresses it sees, and how it resolves a name.
+var (
+	fetchDial   func(ctx context.Context, network, addr string) (net.Conn, error)
+	fetchLocal  = transfer.LANAddrs
+	fetchLookup = func(ctx context.Context, host string) ([]netip.Addr, error) {
+		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	}
+)
+
+// resolveHost turns a --from host[:port] into the literal to dial (plan
+// §8.6): an address with an optional port ("192.168.1.20", "[fe80::1%en0]",
+// "10.0.0.5:7345"), or a name resolved once through lookup. Every address
+// must lie on a local network of this machine (transfer.IsLAN against
+// local) before anything is dialled, or the refusal names the fix. A
+// .local or single-label name warns that any host on the network can
+// answer it. Nothing is dialled here.
+func resolveHost(ctx context.Context, s string, local []transfer.LinkAddr, lan transfer.LANOptions, lookup func(context.Context, string) ([]netip.Addr, error), warn io.Writer) (netip.AddrPort, error) {
+	host, port, err := splitFromHost(s)
+	if err != nil {
+		return netip.AddrPort{}, err
+	}
+	refuse := func(ip netip.Addr) error {
+		return fmt.Errorf("refusing to pair with %s: %w. Use bffs export --out file.bffs, or bffs export --out - | ssh host bffs import --from -", ip.WithZone(""), transfer.ErrNotLAN)
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		ip = ip.Unmap()
+		if ip.Is6() && ip.IsLinkLocalUnicast() && ip.Zone() == "" {
+			return netip.AddrPort{}, fmt.Errorf("link-local address %s needs an interface: [%s%%<iface>], e.g. [%s%%en0]", ip, ip, ip)
+		}
+		if !transfer.IsLAN(ip, local, lan) {
+			return netip.AddrPort{}, refuse(ip)
+		}
+		return netip.AddrPortFrom(ip, port), nil
+	}
+	if !validHostname(host) {
+		return netip.AddrPort{}, fmt.Errorf("invalid host %q in --from: use the address shown on the other machine", host)
+	}
+	if strings.HasSuffix(strings.ToLower(host), ".local") || !strings.Contains(host, ".") {
+		fmt.Fprintln(warn, "warning: any host on this network can answer that name — the IPv4 address shown on the other machine is the safe form")
+	}
+	addrs, err := lookup(ctx, host)
+	if err != nil || len(addrs) == 0 {
+		return netip.AddrPort{}, fmt.Errorf("could not resolve %q: use the IP address shown on the other machine", host)
+	}
+	var pick netip.Addr
+	for _, a := range addrs {
+		a = a.Unmap()
+		if !transfer.IsLAN(a, local, lan) {
+			return netip.AddrPort{}, refuse(a)
+		}
+		if !pick.IsValid() || (a.Is4() && !pick.Is4()) {
+			pick = a
+		}
+	}
+	return netip.AddrPortFrom(pick, port), nil
+}
+
+// splitFromHost separates a --from target into host and port: "[v6]",
+// "[v6]:p", "v6" (two or more colons), "v4", "v4:p", "name", "name:p".
+// The port defaults to the serve default.
+func splitFromHost(s string) (string, uint16, error) {
+	s = strings.TrimSpace(s)
+	host, portS := s, ""
+	switch {
+	case strings.HasPrefix(s, "["):
+		end := strings.IndexByte(s, ']')
+		if end < 0 {
+			return "", 0, fmt.Errorf("invalid --from %q: missing ]", s)
+		}
+		host = s[1:end]
+		rest := s[end+1:]
+		switch {
+		case rest == "":
+		case strings.HasPrefix(rest, ":"):
+			portS = rest[1:]
+		default:
+			return "", 0, fmt.Errorf("invalid --from %q: use [address]:port", s)
+		}
+	case strings.Count(s, ":") >= 2:
+		// A bare IPv6 literal; a port needs brackets.
+	case strings.Contains(s, ":"):
+		host, portS, _ = strings.Cut(s, ":")
+	}
+	if host == "" {
+		return "", 0, fmt.Errorf("invalid --from %q: no host", s)
+	}
+	port := uint16(servePortDefault)
+	if portS != "" {
+		n, err := strconv.Atoi(portS)
+		if err != nil || n < 1 || n > 65535 {
+			return "", 0, fmt.Errorf("invalid port %q in --from %q: use 1-65535", portS, s)
+		}
+		port = uint16(n)
+	}
+	return host, port, nil
+}
+
+// validHostname accepts DNS-shaped names: letters, digits, "-" and "."
+// labels, no empty label, at most 253 bytes.
+func validHostname(h string) bool {
+	if h == "" || len(h) > 253 || strings.HasPrefix(h, ".") || strings.HasSuffix(h, "-") {
+		return false
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(h, "."), ".") {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// runImportFromHost is the B side of plan §8.5: the target is resolved
+// and on-link-checked, the connection comes up, the code is asked for,
+// the manifest is reviewed and confirmed exactly like a file's, and the
+// body streams into porter.Import. Everything human goes to stderr. Exit
+// codes (§5.9): 2 on a wrong code, 130 on Ctrl-C, 1 otherwise.
+func runImportFromHost(cmd *cobra.Command, dir string, env *catalogEnv, dest importDest, limits bundle.Limits, pr *prompter, req importRequest, tty bool, target string) error {
+	errOut := cmd.ErrOrStderr()
+	lan := transfer.LANOptions{AllowLoopback: req.AllowLoopback, AllowRouted: req.AllowRouted}
+	local, err := fetchLocal(lan)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(cmdContext(cmd), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// The first Ctrl-C cuts the connection and unwinds; restoring the
+	// default behaviour then lets a second one end the process even while
+	// the code prompt or a commit is blocking (commits are journalled).
+	context.AfterFunc(ctx, stop)
+	addr, err := resolveHost(ctx, target, local, lan, fetchLookup, errOut)
+	if err != nil {
+		return exitWith(1, err)
+	}
+	if req.AllowRouted {
+		fmt.Fprintln(errOut, "warning: --allow-routed: the on-link check is off; only the pairing code protects this transfer")
+	}
+
+	fp := &fetchPrinter{w: errOut, peer: fromTarget(addr.Addr(), addr.Port()), bar: newProgressBar(errOut, "receiving", isTerminalWriter(errOut))}
+	fp.bar.verified = true
+	var (
+		manifest *bundle.Manifest
+		digest   string
+		rep      porter.Report
+		sinkRan  bool
+		sinkErr  error
+		elapsed  time.Duration
+	)
+	confirm := func(raw []byte) (bool, error) {
+		var m bundle.Manifest
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return false, fmt.Errorf("manifest from %s: %w", fp.peer, err)
+		}
+		if err := m.Validate(limits); err != nil {
+			return false, fmt.Errorf("bundle: %w", err)
+		}
+		sum := sha256.Sum256(raw)
+		digest = hex.EncodeToString(sum[:])
+		manifest = &m
+		days, source := transcripts.CleanupPeriodDays(dest.root.ConfigDir)
+		s := newImportSummary(&m, dest, req)
+		s.Limit = limits.MaxTotalBytes
+		s.Retention = retentionLabel(dest.root.ConfigDir, days, source)
+		renderImportSummary(errOut, s)
+		if req.DryRun {
+			fmt.Fprintln(errOut, "dry run: nothing is written")
+			return true, nil
+		}
+		ok, err := confirmOrAbort(pr, fmt.Sprintf("Import into %s? [y/N] ", short(dest.root.ConfigDir)), req.Yes, tty)
+		if err != nil {
+			return false, fmt.Errorf("refusing to import: %w", err)
+		}
+		return ok, nil
+	}
+	sink := func(ctx context.Context, raw []byte, body io.Reader) (transfer.Done, error) {
+		sinkRan = true
+		live, err := transcripts.Live(ctx, env.configDirs())
+		if err != nil {
+			fp.println("warning: liveness unavailable: " + err.Error())
+		}
+		opts := porter.ImportOptions{
+			Dest:                 dest.root,
+			Account:              dest.account,
+			OnConflict:           porter.ConflictPolicy(req.OnConflict),
+			Memory:               rehome.MemoryMode(req.Memory),
+			TrustMemory:          req.TrustMemory,
+			AsIs:                 req.AsIs,
+			PreserveMtimes:       req.PreserveMtimes,
+			Force:                req.Force,
+			Limits:               limits,
+			ExpectManifestSHA256: digest,
+			Now:                  req.Now,
+			Progress:             fp.progress,
+			Live:                 live,
+			LaunchEnv:            os.Environ(),
+			StreamMode:           true,
+		}
+		start := time.Now()
+		rep, sinkErr = porter.Import(ctx, dir, bufio.NewReaderSize(body, 256<<10), opts)
+		elapsed = time.Since(start)
+		d := transfer.Done{Entries: manifest.Totals.Files, Bytes: rep.Bytes}
+		if sinkErr != nil {
+			d.Reason = sinkErr.Error()
+		}
+		return d, sinkErr
+	}
+	_, err = transfer.Fetch(ctx, transfer.FetchOptions{
+		Addr:    addr,
+		Code:    func() (transfer.Code, error) { return readPairingCode(pr, tty) },
+		Confirm: confirm,
+		Sink:    sink,
+		Events:  fp.event,
+		LAN:     lan,
+		Dial:    fetchDial,
+		DryRun:  req.DryRun,
+		Version: Version,
+		Host:    req.Host,
+		User:    req.User,
+		Local:   local,
+	})
+	fp.interrupt()
+	for _, w := range rep.Warnings {
+		fmt.Fprintln(errOut, "warning:", transcripts.Sanitize(w))
+	}
+	switch {
+	case err == nil && req.DryRun:
+		fmt.Fprintf(errOut, "Dry run — nothing requested from %s; it keeps serving.\n", fp.peer)
+		return nil
+	case err == nil:
+		fp.end()
+		renderImportReceipt(errOut, newImportReceipt(dir, manifest, rep, false, elapsed))
+		return nil
+	case errors.Is(err, transfer.ErrBadCode):
+		return exitWith(2, err)
+	case ctx.Err() != nil || errors.Is(err, context.Canceled):
+		reportPartialImport(errOut, dir, manifest, rep, elapsed)
+		return exitWith(130, errors.New("interrupted; the connection was closed"))
+	case sinkErr != nil:
+		reportPartialImport(errOut, dir, manifest, rep, elapsed)
+		return exitWith(1, err)
+	case sinkRan:
+		// Everything landed and verified; only the completion report to
+		// the other machine failed (it went away first). The import is
+		// whole, so the receipt stands and the run succeeds — the other
+		// side is the one that shows a failure.
+		fp.end()
+		renderImportReceipt(errOut, newImportReceipt(dir, manifest, rep, false, elapsed))
+		fmt.Fprintf(errOut, "warning: %v — the import itself is complete; the other machine may show it as unfinished\n", err)
+		return nil
+	default:
+		return exitWith(1, err)
+	}
+}
+
+// reportPartialImport prints what landed before a failure and where the
+// staging directory was kept, the way the file path does.
+func reportPartialImport(w io.Writer, dir string, m *bundle.Manifest, rep porter.Report, elapsed time.Duration) {
+	if m != nil && len(rep.Imported)+len(rep.Pending)+len(rep.MemoryDirs) > 0 {
+		fmt.Fprintln(w, "import stopped; what landed before the failure:")
+		renderImportReceipt(w, newImportReceipt(dir, m, rep, false, elapsed))
+	}
+	if rep.StagingDir != "" {
+		fmt.Fprintf(w, "staging kept at %s (inspect it, then rerun with --clean-staging)\n", rep.StagingDir)
+	}
+}
+
+// readPairingCode takes the code from $BFFS_TRANSFER_CODE — cleared the
+// moment it is read, so no child inherits it — else from the terminal with
+// echo off, else (piped input) from one line of the shared prompter, so a
+// later confirmation still sees the rest of the input. transfer.Fetch
+// calls it once the connection is up, so it follows the "connected to …"
+// line, which it ends. The code is never echoed.
+func readPairingCode(pr *prompter, tty bool) (transfer.Code, error) {
+	if v, ok := os.LookupEnv(envTransferCode); ok {
+		_ = os.Unsetenv(envTransferCode)
+		fmt.Fprintln(pr.out, "(from $"+envTransferCode+")")
+		return transfer.ParseCode(v)
+	}
+	if tty {
+		s, err := promptSecret(pr.out, "")
+		if err != nil {
+			return transfer.Code{}, err
+		}
+		return transfer.ParseCode(s)
+	}
+	s, err := pr.line("")
+	if err != nil {
+		return transfer.Code{}, err
+	}
+	if strings.TrimSpace(s) == "" {
+		// pr.line already ended the prompt line on exhausted input.
+		return transfer.Code{}, errors.New("no pairing code given: type it on a terminal, or set $" + envTransferCode)
+	}
+	fmt.Fprintln(pr.out)
+	return transfer.ParseCode(s)
+}
+
+// fetchPrinter renders the B-side lines of plan §5.10 from transfer
+// events: the connect line that ends in the code prompt, the "code
+// accepted" line, and the receiving bar. Failures are not printed here —
+// Fetch returns them and the command reports them once.
+type fetchPrinter struct {
+	mu   sync.Mutex
+	w    io.Writer
+	peer string
+	bar  *progressBar
+}
+
+func (p *fetchPrinter) event(ev transfer.Event) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch ev.Kind {
+	case "connect":
+		fmt.Fprintf(p.w, "connected to %s (TLS 1.3, peer key %s) — it asks for the pairing code: ", p.peer, keyFromText(ev.Text, "peer key "))
+	case "code-ok":
+		fmt.Fprintln(p.w, "code accepted — the other machine proved it knows the code too")
+	}
+}
+
+func (p *fetchPrinter) progress(pr bundle.Progress) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bar.update(pr)
+}
+
+func (p *fetchPrinter) println(s string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bar.interrupt()
+	fmt.Fprintln(p.w, s)
+}
+
+func (p *fetchPrinter) interrupt() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bar.interrupt()
+}
+
+func (p *fetchPrinter) end() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bar.end()
 }

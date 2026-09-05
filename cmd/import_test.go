@@ -1,8 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io/fs"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +18,7 @@ import (
 	"github.com/jratienza65/bffs/internal/porter"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
+	"github.com/jratienza65/bffs/internal/transfer"
 )
 
 func TestParseFrom(t *testing.T) {
@@ -406,8 +411,9 @@ func TestImportConfirmFlow(t *testing.T) {
 	}
 }
 
-// --from - needs -y (stdin carries the bundle); a host is refused in this
-// milestone; policy values are validated before anything is read.
+// --from - needs -y (stdin carries the bundle); a host off the local
+// network is refused before any dial; policy values are validated before
+// anything is read.
 func TestImportRequestValidation(t *testing.T) {
 	b := newImportMachine(t)
 	c, pr, _, _ := newSplitCmd("")
@@ -416,10 +422,18 @@ func TestImportRequestValidation(t *testing.T) {
 	if err := runImport(c, b.cfgDir, pr, req, true); err == nil || !strings.Contains(err.Error(), "pass -y") {
 		t.Errorf("stdin without -y: %v", err)
 	}
-	err := runImport(c, b.cfgDir, pr, b.request("mac-b"), true)
-	if err == nil || !strings.Contains(err.Error(), "next milestone") || exitCode(err) != 1 {
+	// A host that is not on a local network is refused before anything is
+	// dialled or resolved (exit 1); the summary path never starts.
+	lanTestSeams(t)
+	c, pr, _, errOut := newImportCmd("")
+	err := runImport(c, b.cfgDir, pr, b.request("203.0.113.5"), true)
+	if err == nil || !strings.Contains(err.Error(), "refusing to pair with 203.0.113.5: not on a local network of this machine (--allow-routed for multi-VLAN offices). Use bffs export --out file.bffs, or bffs export --out - | ssh host bffs import --from -") || exitCode(err) != 1 {
 		t.Errorf("host: %v (exit %d)", err, exitCode(err))
 	}
+	if strings.Contains(errOut.String(), "connected to") {
+		t.Errorf("a refused host was dialled:\n%s", errOut.String())
+	}
+	c, pr, _, _ = newSplitCmd("")
 	req = b.request("-")
 	req.OnConflict = "fork"
 	if err := runImport(c, b.cfgDir, pr, req, true); err == nil || !strings.Contains(err.Error(), `invalid --on-conflict "fork"`) {
@@ -540,5 +554,211 @@ func TestImportAsIs(t *testing.T) {
 	recs, _ := imports.Load(b.cfgDir)
 	if len(recs) != 1 || len(recs[0].Sessions) != 1 || recs[0].Sessions[0].Status != imports.StatusPending {
 		t.Errorf("record = %+v", recs)
+	}
+}
+
+// ---- --from host (M5) ----
+
+// testLAN is a synthetic address set for the on-link checks: one IPv4
+// network on en0 and its link-local IPv6 prefix.
+func testLAN() []transfer.LinkAddr {
+	return []transfer.LinkAddr{
+		{Addr: netip.MustParseAddr("192.168.1.31"), Prefix: netip.MustParsePrefix("192.168.1.0/24"), Iface: "en0"},
+		{Addr: netip.MustParseAddr("fd00::31"), Prefix: netip.MustParsePrefix("fd00::/64"), Iface: "en0"},
+		{Addr: netip.MustParseAddr("fe80::31").WithZone("en0"), Prefix: netip.MustParsePrefix("fe80::/64"), Iface: "en0"},
+	}
+}
+
+// lanTestSeams gives the fetch side the synthetic LAN and a resolver that
+// must never be reached; the real ones come back at cleanup.
+func lanTestSeams(t *testing.T) {
+	t.Helper()
+	oldLocal, oldLookup, oldDial := fetchLocal, fetchLookup, fetchDial
+	fetchLocal = func(transfer.LANOptions) ([]transfer.LinkAddr, error) { return testLAN(), nil }
+	fetchLookup = func(_ context.Context, host string) ([]netip.Addr, error) {
+		return nil, fmt.Errorf("lookup of %q reached the network", host)
+	}
+	fetchDial = func(_ context.Context, _, addr string) (net.Conn, error) {
+		return nil, fmt.Errorf("dial of %s reached the network", addr)
+	}
+	t.Cleanup(func() { fetchLocal, fetchLookup, fetchDial = oldLocal, oldLookup, oldDial })
+}
+
+func TestSplitFromHost(t *testing.T) {
+	cases := []struct {
+		in, host string
+		port     uint16
+		wantErr  string
+	}{
+		{"192.168.1.20", "192.168.1.20", 7345, ""},
+		{"192.168.1.20:8000", "192.168.1.20", 8000, ""},
+		{"[fe80::1%en0]:7345", "fe80::1%en0", 7345, ""},
+		{"[fe80::1]", "fe80::1", 7345, ""},
+		{"fe80::1%en0", "fe80::1%en0", 7345, ""},
+		{"mac-a.local", "mac-a.local", 7345, ""},
+		{"mac-a:9", "mac-a", 9, ""},
+		{"[fe80::1", "", 0, "missing ]"},
+		{"[fe80::1]x", "", 0, "use [address]:port"},
+		{"mac-a:0", "", 0, `invalid port "0"`},
+		{"mac-a:70000", "", 0, `invalid port "70000"`},
+		{"mac-a:x", "", 0, `invalid port "x"`},
+		{":7345", "", 0, "no host"},
+	}
+	for _, tc := range cases {
+		host, port, err := splitFromHost(tc.in)
+		if tc.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("%q: err = %v, want %q", tc.in, err, tc.wantErr)
+			}
+			continue
+		}
+		if err != nil || host != tc.host || port != tc.port {
+			t.Errorf("%q = %q, %d, %v; want %q, %d", tc.in, host, port, err, tc.host, tc.port)
+		}
+	}
+}
+
+// resolveHost: literals go through the on-link check without any lookup,
+// names are resolved once and every address must pass, .local and
+// single-label names warn, and nothing is dialled here.
+func TestResolveHost(t *testing.T) {
+	refusal := "not on a local network of this machine (--allow-routed for multi-VLAN offices). Use bffs export --out file.bffs, or bffs export --out - | ssh host bffs import --from -"
+	cases := []struct {
+		in       string
+		lookup   map[string][]netip.Addr
+		routed   bool
+		want     string
+		wantErr  string
+		warn     bool
+		noLookup bool
+	}{
+		{in: "192.168.1.20", want: "192.168.1.20:7345", noLookup: true},
+		{in: "192.168.1.20:8000", want: "192.168.1.20:8000", noLookup: true},
+		{in: "[fe80::1%en0]:7345", want: "[fe80::1%en0]:7345", noLookup: true},
+		{in: "[fe80::1%en1]", wantErr: "refusing to pair with fe80::1: " + refusal, noLookup: true},
+		{in: "[fe80::1]", wantErr: "link-local address fe80::1 needs an interface", noLookup: true},
+		{in: "203.0.113.5", wantErr: "refusing to pair with 203.0.113.5: " + refusal, noLookup: true},
+		{in: "10.8.0.5", wantErr: "refusing to pair with 10.8.0.5: " + refusal, noLookup: true},
+		{in: "10.8.0.5", routed: true, want: "10.8.0.5:7345", noLookup: true},
+		{in: "100.64.1.1", routed: true, wantErr: "refusing to pair with 100.64.1.1: " + refusal, noLookup: true},
+		{in: "::ffff:192.168.1.20", want: "192.168.1.20:7345", noLookup: true},
+		{in: "mac-a.local", lookup: map[string][]netip.Addr{"mac-a.local": {netip.MustParseAddr("192.168.1.20")}}, want: "192.168.1.20:7345", warn: true},
+		{in: "mac-a", lookup: map[string][]netip.Addr{"mac-a": {netip.MustParseAddr("192.168.1.20")}}, want: "192.168.1.20:7345", warn: true},
+		{in: "mac-a.example.com:8000", lookup: map[string][]netip.Addr{"mac-a.example.com": {netip.MustParseAddr("fd00::20"), netip.MustParseAddr("192.168.1.20")}}, want: "192.168.1.20:8000"},
+		{in: "mac-a.example.com", lookup: map[string][]netip.Addr{"mac-a.example.com": {netip.MustParseAddr("192.168.1.20"), netip.MustParseAddr("2001:db8::1")}}, wantErr: "refusing to pair with 2001:db8::1: " + refusal},
+		{in: "vpn.example.com", lookup: map[string][]netip.Addr{"vpn.example.com": {netip.MustParseAddr("10.8.0.5")}}, wantErr: "refusing to pair with 10.8.0.5: " + refusal},
+		{in: "nowhere.example.com", wantErr: `could not resolve "nowhere.example.com": use the IP address shown on the other machine`},
+		{in: "bad host!", wantErr: `invalid host "bad host!"`, noLookup: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			looked := 0
+			lookup := func(_ context.Context, host string) ([]netip.Addr, error) {
+				looked++
+				if a, ok := tc.lookup[host]; ok {
+					return a, nil
+				}
+				return nil, errors.New("no such host")
+			}
+			var warn strings.Builder
+			got, err := resolveHost(context.Background(), tc.in, testLAN(), transfer.LANOptions{AllowRouted: tc.routed}, lookup, &warn)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				if strings.Contains(tc.wantErr, "refusing") && !errors.Is(err, transfer.ErrNotLAN) {
+					t.Errorf("refusal does not wrap ErrNotLAN: %v", err)
+				}
+			} else if err != nil || got.String() != tc.want {
+				t.Fatalf("resolveHost = %s, %v; want %s", got, err, tc.want)
+			}
+			if tc.noLookup && looked != 0 {
+				t.Errorf("a literal was looked up")
+			}
+			if tc.warn != strings.Contains(warn.String(), "warning: any host on this network can answer that name — the IPv4 address shown on the other machine is the safe form") {
+				t.Errorf("warning = %q, want present=%v", warn.String(), tc.warn)
+			}
+		})
+	}
+}
+
+// The B-side printer: the connect line ends in the code prompt and names
+// the peer key; code-ok is one line; nothing else is printed (failures
+// come back as errors and are reported once).
+func TestFetchPrinterLines(t *testing.T) {
+	var sb strings.Builder
+	p := &fetchPrinter{w: &sb, peer: "192.168.1.20", bar: newProgressBar(&sb, "receiving", false)}
+	p.event(transfer.Event{Kind: "connect", Peer: "192.168.1.20:7345", Text: "connected to 192.168.1.20:7345 (TLS 1.3, peer key 3f9a1c2e)"})
+	p.event(transfer.Event{Kind: "code-ok", Peer: "192.168.1.20:7345", Text: "mac-a accepted the code (bffs 0.3.0, user jonas, account aviate, compression 1)"})
+	p.event(transfer.Event{Kind: "bad-code", Peer: "192.168.1.20:7345", Text: "the other machine rejected the code (2 attempts left there). Run bffs import again."})
+	p.event(transfer.Event{Kind: "error", Peer: "192.168.1.20:7345", Text: "import failed: " + osc52})
+	want := "connected to 192.168.1.20 (TLS 1.3, peer key 3f9a1c2e) — it asks for the pairing code: code accepted — the other machine proved it knows the code too\n"
+	if sb.String() != want {
+		t.Errorf("printer output = %q, want %q", sb.String(), want)
+	}
+}
+
+// The code comes from $BFFS_TRANSFER_CODE when set, folded like typed
+// input, and the variable is cleared before anything else runs. The
+// output never shows it.
+func TestReadPairingCodeFromEnv(t *testing.T) {
+	t.Setenv(envTransferCode, " 7k3q-m9xd ")
+	var sb strings.Builder
+	pr := newPrompter(strings.NewReader("unread\n"), &sb)
+	code, err := readPairingCode(pr, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code.Display() != "7K3Q-M9XD" {
+		t.Errorf("code = %q", code.Display())
+	}
+	if v, ok := os.LookupEnv(envTransferCode); ok {
+		t.Errorf("%s still set to %q after reading", envTransferCode, v)
+	}
+	if !strings.Contains(sb.String(), "(from $BFFS_TRANSFER_CODE)") || strings.Contains(sb.String(), "7K3Q") || strings.Contains(sb.String(), "7k3q") {
+		t.Errorf("output = %q", sb.String())
+	}
+	if rest, _ := pr.line(""); rest != "unread" {
+		t.Errorf("the environment path consumed input: %q", rest)
+	}
+	t.Setenv(envTransferCode, "nope")
+	if _, err := readPairingCode(pr, true); !errors.Is(err, transfer.ErrInvalidCode) {
+		t.Errorf("invalid env code: err = %v", err)
+	}
+	if _, ok := os.LookupEnv(envTransferCode); ok {
+		t.Errorf("%s still set after an invalid read", envTransferCode)
+	}
+}
+
+// Without the variable and without a terminal the code is one line of the
+// shared input (a script piping it in), never echoed, and the rest of the
+// input stays for the confirmation; exhausted input is a clear refusal.
+func TestReadPairingCodePiped(t *testing.T) {
+	t.Setenv(envTransferCode, "") // restores whatever the caller had
+	os.Unsetenv(envTransferCode)
+	var sb strings.Builder
+	pr := newPrompter(strings.NewReader("7k3q m9xd\ny\n"), &sb)
+	code, err := readPairingCode(pr, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code.Display() != "7K3Q-M9XD" {
+		t.Errorf("code = %q", code.Display())
+	}
+	if sb.String() != "\n" || strings.Contains(sb.String(), "7") {
+		t.Errorf("output = %q, want just the line end", sb.String())
+	}
+	if rest, _ := pr.line(""); rest != "y" {
+		t.Errorf("the confirmation's answer was consumed: %q", rest)
+	}
+
+	sb.Reset()
+	pr = newPrompter(strings.NewReader(""), &sb)
+	_, err = readPairingCode(pr, false)
+	if err == nil || err.Error() != "no pairing code given: type it on a terminal, or set $BFFS_TRANSFER_CODE" {
+		t.Errorf("exhausted input: err = %v", err)
+	}
+	if sb.String() != "\n" {
+		t.Errorf("the prompt line was not ended before the error: %q", sb.String())
 	}
 }

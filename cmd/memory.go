@@ -25,6 +25,7 @@ var (
 	memoryAllProjects bool
 	memoryJSON        bool
 	memoryClaudeDir   string
+	memoryPlain       bool
 )
 
 // memoryIndexCap bounds how much of MEMORY.md is parsed for its index
@@ -39,13 +40,20 @@ config dir it runs with — a MEMORY.md index plus topic files — keyed by the
 project's git root. Under partial isolation every bffs account reads the same
 directory; a full-isolation account has its own.
 
-` + "`bffs memory`" + ` lists the memory of the current project in every root. ` + "`show`" + `
+` + "`bffs memory`" + ` on a terminal opens the interactive browser on the memories
+tab (--plain prints the table instead); elsewhere it lists the memory of the
+current project in every root. ` + "`show`" + `
 prints the index and the file table, and which accounts see the directory;
 ` + "`scan-paths`" + ` lists every absolute path and @-reference inside it — the lines
 to review after a rehome, and the references that can raise Claude's
 "external CLAUDE.md imports" dialog.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if !memoryPlain && tuiSupported() {
+			if err := runTUI(cmdContext(cmd), mustConfigDir(cmd), memoryClaudeDir, "memories"); !errors.Is(err, errTUIDisabled) {
+				return err
+			}
+		}
 		return runMemoryList(cmd)
 	},
 }
@@ -91,6 +99,7 @@ func init() {
 			f.BoolVar(&memoryJSON, "json", false, "emit a JSON array instead of the table")
 		}
 	}
+	memoryCmd.Flags().BoolVar(&memoryPlain, "plain", false, "print the table instead of opening the interactive browser")
 	memoryCmd.AddCommand(memoryListCmd, memoryShowCmd, memoryScanPathsCmd)
 	rootCmd.AddCommand(memoryCmd)
 }

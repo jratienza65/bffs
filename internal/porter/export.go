@@ -142,7 +142,14 @@ func BuildManifest(ctx context.Context, sel Selection, o ExportOptions) (*bundle
 			b.src.Close()
 			return nil, nil, nil, err
 		}
-		e, ok, err := b.memoryEntry(mem)
+		var keep map[string]bool
+		if names, ok := sel.MemoryFiles[mem.Dir]; ok {
+			keep = make(map[string]bool, len(names))
+			for _, n := range names {
+				keep[n] = true
+			}
+		}
+		e, ok, err := b.memoryEntry(mem, keep)
 		if err != nil {
 			b.src.Close()
 			return nil, nil, nil, err
@@ -535,7 +542,9 @@ func (b *builder) historyMtime() time.Time {
 // memoryEntry builds the manifest entry of mem: MEMORY.md, top-level
 // topic files and logs/** — never proposals/ or index caches (the walk
 // transcripts uses, applied through the bundle grammar).
-func (b *builder) memoryEntry(mem transcripts.Memory) (bundle.Entry, bool, error) {
+// memoryEntry lists a memory directory; keep, when non-nil, narrows the
+// files to the named ones (slash-relative to the directory).
+func (b *builder) memoryEntry(mem transcripts.Memory, keep map[string]bool) (bundle.Entry, bool, error) {
 	if mem.Slug == "" || mem.Dir == "" {
 		b.warn("skipped memory %q: incomplete listing", mem.Dir)
 		return bundle.Entry{}, false, nil
@@ -565,6 +574,18 @@ func (b *builder) memoryEntry(mem transcripts.Memory) (bundle.Entry, bool, error
 	}
 	if err := b.walkTree(&e.Files, prefix, mem.Dir, skip); err != nil {
 		return bundle.Entry{}, false, err
+	}
+	if keep != nil {
+		kept := e.Files[:0]
+		for _, f := range e.Files {
+			if keep[strings.TrimPrefix(f.Path, prefix+"/")] {
+				kept = append(kept, f)
+			}
+		}
+		e.Files = kept
+		if len(e.Files) == 0 {
+			return bundle.Entry{}, false, nil // deselected entirely: not a warning
+		}
 	}
 	if len(e.Files) == 0 {
 		b.warn("skipped memory %s: no exportable file", mem.Dir)

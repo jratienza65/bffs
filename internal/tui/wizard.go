@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
+
+	"charm.land/lipgloss/v2"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -43,17 +47,232 @@ type wizardScreen struct {
 	step       wizardStep
 	cursor     int
 	parts      porter.Parts
-	memory     bool
 	live       bool
 	input      textinput.Model
 	note       string
 	copied     bool
 	width      int
+	height     int
+
+	// The checklist of the "what" step: every session of the project
+	// and every file of its memory directory, checked unless the panel
+	// had marked a subset.
+	sessions []checkItem
+	memFiles []checkItem
+	rows     []checkRow // the rendered rows, rebuilt on each change
+	offset   int        // scroll offset of the checklist
 }
+
+// checkItem is one checkable thing: a session or a memory file.
+type checkItem struct {
+	id    string // session id, or the memory file's slash-relative name
+	label string
+	meta  string
+	on    bool
+}
+
+// checkRow is one line of the checklist: a section header (no cursor
+// stops there), a checkable item, a part toggle, or the continue row.
+type checkRow struct {
+	header string
+	item   *checkItem
+	on     *bool  // a part or option toggle
+	label  string // toggle label / continue
+	desc   string
+	cont   bool
+}
+
+func (r checkRow) selectable() bool { return r.header == "" }
 
 func newWizardScreen(svc *services, tgt actionTarget, root transcripts.Root, account string, hasProject bool) *wizardScreen {
 	in := newInput("file: ", "path of a .bffs file written by bffs export")
-	return &wizardScreen{svc: svc, tgt: tgt, root: root, account: account, hasProject: hasProject, parts: porter.DefaultParts, memory: true, live: true, input: in}
+	w := &wizardScreen{svc: svc, tgt: tgt, root: root, account: account, hasProject: hasProject, parts: porter.DefaultParts, live: true, input: in}
+	marked := map[string]bool{}
+	for _, id := range tgt.ids {
+		marked[id] = true
+	}
+	for _, sess := range tgt.rows {
+		title := transcripts.Sanitize(sess.Title)
+		if title == "" {
+			title = "(" + shortID(sess.ID) + ")"
+		}
+		meta := humanizeAgo(sess.LastTS, svc.now()) + " · " + formatSize(sess.Size)
+		if sess.Live {
+			meta += " · live"
+		}
+		w.sessions = append(w.sessions, checkItem{id: sess.ID, label: sessionGlyph(sess) + " " + title, meta: meta, on: len(marked) == 0 || marked[sess.ID]})
+	}
+	if tgt.project != "" {
+		if dir := memoryDirFor(root, tgt.slug, tgt.project); dir != "" {
+			for _, f := range listMemoryFiles(dir) {
+				meta := formatSize(f.size)
+				if f.pinned {
+					meta += " · pinned"
+				}
+				w.memFiles = append(w.memFiles, checkItem{id: f.name, label: f.name, meta: meta, on: true})
+			}
+		}
+	}
+	w.rebuild()
+	w.cursor = 0 // step 1 starts on "send"; the checklist places its own cursor
+	return w
+}
+
+// memoryListing is one exportable memory file.
+type memoryListing struct {
+	name   string
+	size   int64
+	pinned bool
+}
+
+// listMemoryFiles lists the .md files of a memory directory the way the
+// export walks it (top level plus logs/), slash-relative, sorted.
+func listMemoryFiles(dir string) []memoryListing {
+	var out []memoryListing
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, rerr := filepath.Rel(dir, path)
+		if rerr != nil || rel == "." {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if rel != transcripts.MemoryLogsSubdir && !strings.HasPrefix(rel, transcripts.MemoryLogsSubdir+"/") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || !strings.HasSuffix(rel, ".md") {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		pinned := false
+		if f, ferr := os.Open(path); ferr == nil {
+			buf := make([]byte, 512)
+			n, _ := f.Read(buf)
+			f.Close()
+			head := string(buf[:n])
+			pinned = strings.HasPrefix(head, "---") && strings.Contains(head, "\npinned: true")
+		}
+		out = append(out, memoryListing{name: rel, size: info.Size(), pinned: pinned})
+		return nil
+	})
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+// rebuild lays the checklist out from its items and toggles.
+func (s *wizardScreen) rebuild() {
+	var rows []checkRow
+	if len(s.tgt.ids) == 0 && s.tgt.project != "" || len(s.sessions) > 0 {
+		rows = append(rows, checkRow{header: "SESSIONS"})
+	}
+	for i := range s.sessions {
+		rows = append(rows, checkRow{item: &s.sessions[i]})
+	}
+	if len(s.sessions) == 0 && s.tgt.project != "" {
+		rows = append(rows, checkRow{header: "", label: "(sessions still loading, or none; the export takes what the project has)"})
+	}
+	if len(s.memFiles) > 0 {
+		rows = append(rows, checkRow{header: "MEMORY"})
+		for i := range s.memFiles {
+			rows = append(rows, checkRow{item: &s.memFiles[i]})
+		}
+	}
+	rows = append(rows, checkRow{header: "PARTS OF EVERY SELECTED SESSION"},
+		checkRow{on: &s.parts.ToolResults, label: "tool results", desc: "saved tool outputs — may contain pasted secrets"},
+		checkRow{on: &s.parts.FileHistory, label: "file history", desc: "backups of files Claude edited, what /rewind uses"},
+		checkRow{on: &s.parts.History, label: "prompt history", desc: "the lines claude shows when you press up"},
+		checkRow{on: &s.live, label: "live sessions", desc: "sessions open in a running claude — exported read-only, possibly truncated"},
+		checkRow{cont: true, label: "continue →", desc: "choose how to send"})
+	s.rows = rows
+	if s.cursor < 0 || s.cursor >= len(rows) || !rows[s.cursor].selectable() {
+		s.cursor = max(0, s.firstSelectable(0, 1))
+	}
+}
+
+// firstSelectable is the next selectable row from i in direction d, or
+// -1 when there is none that way.
+func (s *wizardScreen) firstSelectable(i, d int) int {
+	for j := i; j >= 0 && j < len(s.rows); j += d {
+		if s.rows[j].selectable() && (s.rows[j].item != nil || s.rows[j].on != nil || s.rows[j].cont) {
+			return j
+		}
+	}
+	return -1
+}
+
+// move steps the cursor n selectable rows in direction d.
+func (s *wizardScreen) move(d, n int) {
+	for ; n > 0; n-- {
+		i := s.firstSelectable(s.cursor+d, d)
+		if i < 0 {
+			return
+		}
+		s.cursor = i
+	}
+}
+
+// counts summarises the checklist.
+func (s *wizardScreen) counts() string {
+	on, total := 0, len(s.sessions)
+	for _, it := range s.sessions {
+		if it.on {
+			on++
+		}
+	}
+	parts := []string{fmt.Sprintf("%d of %d sessions", on, total)}
+	if len(s.memFiles) > 0 {
+		mon := 0
+		for _, it := range s.memFiles {
+			if it.on {
+				mon++
+			}
+		}
+		parts = append(parts, fmt.Sprintf("%d of %d memory files", mon, len(s.memFiles)))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// sectionOf is the items of the section the cursor is in.
+func (s *wizardScreen) sectionOf(i int) []checkItem {
+	for j := i; j >= 0; j-- {
+		switch s.rows[j].header {
+		case "SESSIONS":
+			return s.sessions
+		case "MEMORY":
+			return s.memFiles
+		case "":
+			continue
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// toggleSection checks every item of the cursor's section, or clears
+// it when every item is already checked.
+func (s *wizardScreen) toggleSection() {
+	items := s.sectionOf(s.cursor)
+	if len(items) == 0 {
+		return
+	}
+	all := true
+	for _, it := range items {
+		if !it.on {
+			all = false
+			break
+		}
+	}
+	for i := range items {
+		items[i].on = !all
+	}
 }
 
 func (s *wizardScreen) Init() tea.Cmd        { return nil }
@@ -61,15 +280,16 @@ func (s *wizardScreen) Title() string        { return "transfer wizard" }
 func (s *wizardScreen) capturingInput() bool { return s.step == wizRecvFile }
 
 func (s *wizardScreen) Keys() []key.Binding {
+	back := key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))
 	switch s.step {
 	case wizSendWhat:
-		return []key.Binding{keys.Up, keys.Down, key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")), key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "continue")), key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))}
+		return []key.Binding{keys.Up, keys.Down, key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")), key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/none in section")), key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "continue")), back}
 	case wizSendSSH:
-		return []key.Binding{key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy the command")), key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))}
+		return []key.Binding{key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy the command")), back}
 	case wizRecvFile:
-		return []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "review the bundle")), key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))}
+		return []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "review the bundle")), back}
 	}
-	return []key.Binding{keys.Up, keys.Down, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose")), key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back"))}
+	return []key.Binding{keys.Up, keys.Down, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose")), back}
 }
 
 // wizardOption is one choice of a step: a label, what it means, and
@@ -88,18 +308,6 @@ func (s *wizardScreen) options() []wizardOption {
 			{label: "Send sessions from this machine", desc: "serve them over the local network with a pairing code, write a .bffs file, or pipe them through ssh"},
 			{label: "Receive sessions from another machine", desc: "from a machine running the serve, or from a .bffs file that reached this one"},
 		}
-	case wizSendWhat:
-		opts := []wizardOption{}
-		if len(s.tgt.ids) == 0 && s.tgt.project != "" {
-			opts = append(opts, wizardOption{label: "memory", desc: "the project's auto-memory directory (MEMORY.md and topic files)", on: &s.memory})
-		}
-		return append(opts,
-			wizardOption{label: "tool results", desc: "saved tool outputs — may contain pasted secrets", on: &s.parts.ToolResults},
-			wizardOption{label: "file history", desc: "backups of files Claude edited, what /rewind uses", on: &s.parts.FileHistory},
-			wizardOption{label: "prompt history", desc: "the lines claude shows when you press up", on: &s.parts.History},
-			wizardOption{label: "live sessions", desc: "sessions open in a running claude — exported read-only, possibly truncated", on: &s.live},
-			wizardOption{label: "continue →", desc: "choose how to send"},
-		)
 	case wizSendHow:
 		return []wizardOption{
 			{label: "Over the local network", desc: "this machine shows an address and a pairing code; the other one runs bffs import --from <address> (or w → receive) and types the code. Needs an inbound port; macOS asks once whether bffs may accept connections"},
@@ -115,16 +323,62 @@ func (s *wizardScreen) options() []wizardOption {
 	return nil
 }
 
-// target is the export target with the choices of the "what" step.
+// target is the export target with the choices of the "what" step:
+// the parts, the live toggle, and the checklist when it narrows the
+// project (a subset of sessions or of memory files).
 func (s *wizardScreen) target() actionTarget {
 	t := s.tgt
 	parts := s.parts
 	t.parts = &parts
 	t.noLive = !s.live
-	if len(t.ids) == 0 && t.project != "" && !s.memory {
-		t.only = "sessions"
+	if len(s.sessions) > 0 {
+		keep := map[string]bool{}
+		all := true
+		for _, it := range s.sessions {
+			if it.on {
+				keep[it.id] = true
+			} else {
+				all = false
+			}
+		}
+		if !all || len(t.ids) > 0 {
+			t.keepSessions = keep
+			t.ids = nil
+		}
+	}
+	if len(s.memFiles) > 0 {
+		keep := map[string]bool{}
+		all := true
+		for _, it := range s.memFiles {
+			if it.on {
+				keep[it.id] = true
+			} else {
+				all = false
+			}
+		}
+		switch {
+		case len(keep) == 0:
+			t.only = "sessions"
+		case !all:
+			t.keepMemory = keep
+		}
 	}
 	return t
+}
+
+// nothingChecked reports whether the checklist sends nothing.
+func (s *wizardScreen) nothingChecked() bool {
+	for _, it := range s.sessions {
+		if it.on {
+			return false
+		}
+	}
+	for _, it := range s.memFiles {
+		if it.on {
+			return false
+		}
+	}
+	return len(s.sessions)+len(s.memFiles) > 0
 }
 
 // sshCommand is the pipe the ssh step shows.
@@ -132,11 +386,24 @@ func (s *wizardScreen) sshCommand() string {
 	t := s.target()
 	var b strings.Builder
 	b.WriteString("bffs export")
-	if len(t.ids) > 0 {
+	switch {
+	case t.keepSessions != nil:
+		ids := make([]string, 0, len(t.keepSessions))
+		for id := range t.keepSessions {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			b.WriteString(" --session " + shellWord(id))
+		}
+		if t.keepMemory != nil || (t.only != "sessions" && t.project != "") {
+			b.WriteString(" --project " + shellWord(t.project))
+		}
+	case len(t.ids) > 0:
 		for _, id := range t.ids {
 			b.WriteString(" --session " + shellWord(id))
 		}
-	} else if t.project != "" {
+	case t.project != "":
 		b.WriteString(" --project " + shellWord(t.project))
 	}
 	if t.only == "sessions" {
@@ -169,7 +436,7 @@ func (s *wizardScreen) canSend() bool {
 func (s *wizardScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		s.width = msg.Width
+		s.width, s.height = msg.Width, msg.Height
 		s.input.SetWidth(max(10, msg.Width-8))
 		return s, nil
 	case tea.KeyPressMsg:
@@ -202,6 +469,9 @@ func (s *wizardScreen) keyPress(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.input, cmd = s.input.Update(msg)
 		return s, cmd
 	}
+	if s.step == wizSendWhat {
+		return s.checklistKey(msg)
+	}
 	opts := s.options()
 	switch {
 	case key.Matches(msg, keys.Cancel):
@@ -210,10 +480,6 @@ func (s *wizardScreen) keyPress(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.cursor = max(0, s.cursor-1)
 	case key.Matches(msg, keys.Down):
 		s.cursor = min(len(opts)-1, s.cursor+1)
-	case msg.Code == tea.KeySpace && s.step == wizSendWhat:
-		if o := opts[s.cursor]; o.on != nil {
-			*o.on = !*o.on
-		}
 	case msg.String() == "c" && s.step == wizSendSSH:
 		s.copied = true
 		return s, tea.SetClipboard(s.sshCommand())
@@ -221,6 +487,45 @@ func (s *wizardScreen) keyPress(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s.choose()
 	}
 	return s, nil
+}
+
+// checklistKey drives the "what" step: the cursor skips headers, space
+// toggles, a toggles a whole section, enter continues.
+func (s *wizardScreen) checklistKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch {
+	case key.Matches(msg, keys.Cancel):
+		return s.back()
+	case key.Matches(msg, keys.Up):
+		s.move(-1, 1)
+	case key.Matches(msg, keys.Down):
+		s.move(1, 1)
+	case key.Matches(msg, keys.PageUp):
+		s.move(-1, 10)
+	case key.Matches(msg, keys.PageDn):
+		s.move(1, 10)
+	case msg.Code == tea.KeySpace:
+		s.toggleRow()
+	case msg.String() == "a":
+		s.toggleSection()
+	case msg.Code == tea.KeyEnter:
+		if s.rows[s.cursor].cont {
+			return s.choose()
+		}
+		s.toggleRow()
+	}
+	s.note = ""
+	return s, nil
+}
+
+// toggleRow flips the checkable thing under the cursor.
+func (s *wizardScreen) toggleRow() {
+	r := s.rows[s.cursor]
+	switch {
+	case r.item != nil:
+		r.item.on = !r.item.on
+	case r.on != nil:
+		*r.on = !*r.on
+	}
 }
 
 // back is esc: one step up, or close.
@@ -232,7 +537,8 @@ func (s *wizardScreen) back() (Screen, tea.Cmd) {
 	case wizSendWhat, wizRecvFrom:
 		s.step, s.cursor = wizStart, 0
 	case wizSendHow:
-		s.step, s.cursor = wizSendWhat, 0
+		s.step = wizSendWhat
+		s.cursor = max(0, s.firstSelectable(0, 1))
 	case wizSendSSH:
 		s.step, s.cursor, s.copied = wizSendHow, 2, false
 	}
@@ -249,14 +555,15 @@ func (s *wizardScreen) choose() (Screen, tea.Cmd) {
 				s.note = "nothing to send: select a project (2) or mark sessions (space) first"
 				return s, nil
 			}
-			s.step, s.cursor = wizSendWhat, 0
+			s.step = wizSendWhat
+			s.rebuild()
+			s.cursor = max(0, s.firstSelectable(0, 1))
 		} else {
 			s.step, s.cursor = wizRecvFrom, 0
 		}
 	case wizSendWhat:
-		opts := s.options()
-		if o := opts[s.cursor]; o.on != nil {
-			*o.on = !*o.on
+		if s.nothingChecked() {
+			s.note = "nothing selected: check at least one session or memory file (space)"
 			return s, nil
 		}
 		s.step, s.cursor = wizSendHow, 0
@@ -315,6 +622,62 @@ func validBundlePath(raw string) (string, error) {
 	return path, nil
 }
 
+// checklistView renders the rows around the cursor within height.
+func (s *wizardScreen) checklistView(lines []string, width, height int) string {
+	body := make([]string, 0, len(s.rows))
+	for i, r := range s.rows {
+		var line string
+		switch {
+		case r.header != "":
+			line = section(r.header, "")
+		case r.item != nil:
+			box := "[ ]"
+			if r.item.on {
+				box = "[x]"
+			}
+			metaW := lipglossWidthOf(r.item.meta)
+			label := pad(r.item.label, max(8, width-4-2-metaW-3))
+			line = box + " " + label + "  " + styleFaint.Render(r.item.meta)
+		case r.on != nil:
+			state := "include"
+			if !*r.on {
+				state = "leave out"
+			}
+			line = pad(r.label, 16) + state + "   " + styleFaint.Render(r.desc)
+		case r.cont:
+			line = styleHeader.Render(r.label) + "   " + styleFaint.Render(r.desc)
+		default:
+			line = styleFaint.Render(r.label)
+		}
+		if i == s.cursor {
+			line = styleCursor.Render("> " + cell(line, max(0, width-2)))
+		} else {
+			line = "  " + cell(line, max(0, width-2))
+		}
+		body = append(body, line)
+	}
+	// Keep the cursor visible in the rows the pane has left.
+	avail := max(3, height-len(lines)-2)
+	if s.cursor < s.offset {
+		s.offset = s.cursor
+	}
+	if s.cursor >= s.offset+avail {
+		s.offset = s.cursor - avail + 1
+	}
+	if s.offset > 0 {
+		lines = append(lines, styleFaint.Render(fmt.Sprintf("  ↑ %d more", s.offset)))
+	}
+	end := min(len(body), s.offset+avail)
+	lines = append(lines, body[s.offset:end]...)
+	if end < len(body) {
+		lines = append(lines, styleFaint.Render(fmt.Sprintf("  ↓ %d more", len(body)-end)))
+	}
+	if s.note != "" {
+		lines = append(lines, "", styleError.Render(truncate(s.note, width)))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (s *wizardScreen) View(width, height int) string {
 	var lines []string
 	head := func(step, text string) {
@@ -324,8 +687,9 @@ func (s *wizardScreen) View(width, height int) string {
 	case wizStart:
 		head("step 1 of 3", "What do you want to do?")
 	case wizSendWhat:
-		head("step 2 of 3", "What to send: "+s.tgt.what())
-		lines = append(lines, styleFaint.Render(truncate("from "+shortRootLabel(s.root)+" · space toggles a part · nothing is read yet", width)), "")
+		head("step 2 of 3", "What to send from "+s.tgt.label())
+		lines = append(lines, styleFaint.Render(truncate(s.counts()+" · space toggles · a checks or clears a section · enter continues · nothing is read yet", width)), "")
+		return s.checklistView(lines, width, height)
 	case wizSendHow:
 		head("step 3 of 3", "How to send it")
 	case wizSendSSH:
@@ -380,3 +744,6 @@ func (s *wizardScreen) View(width, height int) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// lipglossWidthOf is lipgloss.Width, named for the checklist layout.
+func lipglossWidthOf(v string) int { return lipgloss.Width(v) }

@@ -255,7 +255,9 @@ func (a *app) helpView() string {
 	var ks []key.Binding
 	if s := a.top(); s != nil {
 		ks = append(ks, s.Keys()...)
-		ks = append(ks, keys.Back)
+		if !key.Matches(tea.KeyPressMsg{Code: tea.KeyEscape}, ks...) {
+			ks = append(ks, keys.Back) // an overlay that binds esc itself names it
+		}
 	} else {
 		ks = a.ws.keys()
 	}

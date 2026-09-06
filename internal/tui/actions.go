@@ -32,6 +32,11 @@ type actionTarget struct {
 	only    string                // "" (sessions + memory), "memories" (the S sync) or "sessions" (the wizard's memory toggle)
 	parts   *porter.Parts         // nil = porter.DefaultParts; the wizard narrows it
 	noLive  bool                  // skip sessions open in a running claude
+	// The wizard's checklist: nil keeps everything the selection
+	// yields; a map keeps only the listed session ids / memory file
+	// names (slash-relative), an empty map none.
+	keepSessions map[string]bool
+	keepMemory   map[string]bool
 }
 
 // partsOrDefault is the parts an export of the target carries.
@@ -93,6 +98,10 @@ func (t actionTarget) selectOptions(now time.Time) porter.SelectOptions {
 		o.Only = t.only
 	}
 	switch {
+	case t.keepSessions != nil && t.project != "":
+		// The checklist narrows a project selection afterwards, so the
+		// memory comes along.
+		o.Projects = []string{t.project}
 	case len(t.ids) > 0:
 		o.Sessions = t.ids
 	case t.project != "":
@@ -117,6 +126,26 @@ func (t actionTarget) selection(ctx context.Context, svc *services) (porter.Sele
 		return porter.Selection{}, live, warnings, err
 	}
 	sel.Parts = t.partsOrDefault()
+	if t.keepSessions != nil {
+		kept := sel.Sessions[:0]
+		for _, s := range sel.Sessions {
+			if t.keepSessions[s.ID] {
+				kept = append(kept, s)
+			}
+		}
+		sel.Sessions = kept
+	}
+	if t.keepMemory != nil {
+		sel.MemoryFiles = map[string][]string{}
+		for _, mem := range sel.Memories {
+			names := []string{}
+			for name := range t.keepMemory {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			sel.MemoryFiles[mem.Dir] = names
+		}
+	}
 	return sel, live, warnings, nil
 }
 

@@ -252,7 +252,7 @@ func (s *exportScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, replaceScreen(newResultScreen("export", nil, msg.err))
 		}
 		s.m, s.opener, s.warnings = msg.m, msg.opener, msg.warnings
-		s.summary = exportSummaryLines(s.tgt.root, msg.m, msg.opener, porter.DefaultParts, s.svc.now())
+		s.summary = exportSummaryLines(s.tgt.root, msg.m, msg.opener, s.tgt.partsOrDefault(), s.svc.now())
 		s.state = exportConfirm
 		return s, nil
 

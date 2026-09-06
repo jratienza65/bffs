@@ -29,7 +29,17 @@ type actionTarget struct {
 	project string                // decoded cwd of the project, "" when unknown
 	rows    []transcripts.Session // every session of the project, in row order
 	ids     []string              // selected session ids, in row order
-	only    string                // "" (sessions + memory), or "memories": the S sync
+	only    string                // "" (sessions + memory), "memories" (the S sync) or "sessions" (the wizard's memory toggle)
+	parts   *porter.Parts         // nil = porter.DefaultParts; the wizard narrows it
+	noLive  bool                  // skip sessions open in a running claude
+}
+
+// partsOrDefault is the parts an export of the target carries.
+func (t actionTarget) partsOrDefault() porter.Parts {
+	if t.parts != nil {
+		return *t.parts
+	}
+	return porter.DefaultParts
 }
 
 // memoryOnly narrows the target to the project's memory directory.
@@ -58,11 +68,13 @@ func (t actionTarget) label() string {
 
 // what says in a few words what the selection covers.
 func (t actionTarget) what() string {
-	if t.only == "memories" {
+	switch {
+	case t.only == "memories":
 		return "the memory of " + t.label()
-	}
-	if len(t.ids) > 0 {
+	case len(t.ids) > 0:
 		return countNoun(len(t.ids), "selected session")
+	case t.only == "sessions":
+		return "the sessions of " + t.label() + " (without its memory)"
 	}
 	return "the whole project " + t.label() + " and its memory"
 }
@@ -71,11 +83,14 @@ func (t actionTarget) what() string {
 // selected sessions, else the project directory (sessions + memory),
 // else — a project without a recorded cwd — every listed session.
 func (t actionTarget) selectOptions(now time.Time) porter.SelectOptions {
-	o := porter.SelectOptions{IncludeLive: true, Now: now}
+	o := porter.SelectOptions{IncludeLive: !t.noLive, Now: now}
 	if t.only == "memories" && t.project != "" {
 		o.Only = t.only
 		o.Projects = []string{t.project}
 		return o
+	}
+	if t.only == "sessions" {
+		o.Only = t.only
 	}
 	switch {
 	case len(t.ids) > 0:
@@ -101,7 +116,7 @@ func (t actionTarget) selection(ctx context.Context, svc *services) (porter.Sele
 	if err != nil {
 		return porter.Selection{}, live, warnings, err
 	}
-	sel.Parts = porter.DefaultParts
+	sel.Parts = t.partsOrDefault()
 	return sel, live, warnings, nil
 }
 

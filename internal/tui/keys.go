@@ -27,6 +27,7 @@ type keyMap struct {
 	ScreenMode, ScreenModePrev key.Binding
 	Menu                       key.Binding
 	Theme                      key.Binding
+	Wizard                     key.Binding
 
 	// The action keys (plan §11, tui-v2 §1): each opens an overlay over
 	// the main pane; i (receive) works from every panel.
@@ -75,6 +76,7 @@ var keys = keyMap{
 	ScreenModePrev: key.NewBinding(key.WithKeys("_", "-"), key.WithHelp("_", "smaller preview")),
 	Menu:           key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "more")),
 	Theme:          key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "theme")),
+	Wizard:         key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "transfer wizard")),
 
 	Export:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "export")),
 	Send:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "send")),
@@ -96,6 +98,6 @@ var keys = keyMap{
 // — deliberately absent from the browser, plan Q7) everywhere, and the
 // other action letters where the action has no subject. Anywhere they
 // are not bound the key answers with reservedHint.
-var reservedKeys = key.NewBinding(key.WithKeys("e", "s", "i", "c", "r", "R", "t", "S", "L", "p", "d"), key.WithHelp("d", "no delete here (bffs sessions rm)"))
+var reservedKeys = key.NewBinding(key.WithKeys("e", "s", "i", "c", "r", "R", "t", "S", "L", "p", "w", "d"), key.WithHelp("d", "no delete here (bffs sessions rm)"))
 
 const reservedHint = "(not available here; d never deletes — use bffs sessions rm)"

@@ -19,7 +19,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/jratienza65/bffs/internal/bundle"
-	"github.com/jratienza65/bffs/internal/porter"
 	"github.com/jratienza65/bffs/internal/transcripts"
 	"github.com/jratienza65/bffs/internal/transfer"
 )
@@ -330,7 +329,7 @@ func (s *serveScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, replaceScreen(newResultScreen("send over LAN", nil, fmt.Errorf("marshal manifest: %w", err)))
 		}
 		s.m, s.raw, s.opener, s.warnings = msg.m, raw, msg.opener, msg.warnings
-		s.summary = exportSummaryLines(s.tgt.root, msg.m, msg.opener, porter.DefaultParts, s.svc.now())
+		s.summary = exportSummaryLines(s.tgt.root, msg.m, msg.opener, s.tgt.partsOrDefault(), s.svc.now())
 		s.state = serveConfirm
 		return s, nil
 

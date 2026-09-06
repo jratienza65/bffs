@@ -907,6 +907,8 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return pushScreen(newMenuScreen(ws.menuTitle(), ws.actions()))
 	case key.Matches(msg, keys.Theme):
 		return ws.cycleTheme()
+	case key.Matches(msg, keys.Wizard):
+		return ws.openWizard()
 	case key.Matches(msg, keys.Open):
 		return ws.open()
 	case key.Matches(msg, keys.Back):
@@ -999,6 +1001,23 @@ func (ws *workspace) cycleTheme() tea.Cmd {
 		state.Theme = next
 		return themeSavedMsg{name: next, err: store.SaveState(cfgDir, state)}
 	})
+}
+
+// perspectiveAccount is the account an import runs as: the selected
+// account when it is a real one, else "" (the resolver's pick).
+func (ws *workspace) perspectiveAccount() string {
+	if a := ws.selectedAccount(); a != nil && (a.kind == "partial" || a.kind == "full" || a.kind == "api key") {
+		return a.name
+	}
+	return ""
+}
+
+// openWizard pushes the transfer wizard for the current selection.
+func (ws *workspace) openWizard() tea.Cmd {
+	if ws.rootKey == "" {
+		return status("no pool to work in yet")
+	}
+	return pushScreen(newWizardScreen(ws.svc, ws.target(), ws.root, ws.perspectiveAccount(), ws.project != nil))
 }
 
 // switchAccount writes state.toml the way `bffs switch <name>` does.
@@ -1117,7 +1136,9 @@ func (ws *workspace) actions() []menuItem {
 		name := a.name
 		add("space", "switch claude to "+transcripts.Sanitize(name)+" (bffs switch)", func() tea.Cmd { return switchAccount(svc.cfgDir, name) })
 	}
-	add("i", "receive a bundle over the LAN into "+shortRootLabel(root), func() tea.Cmd { return receiveInto(svc, root) })
+	add("w", "transfer wizard: send to or receive from another machine, step by step", func() tea.Cmd { return ws.openWizard() })
+	account := ws.perspectiveAccount()
+	add("i", "receive a bundle over the LAN into "+shortRootLabel(root), func() tea.Cmd { return receiveInto(svc, root, account) })
 	if ws.project == nil || ws.focus == panelAccounts {
 		return items
 	}
@@ -1168,6 +1189,7 @@ var actionHints = map[string]string{
 	"r": "nothing to rehome: mark sessions with space (no pending imports)",
 	"t": "no cwd recorded for this project; nothing to trust",
 	"S": "no memory dir for this project", "p": "no memory dir for this project",
+	"w": "no pool to work in yet",
 	"d": "d never deletes — use bffs sessions rm",
 }
 
@@ -1197,9 +1219,9 @@ func (ws *workspace) keys() []key.Binding {
 	var ks []key.Binding
 	switch ws.focus {
 	case panelAccounts:
-		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.Receive}
+		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.Wizard}
 	case panelProjects:
-		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "sessions")), keys.Export, keys.Copy, keys.Trust, keys.SyncMemory}
+		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "sessions")), keys.Wizard, keys.Export, keys.Copy, keys.Trust}
 	case panelItems:
 		if ws.tab == tabSessions {
 			open := "transcript"
@@ -1222,7 +1244,7 @@ func (ws *workspace) helpGroups() [][]key.Binding {
 	return [][]key.Binding{
 		{keys.Panel1, keys.Panel2, keys.Panel3, keys.NextPanel, keys.PrevPanel, keys.NextTab, keys.PrevTab, keys.Back},
 		{keys.Up, keys.Down, keys.PageUp, keys.PageDn, keys.Open, keys.Select, keys.SelectAll, keys.Activate, keys.Filter},
-		{keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
+		{keys.Wizard, keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
 		{keys.Trust, keys.SyncMemory, keys.Pointer, keys.ScanPaths},
 		{keys.ScreenMode, keys.ScreenModePrev, keys.Theme, keys.Menu, keys.Help, keys.Quit, reservedKeys},
 	}

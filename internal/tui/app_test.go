@@ -245,6 +245,9 @@ func keyPress(s string) tea.KeyPressMsg {
 	case "ctrl+c":
 		return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 	}
+	if strings.HasPrefix(s, "ctrl+") && len(s) == 6 {
+		return tea.KeyPressMsg{Code: rune(s[5]), Mod: tea.ModCtrl}
+	}
 	r := []rune(s)
 	return tea.KeyPressMsg{Code: r[0], Text: s}
 }

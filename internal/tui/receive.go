@@ -47,6 +47,7 @@ const (
 	recvPath                        // typing a path for it
 	recvConfirm                     // summary + placements + [y/N]
 	recvImporting                   // porter.Import streams the body
+	recvPeeking                     // a file source: reading its manifest
 )
 
 // recvProject is one project of the incoming bundle and how it will be
@@ -85,6 +86,14 @@ type recvManifestMsg struct {
 type recvAnswer struct {
 	rules []rehome.Mapping
 	ok    bool
+}
+
+// recvPeekedMsg ends the manifest read of a file source.
+type recvPeekedMsg struct {
+	path   string
+	review recvManifestMsg
+	digest string
+	err    error
 }
 
 // recvDoneMsg ends the fetch.
@@ -127,21 +136,72 @@ type receiveScreen struct {
 	cursor   int
 	askQuit  bool
 	width    int
+	file     string // a .bffs file source instead of a host
+	digest   string // the reviewed manifest's sha256 (file source)
 }
 
-func newReceiveScreen(svc *services, root transcripts.Root) *receiveScreen {
+// newReceiveFileScreen is `bffs import --from <file.bffs>` into root:
+// the manifest is read and reviewed first, placement and confirmation
+// are the receive screen's, then porter.Import reads the file again
+// with the reviewed manifest's sha256 pinned.
+func newReceiveFileScreen(svc *services, root transcripts.Root, account, path string) *receiveScreen {
+	s := newReceiveScreen(svc, root, account)
+	s.file, s.state = path, recvPeeking
+	s.prog = newOpView("importing")
+	return s
+}
+
+// peekFile reads a bundle file's manifest for review.
+func peekFile(path string, root transcripts.Root, account string) tea.Cmd {
+	return func() tea.Msg {
+		f, err := os.Open(path)
+		if err != nil {
+			return recvPeekedMsg{path: path, err: err}
+		}
+		defer f.Close()
+		m, raw, _, err := bundle.PeekManifest(bufio.NewReaderSize(f, 256<<10))
+		if err != nil {
+			return recvPeekedMsg{path: path, err: fmt.Errorf("bundle: %w", err)}
+		}
+		limits := bundle.DefaultLimits
+		if err := m.Validate(limits); err != nil {
+			return recvPeekedMsg{path: path, err: fmt.Errorf("bundle: %w", err)}
+		}
+		sum := sha256.Sum256(raw)
+		return recvPeekedMsg{path: path, review: reviewManifest(m, root, account, limits.MaxTotalBytes), digest: hex.EncodeToString(sum[:])}
+	}
+}
+
+// newReceiveScreen receives into root as account (the perspective the
+// browser has selected; "" = the resolver's pick for the cwd, the CLI's
+// default without --account).
+func newReceiveScreen(svc *services, root transcripts.Root, account string) *receiveScreen {
+	if account == "" || account == transcripts.HomeName {
+		account = destAccount(svc, root)
+	}
 	code := newInput("pairing code: ", "the 8 or 12 characters shown on the other machine (nothing is echoed)")
 	code.EchoMode = textinput.EchoNone
 	return &receiveScreen{
-		svc: svc, root: root, account: destAccount(svc, root),
+		svc: svc, root: root, account: account,
 		input: newInput("from: ", "IPv4 address, or host[:port], shown on the other machine"),
 		code:  code,
 		prog:  newOpView("receiving"),
 	}
 }
 
-func (s *receiveScreen) Init() tea.Cmd { return nil }
-func (s *receiveScreen) Title() string { return "receive" }
+func (s *receiveScreen) Init() tea.Cmd {
+	if s.file != "" {
+		return peekFile(s.file, s.root, s.account)
+	}
+	return nil
+}
+
+func (s *receiveScreen) Title() string {
+	if s.file != "" {
+		return "import file"
+	}
+	return "receive"
+}
 func (s *receiveScreen) running() bool { return s.op.active() }
 func (s *receiveScreen) capturingInput() bool {
 	return s.state == recvHost || s.state == recvCode || s.state == recvPath
@@ -542,15 +602,19 @@ func (s *receiveScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		return s, s.op.wait()
 
 	case recvManifestMsg:
-		s.header, s.projects, s.limit, s.days, s.daysSrc = msg.header, msg.projects, msg.limit, msg.days, msg.source
-		s.cursor = 0
-		if i := s.undecided(0); i >= 0 {
-			s.current = i
-			s.state = recvPlace
-		} else {
-			s.state = recvConfirm
-		}
+		s.review(msg)
 		return s, s.op.wait()
+
+	case recvPeekedMsg:
+		if msg.path != s.file || s.state != recvPeeking {
+			return s, nil
+		}
+		if msg.err != nil {
+			return s, tea.Batch(popScreen(), statusError(msg.err))
+		}
+		s.digest = msg.digest
+		s.review(msg.review)
+		return s, nil
 
 	case recvDoneMsg:
 		s.op.finish()
@@ -570,6 +634,59 @@ func (s *receiveScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		return s, cmd
 	}
 	return s, nil
+}
+
+// review takes the manifest summary in and moves to the first placement
+// question or straight to the confirmation.
+func (s *receiveScreen) review(msg recvManifestMsg) {
+	s.header, s.projects, s.limit, s.days, s.daysSrc = msg.header, msg.projects, msg.limit, msg.days, msg.source
+	s.cursor = 0
+	if i := s.undecided(0); i >= 0 {
+		s.current = i
+		s.state = recvPlace
+	} else {
+		s.state = recvConfirm
+	}
+}
+
+// startFile imports the reviewed file: porter.Import reads it again
+// from the start with the reviewed manifest's sha256 pinned, so a file
+// swapped meanwhile is refused.
+func (s *receiveScreen) startFile() (Screen, tea.Cmd) {
+	s.state = recvImporting
+	svc, root, account, path, digest, rules := s.svc, s.root, s.account, s.file, s.digest, s.rules()
+	var cmd tea.Cmd
+	s.op, cmd = startOp(s.svc.ctx, func(ctx context.Context, emit func(tea.Msg)) tea.Msg {
+		out := recvDoneMsg{sinkRan: true}
+		f, err := os.Open(path)
+		if err != nil {
+			out.err, out.sinkErr = err, err
+			return out
+		}
+		defer f.Close()
+		live, err := transcripts.Live(ctx, svc.configDirs())
+		if err != nil {
+			live = nil
+		}
+		opts := porter.ImportOptions{
+			Dest:                 root,
+			Account:              account,
+			OnConflict:           porter.ConflictSkip,
+			Limits:               bundle.DefaultLimits,
+			ExpectManifestSHA256: digest,
+			Now:                  svc.now(),
+			Progress:             func(p bundle.Progress) { emit(progressMsg{p: p}) },
+			Live:                 live,
+			LaunchEnv:            os.Environ(),
+			Map:                  rules,
+		}
+		started := time.Now()
+		out.rep, out.sinkErr = porter.Import(ctx, svc.cfgDir, bufio.NewReaderSize(f, 256<<10), opts)
+		out.elapsed = time.Since(started)
+		out.err = out.sinkErr
+		return out
+	})
+	return s, cmd
 }
 
 // finish maps the fetch's outcome to a result screen or a status line,
@@ -659,6 +776,9 @@ func (s *receiveScreen) keyPress(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		p := s.projects[s.current]
 		switch {
 		case key.Matches(msg, keys.Cancel):
+			if s.file != "" {
+				return s, tea.Batch(popScreen(), status("import cancelled; nothing written"))
+			}
 			s.op.stop()
 		case key.Matches(msg, keys.Quit):
 			s.askQuit = true
@@ -707,12 +827,18 @@ func (s *receiveScreen) keyPress(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	case recvConfirm:
 		switch yesNo(msg) {
 		case 1:
+			if s.file != "" {
+				return s.startFile()
+			}
 			s.state = recvImporting
 			select {
 			case s.answerCh <- recvAnswer{rules: s.rules(), ok: true}:
 			default:
 			}
 		case -1:
+			if s.file != "" {
+				return s, tea.Batch(popScreen(), status("import cancelled; nothing written"))
+			}
 			select {
 			case s.answerCh <- recvAnswer{}:
 			default:
@@ -805,8 +931,13 @@ func (s *receiveScreen) summaryLines() []string {
 
 func (s *receiveScreen) View(width, height int) string {
 	head := styleFaint.Render(truncate("receive into "+shortRootLabel(s.root)+"  ("+shortPath(s.root.Dir)+")", width))
+	if s.file != "" {
+		head = styleFaint.Render(truncate("import "+shortPath(s.file)+" into "+shortRootLabel(s.root)+"  ("+shortPath(s.root.Dir)+")", width))
+	}
 	var lines []string
 	switch s.state {
+	case recvPeeking:
+		return strings.Join([]string{head, "", "reading the bundle's manifest…"}, "\n")
 	case recvHost, recvResolving:
 		lines = []string{head, "", s.input.View()}
 		switch {
@@ -859,6 +990,9 @@ func (s *receiveScreen) View(width, height int) string {
 	case recvImporting:
 		lines = append([]string{head, ""}, s.events...)
 		lines = append(lines, "", s.prog.view(width))
+		if s.file != "" {
+			lines = append(lines, styleFaint.Render("every file is verified against the manifest before it lands; a session is whole or absent"))
+		}
 	}
 	switch {
 	case s.askQuit:

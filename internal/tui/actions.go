@@ -37,6 +37,10 @@ type actionTarget struct {
 	// names (slash-relative), an empty map none.
 	keepSessions map[string]bool
 	keepMemory   map[string]bool
+	// Pool-wide scope: every project of the root, or the listed project
+	// directories (the wizard's project checklist).
+	allProjects bool
+	projects    []string
 }
 
 // partsOrDefault is the parts an export of the target carries.
@@ -63,9 +67,14 @@ func (t actionTarget) allIDs() []string {
 	return ids
 }
 
-// label names the project for headers and titles.
+// label names the project (or the pool) for headers and titles.
 func (t actionTarget) label() string {
-	if t.project != "" {
+	switch {
+	case t.allProjects:
+		return "every project of " + shortRootLabel(t.root)
+	case len(t.projects) > 0:
+		return countNoun(len(t.projects), "project") + " of " + shortRootLabel(t.root)
+	case t.project != "":
 		return transcripts.Sanitize(shortPath(t.project))
 	}
 	return transcripts.Sanitize(t.slug)
@@ -74,6 +83,11 @@ func (t actionTarget) label() string {
 // what says in a few words what the selection covers.
 func (t actionTarget) what() string {
 	switch {
+	case t.allProjects || len(t.projects) > 0:
+		if t.only == "sessions" {
+			return "the sessions of " + t.label() + " (without memory)"
+		}
+		return t.label() + " with its memory"
 	case t.only == "memories":
 		return "the memory of " + t.label()
 	case len(t.ids) > 0:
@@ -98,6 +112,12 @@ func (t actionTarget) selectOptions(now time.Time) porter.SelectOptions {
 		o.Only = t.only
 	}
 	switch {
+	case t.allProjects:
+		o.AllProjects = true
+		return o
+	case len(t.projects) > 0:
+		o.Projects = append([]string(nil), t.projects...)
+		return o
 	case t.keepSessions != nil && t.project != "":
 		// The checklist narrows a project selection afterwards, so the
 		// memory comes along.

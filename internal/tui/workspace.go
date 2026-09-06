@@ -1017,7 +1017,13 @@ func (ws *workspace) openWizard() tea.Cmd {
 	if ws.rootKey == "" {
 		return status("no pool to work in yet")
 	}
-	return pushScreen(newWizardScreen(ws.svc, ws.target(), ws.root, ws.perspectiveAccount(), ws.project != nil))
+	var projects []*projectRow
+	for _, r := range ws.panels[panelProjects].rows() {
+		if pr, ok := r.(*projectRow); ok {
+			projects = append(projects, pr)
+		}
+	}
+	return pushScreen(newWizardScreen(ws.svc, ws.target(), ws.root, ws.perspectiveAccount(), ws.project != nil, projects))
 }
 
 // switchAccount writes state.toml the way `bffs switch <name>` does.
@@ -1139,7 +1145,21 @@ func (ws *workspace) actions() []menuItem {
 	add("w", "transfer wizard: send to or receive from another machine, step by step", func() tea.Cmd { return ws.openWizard() })
 	account := ws.perspectiveAccount()
 	add("i", "receive a bundle over the LAN into "+shortRootLabel(root), func() tea.Cmd { return receiveInto(svc, root, account) })
-	if ws.project == nil || ws.focus == panelAccounts {
+	if ws.focus == panelAccounts {
+		// The accounts panel is the pool: its actions take every project.
+		all := actionTarget{root: root, allProjects: true}
+		add("e", "export "+all.what()+" to a file", func() tea.Cmd { return pushScreen(newExportScreen(svc, all)) })
+		add("s", "send "+all.what()+" over the LAN", func() tea.Cmd {
+			sc, err := newServeScreen(svc, all)
+			if err != nil {
+				return statusError(err)
+			}
+			return pushScreen(sc)
+		})
+		add("c", "copy "+all.what()+" to another account", func() tea.Cmd { return pushScreen(newCopyScreen(svc, all)) })
+		return items
+	}
+	if ws.project == nil {
 		return items
 	}
 	tgt := ws.target()
@@ -1184,7 +1204,7 @@ func (ws *workspace) actions() []menuItem {
 
 // actionHints explain a refused action key.
 var actionHints = map[string]string{
-	"e": "select a project first", "s": "select a project first", "c": "select a project first",
+	"e": "select a project (2), or 1 accounts for the whole pool", "s": "select a project (2), or 1 accounts for the whole pool", "c": "select a project (2), or 1 accounts for the whole pool",
 	"R": "select a session on the sessions tab", "L": "select a session on the sessions tab",
 	"r": "nothing to rehome: mark sessions with space (no pending imports)",
 	"t": "no cwd recorded for this project; nothing to trust",
@@ -1219,7 +1239,7 @@ func (ws *workspace) keys() []key.Binding {
 	var ks []key.Binding
 	switch ws.focus {
 	case panelAccounts:
-		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.Wizard}
+		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.Wizard, key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "export the pool"))}
 	case panelProjects:
 		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "sessions")), keys.Wizard, keys.Export, keys.Copy, keys.Trust}
 	case panelItems:

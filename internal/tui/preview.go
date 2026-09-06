@@ -20,9 +20,10 @@ func previewCmd(key string, gen int, build func() ([]string, error)) tea.Cmd {
 	}
 }
 
-// kvLine lays out one "label  value" detail line, the value sanitised.
+// kvLine lays out one "label  value" detail line, the label muted and
+// the value sanitised.
 func kvLine(label, value string) string {
-	return "  " + pad(label, 12) + " " + transcripts.Sanitize(value)
+	return "  " + styleFaint.Render(pad(label, 12)) + " " + transcripts.Sanitize(value)
 }
 
 // accountPreview describes one perspective: the account, the pool it
@@ -235,7 +236,7 @@ func excerptLines(head transcripts.Head, tail transcripts.Tail) []string {
 	var lines []string
 	add := func(label, text string) {
 		if text != "" {
-			lines = append(lines, textLines("  "+pad(label, 15), transcripts.Sanitize(text))...)
+			lines = append(lines, textLines("  "+styleFaint.Render(pad(label, 15)), transcripts.Sanitize(text))...)
 		}
 	}
 	add("first prompt", head.FirstPrompt)
@@ -275,7 +276,7 @@ func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, nam
 						}
 					}
 				}
-				drift = append(drift, shortRootLabel(other)+": "+state)
+				drift = append(drift, shortRootLabel(other)+": "+stateStyled(state))
 			}
 			if len(drift) == 0 {
 				drift = append(drift, "no other root on this machine")

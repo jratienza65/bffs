@@ -11,11 +11,18 @@ import (
 )
 
 // row is a list item that lays itself out as one plain-text line for a
-// given width. Styling is the delegate's: the cursor row is rendered in
-// reverse video as a whole.
+// given width. Styling is the delegate's: the cursor row is rendered as
+// a whole with the selection style; other rows may colour their
+// segments through styledRow.
 type row interface {
 	list.Item
 	render(width int) string
+}
+
+// styledRow is a row that can render itself with per-segment colours
+// (a state glyph, a muted age); the plain render stays the layout.
+type styledRow interface {
+	renderStyled(width int) string
 }
 
 // rowDelegate renders one-line rows with a two-cell cursor gutter.
@@ -32,12 +39,15 @@ func (rowDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) 
 		return
 	}
 	width := m.Width()
-	line := pad(r.render(width-2), width-2)
 	if index == m.Index() {
-		fmt.Fprint(w, styleCursor.Render("> "+line))
+		fmt.Fprint(w, styleCursor.Render("> "+pad(r.render(width-2), width-2)))
 		return
 	}
-	fmt.Fprint(w, "  "+line)
+	if sr, ok := item.(styledRow); ok {
+		fmt.Fprint(w, "  "+cell(sr.renderStyled(width-2), width-2))
+		return
+	}
+	fmt.Fprint(w, "  "+pad(r.render(width-2), width-2))
 }
 
 // newList builds a list with the browser's conventions: no built-in

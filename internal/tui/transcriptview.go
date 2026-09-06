@@ -136,7 +136,11 @@ func renderMessage(stamp, role string, content json.RawMessage) []string {
 	}
 	var text string
 	if err := json.Unmarshal(content, &text); err == nil {
-		return textLines(stamp+prefix, text)
+		lines := textLines(stamp+prefix, text)
+		if role != "assistant" && len(lines) > 0 {
+			lines[0] = stylePrompt.Render(lines[0])
+		}
+		return lines
 	}
 	var blocks []contentBlock
 	if err := json.Unmarshal(content, &blocks); err != nil {

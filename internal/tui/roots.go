@@ -27,15 +27,35 @@ type accountRow struct {
 func (r *accountRow) FilterValue() string { return r.name + " " + r.kind }
 
 func (r *accountRow) render(width int) string {
-	right := r.kind
+	name, right := r.parts(width)
+	if right == "" {
+		return name
+	}
+	return name + " " + right
+}
+
+// renderStyled colours the active marker and mutes the kind.
+func (r *accountRow) renderStyled(width int) string {
+	name, right := r.parts(width)
+	if right == "" {
+		return name
+	}
+	if r.active {
+		return name + " " + styleOK.Render(right)
+	}
+	return name + " " + styleFaint.Render(right)
+}
+
+func (r *accountRow) parts(width int) (name, right string) {
+	right = r.kind
 	if r.active {
 		right = "● active"
 	}
 	nameW := width - 1 - lipgloss.Width(right)
 	if nameW < 6 {
-		return truncate(transcripts.Sanitize(r.name), width)
+		return truncate(transcripts.Sanitize(r.name), width), ""
 	}
-	return pad(transcripts.Sanitize(r.name), nameW) + " " + right
+	return pad(transcripts.Sanitize(r.name), nameW), right
 }
 
 // accountRows lists every account of accounts.toml (the active one

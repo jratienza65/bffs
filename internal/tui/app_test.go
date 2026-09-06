@@ -217,7 +217,9 @@ func (h *harness) keys(ks ...string) {
 	}
 }
 
-func (h *harness) view() string { return h.a.View().Content }
+// view is the rendered frame with SGR styling stripped: tests assert on
+// content; colours are the theme's business (theme_test.go).
+func (h *harness) view() string { return plain(h.a.View().Content) }
 
 // keyPress builds the message the terminal would send for a key name.
 func keyPress(s string) tea.KeyPressMsg {

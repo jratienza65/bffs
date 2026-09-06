@@ -53,7 +53,7 @@ func TestDriftLines(t *testing.T) {
 		},
 		warnings: []string{"w\x1b[2Jarn"},
 	}
-	out := strings.Join(driftLines(d, "a", now), "\n")
+	out := plain(strings.Join(driftLines(d, "a", now), "\n"))
 	wantAll(t, out, "/p", "3 sessions · memory 2 files · newest 1h ago", "ACROSS ROOTS", "reference: shared pool: a, b",
 		"shared pool: a, b", "3", "2 files",
 		"account: w", "1", "differs — MEMORY.md only here, n.md differs (newer there)",

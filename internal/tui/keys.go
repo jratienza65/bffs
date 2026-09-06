@@ -26,6 +26,7 @@ type keyMap struct {
 	NextTab, PrevTab           key.Binding
 	ScreenMode, ScreenModePrev key.Binding
 	Menu                       key.Binding
+	Theme                      key.Binding
 
 	// The action keys (plan §11, tui-v2 §1): each opens an overlay over
 	// the main pane; i (receive) works from every panel.
@@ -73,6 +74,7 @@ var keys = keyMap{
 	ScreenMode:     key.NewBinding(key.WithKeys("+", "="), key.WithHelp("+", "bigger preview")),
 	ScreenModePrev: key.NewBinding(key.WithKeys("_", "-"), key.WithHelp("_", "smaller preview")),
 	Menu:           key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "more")),
+	Theme:          key.NewBinding(key.WithKeys("T"), key.WithHelp("T", "theme")),
 
 	Export:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "export")),
 	Send:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "send")),

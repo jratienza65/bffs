@@ -33,17 +33,34 @@ const (
 // render lays the row out for the side column: the name, the size, the
 // age and a "pin" tag for a pinned file.
 func (r *memoryFileRow) render(width int) string {
-	pin := "   "
+	name, meta, pin := r.parts(width)
+	if meta == "" {
+		return name
+	}
+	return name + " " + meta + " " + pin
+}
+
+// renderStyled mutes the size and age and colours the pin tag.
+func (r *memoryFileRow) renderStyled(width int) string {
+	name, meta, pin := r.parts(width)
+	if meta == "" {
+		return name
+	}
+	return name + " " + styleFaint.Render(meta) + " " + stylePin.Render(pin)
+}
+
+func (r *memoryFileRow) parts(width int) (name, meta, pin string) {
+	pin = "   "
 	if r.f.Pinned {
 		pin = "pin"
 	}
-	right := pad(formatSize(r.f.Size), memorySizeW) + " " + pad(humanizeAgo(r.f.ModTime, r.svc.now()), memoryAgeW) + " " + pin
-	nameW := width - 1 - len([]rune(right))
-	name := transcripts.Sanitize(r.f.Name)
+	meta = pad(formatSize(r.f.Size), memorySizeW) + " " + pad(humanizeAgo(r.f.ModTime, r.svc.now()), memoryAgeW)
+	nameW := width - 1 - len([]rune(meta)) - 1 - 3
+	name = transcripts.Sanitize(r.f.Name)
 	if nameW < 8 {
-		return truncate(name, width)
+		return truncate(name, width), "", ""
 	}
-	return pad(name, nameW) + " " + right
+	return pad(name, nameW), meta, pin
 }
 
 // loadMemories catalogs every memory directory of root once; the app

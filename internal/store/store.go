@@ -102,6 +102,12 @@ type State struct {
 	// stays silent, fast and import-free. Round-tripped so a value a user
 	// sets ahead of time survives every other state.toml write.
 	TrustSync string `toml:"trust_sync,omitempty"`
+
+	// Theme names the browser's colour theme (`bffs` TUI: default,
+	// catppuccin, gruvbox, tokyo-night, solarized, mono). Empty means the
+	// default; $BFFS_THEME overrides it and NO_COLOR forces mono. The TUI's
+	// T key writes it.
+	Theme string `toml:"theme,omitempty"`
 }
 
 func (a Accounts) Names() []string {

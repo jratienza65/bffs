@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"charm.land/lipgloss/v2"
 	"context"
 	"path/filepath"
 	"time"
@@ -78,16 +79,49 @@ func (r *sessionRow) title() string {
 // row, the state glyph, the title and the age. Account, size and
 // branch belong to the preview.
 func (r *sessionRow) render(width int) string {
-	mark := " "
+	mark, glyph, title, age := r.parts(width)
+	if title == "" {
+		return truncate(mark+glyph+" "+r.title(), width)
+	}
+	return mark + glyph + " " + title + " " + age
+}
+
+// renderStyled colours the segments: the mark, the state glyph, the
+// age; the title keeps the terminal's text colour.
+func (r *sessionRow) renderStyled(width int) string {
+	mark, glyph, title, age := r.parts(width)
+	if title == "" {
+		return truncate(mark+glyph+" "+r.title(), width)
+	}
+	return styleMark.Render(mark) + glyphStyle(r.s).Render(glyph) + " " + title + " " + styleFaint.Render(age)
+}
+
+// parts lays the row out; title is "" when the width only fits the
+// prefix and the title.
+func (r *sessionRow) parts(width int) (mark, glyph, title, age string) {
+	mark = " "
 	if r.sel[r.s.ID] {
 		mark = "*"
 	}
-	prefix := mark + sessionGlyph(r.s) + " "
+	glyph = sessionGlyph(r.s)
 	titleW := width - 3 - 1 - sessionAgeW
 	if titleW < 8 {
-		return truncate(prefix+r.title(), width)
+		return mark, glyph, "", ""
 	}
-	return prefix + pad(r.title(), titleW) + " " + pad(humanizeAgo(r.s.LastTS, r.now()), sessionAgeW)
+	return mark, glyph, pad(r.title(), titleW), pad(humanizeAgo(r.s.LastTS, r.now()), sessionAgeW)
+}
+
+// glyphStyle colours a session's state glyph.
+func glyphStyle(s transcripts.Session) lipgloss.Style {
+	switch {
+	case s.Live:
+		return styleLive
+	case s.Import != nil:
+		return styleImported
+	case s.Cwd != "" && !s.CwdExists:
+		return styleMissing
+	}
+	return lipgloss.NewStyle()
 }
 
 // loadSessions is the fast path for one project: liveness once, then

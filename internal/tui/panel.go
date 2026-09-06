@@ -37,7 +37,7 @@ func newPanel(id panelID, name, singular, plural, empty string) *panel {
 	p := &panel{id: id, name: name, empty: empty, list: newList(nil, singular, plural)}
 	p.list.SetShowStatusBar(false)
 	p.list.SetShowPagination(false)
-	p.list.Styles.Title = styleFaint
+	p.list.Styles.Title = styleTitle
 	return p
 }
 
@@ -130,6 +130,7 @@ func (p *panel) body(width, height int, focused bool) []string {
 		return fill([]string{styleFaint.Render(truncate(text, width))}, height)
 	}
 	if focused {
+		p.list.Styles.Title = styleTitle
 		return fill(strings.Split(p.list.View(), "\n"), height)
 	}
 	lines := make([]string, 0, height)

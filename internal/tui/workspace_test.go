@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -234,6 +235,9 @@ func TestMouse(t *testing.T) {
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	f.transcript(f.slug, sid2, f.project, "first prompt of two", fixedNow.Add(-2*time.Hour))
 	f.transcript(f.slug, sid3, f.project, "first prompt of three", fixedNow.Add(-3*time.Hour))
+	for i := 4; i < 14; i++ { // enough rows that a panel can scroll
+		f.transcript(f.slug, fmt.Sprintf("%08d-1111-4222-8333-444455556666", i), f.project, fmt.Sprintf("prompt %d", i), fixedNow.Add(-time.Duration(i)*time.Hour))
+	}
 	h := f.start("sessions")
 	ws := h.a.ws
 	if v := h.a.View(); v.MouseMode != tea.MouseModeCellMotion {
@@ -255,12 +259,21 @@ func TestMouse(t *testing.T) {
 	}
 	wantAll(t, h.view(), "first prompt of three", "session "+sid3[:8])
 
-	// The wheel over the same panel moves its cursor without changing
-	// focus; over the preview it scrolls the pane.
-	h.send(tea.MouseWheelMsg{X: 4, Y: row(1), Button: tea.MouseWheelUp})
-	if r, ok := wsCursor(h, panelItems).(*sessionRow); !ok || r.s.ID != sid1 {
-		t.Errorf("wheel up should move the cursor to the top, got %+v", wsCursor(h, panelItems))
+	// The wheel over a panel scrolls its view and leaves the selection
+	// (and everything derived from it) alone.
+	h.send(tea.WindowSizeMsg{Width: 400, Height: 20}) // fewer rows than sessions
+	hs = ws.panelHeights()
+	items := ws.panels[panelItems]
+	h.send(tea.MouseWheelMsg{X: 4, Y: 1 + (1 + hs[0]) + (1 + hs[1]) + 2, Button: tea.MouseWheelDown})
+	if items.offset == 0 {
+		t.Errorf("the wheel should scroll the panel's view, offset = %d", items.offset)
 	}
+	if r, ok := wsCursor(h, panelItems).(*sessionRow); !ok || r.s.ID != sid3 {
+		t.Errorf("the wheel must not move the selection, got %+v", wsCursor(h, panelItems))
+	}
+	wantAll(t, h.view(), "session "+sid3[:8]) // the preview did not follow either
+	h.send(tea.WindowSizeMsg{Width: 400, Height: 40})
+	hs = ws.panelHeights()
 	// Over the preview the wheel scrolls the pane (a short window, so
 	// the session preview overflows it) and never moves focus.
 	h.send(tea.WindowSizeMsg{Width: 400, Height: 18})

@@ -771,7 +771,18 @@ func (ws *workspace) requestTitles() tea.Cmd {
 	if ws.tab != tabSessions {
 		return nil
 	}
-	items, start, end := visibleRange(ws.panels[panelItems].list)
+	p := ws.panels[panelItems]
+	items := p.list.Items()
+	if p.list.FilterState() != list.Unfiltered {
+		items = p.list.VisibleItems()
+	}
+	start, end := p.window()
+	if start > len(items) {
+		start = len(items)
+	}
+	if end > len(items) {
+		end = len(items)
+	}
 	return ws.request(items[start:end])
 }
 
@@ -1524,16 +1535,14 @@ func (ws *workspace) hitTest(x, y int) hit {
 // its own cursor.
 func (ws *workspace) rowIndex(id panelID, line int) int {
 	p := ws.panels[id]
-	items := p.list.VisibleItems()
-	idx := p.list.Index() + line
 	if id == ws.focus && !ws.mainFocus {
 		if line == 0 {
 			return -1 // the status / filter row
 		}
-		per := max(1, p.list.Paginator.PerPage)
-		idx = p.list.Paginator.Page*per + line - 1
+		line--
 	}
-	if idx < 0 || idx >= len(items) {
+	idx := p.offset + line
+	if idx < 0 || idx >= len(p.list.VisibleItems()) {
 		return -1
 	}
 	return idx
@@ -1566,20 +1575,14 @@ func (ws *workspace) mouse(msg tea.MouseMsg, y int) tea.Cmd {
 			}
 			return nil
 		}
-		p := ws.panels[h.panel]
-		for i := 0; i < wheelLines; i++ {
-			if up {
-				p.list.CursorUp()
-			} else {
-				p.list.CursorDown()
-			}
+		// The wheel moves the view, never the selection: the chain
+		// below stays where it is and only the rows on screen change.
+		n := wheelLines
+		if up {
+			n = -n
 		}
-		if h.panel != ws.focus {
-			// Scrolling an unfocused panel moves its cursor; the chain
-			// below it follows, as it does from the keyboard.
-			return ws.sync()
-		}
-		return tea.Batch(ws.sync(), ws.requestTitles())
+		ws.panels[h.panel].scroll(n)
+		return ws.requestTitles()
 
 	case tea.MouseClickMsg:
 		if e.Button != tea.MouseLeft {

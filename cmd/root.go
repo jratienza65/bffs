@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -27,6 +28,18 @@ via a bffs.toml file in the project root.`,
 	// Runtime errors print a clean message; cobra's usage block only appears
 	// for actual flag/argument parse errors.
 	SilenceUsage: true,
+	Args:         cobra.NoArgs,
+	// Bare `bffs` on a terminal is the interactive browser: accounts,
+	// projects, sessions and memory in one place. Elsewhere (a pipe, a
+	// bffs_notui build) it prints the help.
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if tuiSupported() {
+			if err := runTUI(cmdContext(cmd), mustConfigDir(cmd), "", "sessions"); !errors.Is(err, errTUIDisabled) {
+				return err
+			}
+		}
+		return cmd.Help()
+	},
 }
 
 // Execute runs the cobra tree and ends the process with the error's exit

@@ -2,13 +2,11 @@ package tui
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/jratienza65/bffs/internal/claudejson"
 	"github.com/jratienza65/bffs/internal/transcripts"
 	"github.com/jratienza65/bffs/internal/trust"
 )
@@ -22,31 +20,36 @@ func previewCmd(key string, gen int, build func() ([]string, error)) tea.Cmd {
 	}
 }
 
-// kvLine lays out one "label: value" line, the value sanitised.
+// kvLine lays out one "label  value" detail line, the value sanitised.
 func kvLine(label, value string) string {
-	return fmt.Sprintf("%-14s%s", label+":", transcripts.Sanitize(value))
+	return "  " + pad(label, 12) + " " + transcripts.Sanitize(value)
 }
 
-// rootPreview describes one root: where it lives, who reads it, its
-// retention and how many sessions are live in it.
-func rootPreview(svc *services, root transcripts.Root, projects int) func() ([]string, error) {
+// accountPreview describes one perspective: the account, the pool it
+// browses, and what its .claude.json records.
+func accountPreview(svc *services, r *accountRow) func() ([]string, error) {
 	return func() ([]string, error) {
-		lines := []string{styleHeader.Render(rootLabel(root)), ""}
-		lines = append(lines, kvLine("projects dir", shortPath(root.Dir)), kvLine("config dir", shortPath(root.ConfigDir)))
-		if root.ClaudeJSON != "" {
-			lines = append(lines, kvLine(".claude.json", shortPath(root.ClaudeJSON)))
+		lines := []string{styleHeader.Render(transcripts.Sanitize(r.name))}
+		summary := r.kind
+		switch r.kind {
+		case "partial", "full":
+			summary = "oauth · " + r.kind + " isolation"
+		case "api key":
+			summary = "api key · runs against the unmanaged ~/.claude"
+		case "home":
+			summary = "the unmanaged ~/.claude — no bffs account reads it"
+		case "orphan":
+			summary = "orphan session dir — no account behind it; read-only"
 		}
-		switch {
-		case root.Orphan:
-			lines = append(lines, kvLine("kind", "orphan session dir — no account behind it; read-only source"))
-		case root.Owner != "":
-			lines = append(lines, kvLine("kind", "full isolation — its own transcripts, memory and .claude.json"))
-		case root.Shared:
-			lines = append(lines, kvLine("kind", "shared pool — partial-isolation accounts symlink projects/ here"), kvLine("accounts", accountList(root.Accounts)))
-		default:
-			lines = append(lines, kvLine("kind", "home — the unmanaged ~/.claude"))
+		if r.active {
+			summary += " · active"
 		}
-		lines = append(lines, kvLine("projects", fmt.Sprint(projects)))
+		if acc, ok := svc.accs.Get(r.name); ok && acc.Email != "" {
+			summary += " · " + transcripts.Sanitize(acc.Email)
+		}
+		lines = append(lines, summary, "")
+		root := r.root
+		lines = append(lines, section("pool", ""), kvLine("root", shortRootLabel(root)), kvLine("projects dir", shortPath(root.Dir)), kvLine("config dir", shortPath(root.ConfigDir)))
 		days, src := transcripts.CleanupPeriodDays(root.ConfigDir)
 		if days == 0 {
 			lines = append(lines, kvLine("retention", "never swept ("+src+")"))
@@ -56,69 +59,175 @@ func rootPreview(svc *services, root transcripts.Root, projects int) func() ([]s
 		if live, err := transcripts.Live(svc.ctx, []string{root.ConfigDir}); err == nil {
 			lines = append(lines, kvLine("live sessions", fmt.Sprint(len(live))))
 		}
-		lines = append(lines, "", styleFaint.Render("enter opens the projects · i receives a bundle into this root"))
+		if file := accountJSON(svc, r); file != "" {
+			lines = append(lines, "", section("recorded in its .claude.json", shortPath(file)))
+			if flags, err := claudejson.ReadProjectFlags(file); err == nil {
+				trusted, pointers := 0, 0
+				for _, f := range flags {
+					if f.TrustAccepted != nil && *f.TrustAccepted {
+						trusted++
+					}
+					if f.LastSessionID != "" {
+						pointers++
+					}
+				}
+				lines = append(lines, kvLine("projects", fmt.Sprint(len(flags))), kvLine("trusted", fmt.Sprint(trusted)), kvLine("last sessions", fmt.Sprint(pointers)))
+			} else {
+				lines = append(lines, kvLine("projects", "(no file yet)"))
+			}
+		}
+		hint := "enter opens its projects · i receives a bundle into its pool"
+		if r.kind == "partial" || r.kind == "full" || r.kind == "api key" {
+			hint = "space makes it the active account · " + hint
+		}
+		lines = append(lines, "", styleFaint.Render(hint))
 		return lines, nil
 	}
 }
 
-// driftPreview is the project's two drift tables.
-func driftPreview(svc *services, root transcripts.Root, slug, cwd string) func() ([]string, error) {
+// accountJSON is the .claude.json of a perspective, "" for orphans.
+func accountJSON(svc *services, r *accountRow) string {
+	if r.kind == "orphan" {
+		return ""
+	}
+	files, err := trust.Files(svc.cfgDir, svc.homeJSON(), svc.accs)
+	if err != nil {
+		return ""
+	}
+	if f, ok := files[r.name]; ok {
+		return f
+	}
+	if r.kind == "api key" || r.kind == "home" {
+		return files[transcripts.HomeName]
+	}
+	return ""
+}
+
+// driftPreview is the project's summary and its two drift tables.
+func driftPreview(svc *services, root transcripts.Root, slug, cwd, perspective string) func() ([]string, error) {
 	return func() ([]string, error) {
-		return driftLines(computeDrift(svc.ctx, svc, root, slug, cwd)), nil
+		return driftLines(computeDrift(svc.ctx, svc, root, slug, cwd), perspective, svc.now()), nil
 	}
 }
 
-// sessionPreview is the session's facts, its per-account state and an
-// excerpt from the head and tail windows — never the whole transcript.
-func sessionPreview(svc *services, s transcripts.Session, resolved bool) func() ([]string, error) {
+// sessionPreview leads with what the session is about — title, a
+// one-line summary, the resume command, the excerpt from the head and
+// tail windows — then the per-account row, the files Claude keeps for
+// it and the identifiers. Never the whole transcript.
+func sessionPreview(svc *services, s transcripts.Session, resolved bool, perspective string) func() ([]string, error) {
 	return func() ([]string, error) {
 		msg, _ := loadDetail(svc, s, resolved)().(showLoadedMsg)
 		if msg.err != nil {
 			return nil, msg.err
 		}
 		d := msg.detail
-		lines := []string{styleHeader.Render("session " + shortID(s.ID))}
-		lines = append(lines, detailLines(d, svc.now())...)
-		if d.Session.Cwd != "" {
-			if key, err := transcripts.ProjectKey(d.Session.Cwd); err == nil {
-				gitRoot, _ := transcripts.GitRoot(d.Session.Cwd)
+		s := d.Session
+		now := svc.now()
+		title := transcripts.Sanitize(s.Title)
+		if title == "" {
+			title = "(untitled) " + shortID(s.ID)
+		}
+		lines := []string{styleHeader.Render(title)}
+		var parts []string
+		if s.Account != "" {
+			parts = append(parts, transcripts.Sanitize(s.Account))
+		} else {
+			parts = append(parts, "account unknown")
+		}
+		switch {
+		case s.Live && d.LivePID > 0:
+			parts = append(parts, fmt.Sprintf("live (pid %d)", d.LivePID))
+		case sessionState(s) != "":
+			parts = append(parts, sessionState(s))
+		}
+		parts = append(parts, humanizeAgo(s.LastTS, now), formatSize(s.Size))
+		if s.GitBranch != "" {
+			parts = append(parts, transcripts.Sanitize(s.GitBranch))
+		}
+		switch {
+		case s.Cwd == "":
+			parts = append(parts, "no cwd recorded")
+		case s.CwdExists:
+			parts = append(parts, shortPath(s.Cwd))
+		default:
+			parts = append(parts, shortPath(s.Cwd)+" (missing here)")
+		}
+		lines = append(lines, strings.Join(parts, " · "), styleFaint.Render("resume  "+resumeLine(s)))
+
+		head, _ := transcripts.ReadHead(s.Path)
+		tail, _ := transcripts.ReadTail(s.Path)
+		lines = append(lines, "", section("excerpt", "enter opens the full transcript"))
+		lines = append(lines, excerptLines(head, tail)...)
+
+		if s.Cwd != "" {
+			if key, err := transcripts.ProjectKey(s.Cwd); err == nil {
+				gitRoot, _ := transcripts.GitRoot(s.Cwd)
 				if files, err := trust.Files(svc.cfgDir, svc.homeJSON(), svc.accs); err == nil {
 					if sts, err := trust.Report(files, key, gitRoot); err == nil {
-						lines = append(lines, "", styleHeader.Render("per account")+"  "+styleFaint.Render("(t syncs trust · L points an account's last-session here)"))
-						lines = append(lines, accountRows(sts, s.ID)...)
+						var rows []accountDrift
+						for _, st := range sts {
+							ad := accountDrift{status: st}
+							if flags, err := readFlags(st.File); err == nil {
+								ad.lastSession = flags[key]
+								ad.inProject = ad.lastSession == s.ID
+							}
+							rows = append(rows, ad)
+						}
+						lines = append(lines, "", section("per account", "t trust sync · L point a last session here · ← selected account"))
+						lines = append(lines, accountTable(rows, perspective, "(this session)")...)
 					}
 				}
 			}
 		}
-		head, _ := transcripts.ReadHead(s.Path)
-		tail, _ := transcripts.ReadTail(s.Path)
-		lines = append(lines, "", styleHeader.Render("excerpt")+"  "+styleFaint.Render("(enter opens the full transcript)"))
-		lines = append(lines, excerptLines(head, tail)...)
-		return lines, nil
-	}
-}
-
-// accountRows renders the trust matrix rows for a session's project,
-// marking the accounts whose last-session pointer is this session.
-func accountRows(sts []trust.Status, sid string) []string {
-	var lines []string
-	for _, st := range sts {
-		folder := answerCell(st.Folder)
-		if st.InheritedFrom != "" {
-			folder += "*"
+		if fl := artifactLines(s.Root, s); len(fl) > 0 {
+			lines = append(lines, "", section("files", ""))
+			lines = append(lines, fl...)
 		}
-		last := "-"
-		if flags, err := readFlags(st.File); err == nil {
-			if id := flags[st.ProjectKey]; id != "" {
-				last = shortID(transcripts.Sanitize(id))
-				if id == sid {
-					last += " (this session)"
-				}
+		lines = append(lines, "", section("details", ""), kvLine("id", s.ID), kvLine("root", shortRootLabel(s.Root)+"  "+shortPath(s.Root.Dir)))
+		if !s.FirstTS.IsZero() {
+			first := s.FirstTS.Local().Format("2006-01-02 15:04") + " (" + humanizeAgo(s.FirstTS, now) + ")"
+			if s.Version != "" {
+				first += " · claude " + s.Version
+			}
+			lines = append(lines, kvLine("started", first))
+		}
+		if s.Account != "" {
+			attr := s.AttribSource
+			if len(d.Claimants) > 0 {
+				attr += " · pointer of " + transcripts.Sanitize(strings.Join(d.Claimants, ", "))
+			}
+			lines = append(lines, kvLine("attribution", attr))
+		} else {
+			lines = append(lines, kvLine("attribution", "unknown: no launch-log, lastSessionId or import evidence"))
+		}
+		if s.Relocated {
+			lines = append(lines, kvLine("started in", shortPath(s.HeadCwd)+" (relocated since)"))
+		}
+		if s.Import != nil && s.Import.Record != nil {
+			r := s.Import.Record
+			src := transcripts.Sanitize(r.Source.Hostname)
+			if r.Source.User != "" || r.Source.Home != "" {
+				src += fmt.Sprintf(" (%s, %s)", transcripts.Sanitize(r.Source.User), transcripts.Sanitize(r.Source.Home))
+			}
+			acct := r.Account
+			if acct == "" {
+				acct = transcripts.HomeName
+			}
+			kind := r.Kind
+			if !r.ImportedAt.IsZero() {
+				kind += " " + r.ImportedAt.Local().Format("2006-01-02")
+			}
+			line := fmt.Sprintf("bundle %s (%s) from %s, account %s", transcripts.Sanitize(r.BundleID), kind, src, transcripts.Sanitize(acct))
+			if s.Import.Session != nil {
+				line += ", status " + transcripts.Sanitize(s.Import.Session.Status)
+			}
+			lines = append(lines, kvLine("import", line))
+			if s.Import.Session != nil && s.Import.Session.OldCwd != "" {
+				lines = append(lines, kvLine("old cwd", s.Import.Session.OldCwd))
 			}
 		}
-		lines = append(lines, "  "+pad(transcripts.Sanitize(st.Account), driftAccountW)+" trust "+pad(folder, driftAnswerW)+" external "+pad(answerCell(st.External), driftAnswerW)+" last-session "+last)
+		return lines, nil
 	}
-	return lines
 }
 
 // excerptLines are the prompts and summary the windows carry.
@@ -126,7 +235,7 @@ func excerptLines(head transcripts.Head, tail transcripts.Tail) []string {
 	var lines []string
 	add := func(label, text string) {
 		if text != "" {
-			lines = append(lines, textLines(pad(label+":", 15), transcripts.Sanitize(text))...)
+			lines = append(lines, textLines("  "+pad(label, 15), transcripts.Sanitize(text))...)
 		}
 	}
 	add("first prompt", head.FirstPrompt)
@@ -139,27 +248,25 @@ func excerptLines(head transcripts.Head, tail transcripts.Tail) []string {
 }
 
 // memoryFilePreview is one memory file: who reads it, how the same file
-// compares on the other roots, then its contents.
+// compares on the other roots, its path references, then its contents.
 func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, name string) func() ([]string, error) {
-	path := filepath.Join(dir, filepath.FromSlash(name))
+	path := joinName(dir, name)
 	return func() ([]string, error) {
 		lines := []string{styleHeader.Render(transcripts.Sanitize(name)) + "  " + styleFaint.Render(shortPath(path)), kvLine("read by", memoryVisibility(root))}
-		here, err := memoryHashes(dir)
-		if err == nil {
+		if here, err := memoryHashes(dir); err == nil {
 			var drift []string
 			for _, other := range svc.roots {
 				if other.Dir == root.Dir && other.ConfigDir == root.ConfigDir {
 					continue
 				}
-				od := memoryDirFor(other, slug, cwd)
 				state := "none"
-				if od != "" {
+				if od := memoryDirFor(other, slug, cwd); od != "" {
 					if there, err := memoryHashes(od); err == nil {
-						other := map[string]memFile{}
+						otherFiles := map[string]memFile{}
 						if mf, ok := there[name]; ok {
-							other[name] = mf
+							otherFiles[name] = mf
 						}
-						_, diffs := compareMemory(map[string]memFile{name: here[name]}, other)
+						_, diffs := compareMemory(map[string]memFile{name: here[name]}, otherFiles)
 						state = "same"
 						for _, d := range diffs {
 							if d.name == name {
@@ -175,7 +282,11 @@ func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, nam
 			}
 			lines = append(lines, kvLine("drift", strings.Join(drift, " · ")))
 		}
-		lines = append(lines, "")
+		if refs := refLines(dir, name); len(refs) > 0 {
+			lines = append(lines, "", section("references", "absolute paths and @-refs inside the file"))
+			lines = append(lines, refs...)
+		}
+		lines = append(lines, "", section("content", ""))
 		msg, _ := loadFile(path)().(fileLoadedMsg)
 		if msg.err != nil {
 			return lines, msg.err
@@ -183,75 +294,6 @@ func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, nam
 		lines = append(lines, msg.lines...)
 		if msg.truncated {
 			lines = append(lines, styleFaint.Render("… (first 1 MB)"))
-		}
-		return lines, nil
-	}
-}
-
-// artifactPreview shows a regular file's head or a directory's entries.
-func artifactPreview(r *artifactRow) func() ([]string, error) {
-	return func() ([]string, error) {
-		lines := []string{styleHeader.Render(transcripts.Sanitize(strings.TrimSpace(r.label))) + "  " + styleFaint.Render(shortPath(r.path))}
-		switch {
-		case !r.exists:
-			lines = append(lines, styleFaint.Render("(absent)"))
-		case r.isDir:
-			entries, err := os.ReadDir(r.path)
-			if err != nil {
-				return lines, err
-			}
-			sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-			lines = append(lines, kvLine("entries", fmt.Sprint(len(entries))), "")
-			for i, e := range entries {
-				if i == 200 {
-					lines = append(lines, styleFaint.Render("… (first 200 entries)"))
-					break
-				}
-				name := transcripts.Sanitize(e.Name())
-				if e.IsDir() {
-					lines = append(lines, "  "+name+"/")
-				} else if info, err := e.Info(); err == nil {
-					lines = append(lines, "  "+pad(name, 48)+" "+formatSize(info.Size()))
-				} else {
-					lines = append(lines, "  "+name)
-				}
-			}
-		default:
-			lines = append(lines, kvLine("size", formatSize(r.size)), "")
-			msg, _ := loadFile(r.path)().(fileLoadedMsg)
-			if msg.err != nil {
-				return lines, msg.err
-			}
-			lines = append(lines, msg.lines...)
-			if msg.truncated {
-				lines = append(lines, styleFaint.Render("… (first 1 MB)"))
-			}
-		}
-		return lines, nil
-	}
-}
-
-// refPreview shows one path reference and whether it resolves here.
-func refPreview(r *refRow) func() ([]string, error) {
-	return func() ([]string, error) {
-		ref := r.ref
-		kind := "absolute path"
-		if ref.Kind == transcripts.PathKindAt {
-			kind = "@-reference"
-		}
-		lines := []string{styleHeader.Render(transcripts.Sanitize(ref.Path)), kvLine("kind", kind), kvLine("found in", fmt.Sprintf("%s:%d", ref.File, ref.Line))}
-		p := strings.TrimPrefix(ref.Path, "@")
-		if strings.HasPrefix(p, "~/") {
-			if home, err := os.UserHomeDir(); err == nil {
-				p = filepath.Join(home, p[2:])
-			}
-		}
-		if filepath.IsAbs(p) {
-			if _, err := os.Stat(p); err == nil {
-				lines = append(lines, kvLine("on this machine", "exists"))
-			} else {
-				lines = append(lines, kvLine("on this machine", "missing — after a rehome, r rewrites memory paths"))
-			}
 		}
 		return lines, nil
 	}

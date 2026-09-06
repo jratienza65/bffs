@@ -64,16 +64,16 @@ func TestDriftAcrossRoots(t *testing.T) {
 	h := f.start("sessions")
 	out := h.view()
 	wantAll(t, out, "project "+shortPath(f.project), "reference: shared pool: work",
-		"shared pool: work", "2 files (reference)",
+		"shared pool: work", "2 files",
 		"account: full", "differs — MEMORY.md only here, notes.md differs (newer there)",
-		"per account",
-		"work         -          -          "+sid1[:8]+" (this project)",
-		"home         accepted   accepted   -")
+		"PER ACCOUNT",
+		"work        ← –        –        "+sid1[:8]+" (this project)",
+		"home          ✓        ✓        –")
 	// The memory file preview compares the same file on the other root.
 	h.keys("3", "]", "down")
-	wantAll(t, h.view(), "memory notes.md", "drift:        account: full: differs (newer there)")
+	wantAll(t, h.view(), "memory notes.md", "drift        account: full: differs (newer there)")
 	h.keys("up")
-	wantAll(t, h.view(), "memory MEMORY.md", "drift:        account: full: only here")
+	wantAll(t, h.view(), "memory MEMORY.md", "drift        account: full: only here")
 }
 
 // x lists the actions the selection allows and runs the chosen one
@@ -194,16 +194,17 @@ func TestPointerScreen(t *testing.T) {
 		t.Errorf("lastSessionId = %q, want %s", flags[key].LastSessionID, sid1)
 	}
 	// The refreshed preview shows the pointer on the account row.
-	wantAll(t, h.view(), "last-session "+sid1[:8]+" (this session)")
+	wantAll(t, h.view(), "work        ← –        –        "+sid1[:8]+" (this session)")
 	// Pointing again is a no-op with a status line.
 	h.keys("L", "enter")
 	wantAll(t, h.view(), "work already points at this session")
 	h.keys("esc")
 }
 
-// Panel 4 lists a session's artifacts and previews the one under the
-// cursor; enter on the transcript opens the full viewer.
-func TestFilesPanel(t *testing.T) {
+// The session preview lists the files Claude keeps for it — only the
+// ones that exist — and enter on the transcript row is not needed: the
+// transcript opens from the row itself.
+func TestSessionPreviewFiles(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	side := filepath.Join(f.claudeDir, "projects", f.slug, sid1, "subagents")
@@ -213,24 +214,8 @@ func TestFilesPanel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(side, "agent-1.jsonl"), []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	h, ws := f.openSessions()
-	wantAll(t, h.view(), "transcript "+sid1[:8]+".jsonl", "sidecar/", "subagents/", "1 subagent", "file-history/", "(absent)")
-	h.keys("4")
-	if ws.focus != panelFiles {
-		t.Fatalf("4 should focus the files panel, got %d", ws.focus)
-	}
-	wantAll(t, h.view(), "size:", "first prompt of one")
-	h.keys("enter")
-	if _, ok := h.a.top().(*transcriptScreen); !ok {
-		t.Fatalf("enter on the transcript row should open the viewer, got %T", h.a.top())
-	}
-	h.keys("esc", "down", "down")
-	if r, ok := wsCursor(h, panelFiles).(*artifactRow); !ok || !r.isDir {
-		t.Fatalf("cursor row = %+v", wsCursor(h, panelFiles))
-	}
-	wantAll(t, h.view(), "entries:")
-	h.keys("enter")
-	if !ws.mainFocus {
-		t.Error("enter on a directory should focus the main pane")
-	}
+	h, _ := f.openSessions()
+	out := h.view()
+	wantAll(t, out, "FILES", "transcript   0 KB", "sidecar      0 KB, 1 subagent")
+	wantNone(t, out, "(absent)", "file-history", "tasks")
 }

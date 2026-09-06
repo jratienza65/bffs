@@ -12,22 +12,22 @@ import (
 type panelID int
 
 const (
-	panelRoots panelID = iota
+	panelAccounts panelID = iota
 	panelProjects
 	panelItems // sessions | memory, tabbed
-	panelFiles // artifacts of a session, references of a memory file
 	panelCount
 )
 
 // panel is one framed list of the side column. It owns a list.Model
 // (rows, cursor, filter, paging) and knows how to draw itself expanded
-// (the focused panel: the list) or collapsed (the selected row and what
-// follows it, without a cursor).
+// (the focused panel: the list, its title row carrying a one-line
+// status or the filter input) or collapsed (the rows from the selected
+// one down, the selection muted, no cursor).
 type panel struct {
 	id      panelID
-	name    string // the frame title: "roots", "projects", "sessions"…
+	name    string // the frame title: "accounts", "projects", "sessions"…
 	list    list.Model
-	header  string // column header in the list's title row ("" = the name)
+	status  string // the list's title row: "16 sessions · 2 live"
 	empty   string // shown when there is nothing to list
 	loading bool
 	width   int // inner width
@@ -85,17 +85,19 @@ func (p *panel) count() string {
 func (p *panel) setSize(width, height int) {
 	p.width = width
 	p.list.SetSize(width, max(1, height))
-	title := p.header
-	if title == "" {
-		title = p.name
-	}
-	p.list.Title = truncate(title, max(0, width-2))
+	p.list.Title = truncate(p.status, max(0, width-2))
+}
+
+// setStatus updates the title row.
+func (p *panel) setStatus(s string) {
+	p.status = s
+	p.list.Title = truncate(s, max(0, p.width-2))
 }
 
 // filtering reports whether the panel's filter input has the keyboard.
 func (p *panel) filtering() bool { return p.list.SettingFilter() }
 
-// title is the frame title: number, name, tabs and the count.
+// title is the frame title: number, name (or tabs) and the count.
 func (p *panel) title(tabs string) string {
 	t := fmt.Sprintf("%d %s", int(p.id)+1, p.name)
 	if tabs != "" {
@@ -108,7 +110,7 @@ func (p *panel) title(tabs string) string {
 }
 
 // body draws height lines of width cells: the list when focused, else
-// the rows from the cursor down, the cursor row marked but not styled.
+// the rows from the cursor down with the selection muted.
 func (p *panel) body(width, height int, focused bool) []string {
 	if height <= 0 {
 		return nil
@@ -125,20 +127,19 @@ func (p *panel) body(width, height int, focused bool) []string {
 		return fill(strings.Split(p.list.View(), "\n"), height)
 	}
 	lines := make([]string, 0, height)
-	start := p.list.Index()
-	if start < 0 {
-		start = 0
-	}
+	start := max(0, p.list.Index())
 	for i := start; i < len(items) && len(lines) < height; i++ {
 		r, ok := items[i].(row)
 		if !ok {
 			continue
 		}
-		mark := "  "
+		line := pad("  "+r.render(width-2), width)
 		if i == p.list.Index() {
-			mark = "> "
+			line = styleMuted.Render(line)
+		} else {
+			line = styleFaint.Render(line)
 		}
-		lines = append(lines, styleFaint.Render(pad(mark+r.render(width-2), width)))
+		lines = append(lines, line)
 	}
 	return fill(lines, height)
 }

@@ -307,7 +307,7 @@ func TestRehomeScreen(t *testing.T) {
 	h.keys("3")
 	// Nothing selected and nothing pending: r explains.
 	h.keys("r")
-	wantAll(t, h.view(), "nothing to rehome: select sessions with space")
+	wantAll(t, h.view(), "nothing to rehome: mark sessions with space")
 	if h.a.top() != nil {
 		t.Fatalf("r without a subject must stay put, got %T", h.a.top())
 	}

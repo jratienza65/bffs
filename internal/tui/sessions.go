@@ -25,14 +25,7 @@ func (r *sessionRow) FilterValue() string {
 	return r.s.Title + " " + r.s.ID + " " + r.s.Account + " " + r.s.GitBranch
 }
 
-const (
-	sessionAccountW = 10
-	sessionAgeW     = 8
-	sessionSizeW    = 8
-	sessionBranchW  = 12
-	sessionStateW   = 16
-	sessionFixedW   = 4 + 1 + sessionAccountW + 1 + sessionAgeW + 1 + sessionSizeW + 1 + sessionBranchW + 1 + sessionStateW
-)
+const sessionAgeW = 8
 
 // shortID is the eight-character prefix the tables print.
 func shortID(sid string) string {
@@ -42,8 +35,9 @@ func shortID(sid string) string {
 	return sid
 }
 
-// sessionState is the STATE cell: live, imported·pending (an import
-// whose directory does not exist here), imported, or nothing.
+// sessionState is the STATE word the preview prints: live,
+// imported·pending (an import whose directory does not exist here),
+// imported, or nothing.
 func sessionState(s transcripts.Session) string {
 	switch {
 	case s.Live:
@@ -57,6 +51,20 @@ func sessionState(s transcripts.Session) string {
 	}
 }
 
+// sessionGlyph is the one-cell state of a row: ● live, ↓ imported,
+// ! cwd missing on this machine, nothing otherwise.
+func sessionGlyph(s transcripts.Session) string {
+	switch {
+	case s.Live:
+		return "●"
+	case s.Import != nil:
+		return "↓"
+	case s.Cwd != "" && !s.CwdExists:
+		return "!"
+	}
+	return " "
+}
+
 // title is the TITLE cell: the sanitised title, "-" when the windows
 // held none, the id while they are still being read.
 func (r *sessionRow) title() string {
@@ -66,41 +74,20 @@ func (r *sessionRow) title() string {
 	return dashIfEmpty(transcripts.Sanitize(r.s.Title))
 }
 
+// render lays the row out for the side column: a mark for a selected
+// row, the state glyph, the title and the age. Account, size and
+// branch belong to the preview.
 func (r *sessionRow) render(width int) string {
-	mark := "[ ] "
+	mark := " "
 	if r.sel[r.s.ID] {
-		mark = "[x] "
+		mark = "*"
 	}
-	age := humanizeAgo(r.s.LastTS, r.now())
-	titleW := width - sessionFixedW
-	if titleW < 16 {
-		// Narrow terminal: title, age and state only.
-		titleW = width - 4 - 1 - sessionAgeW - 1 - sessionStateW
-		if titleW < 8 {
-			return truncate(mark+r.title(), width)
-		}
-		return mark + pad(r.title(), titleW) + " " + pad(age, sessionAgeW) + " " + pad(sessionState(r.s), sessionStateW)
+	prefix := mark + sessionGlyph(r.s) + " "
+	titleW := width - 3 - 1 - sessionAgeW
+	if titleW < 8 {
+		return truncate(prefix+r.title(), width)
 	}
-	return mark + pad(r.title(), titleW) +
-		" " + pad(dashIfEmpty(transcripts.Sanitize(r.s.Account)), sessionAccountW) +
-		" " + pad(age, sessionAgeW) +
-		" " + pad(formatSize(r.s.Size), sessionSizeW) +
-		" " + pad(dashIfEmpty(transcripts.Sanitize(r.s.GitBranch)), sessionBranchW) +
-		" " + pad(sessionState(r.s), sessionStateW)
-}
-
-// sessionsHeader is the column header laid out like the rows.
-func sessionsHeader(width int) string {
-	titleW := width - sessionFixedW
-	if titleW < 16 {
-		titleW = width - 4 - 1 - sessionAgeW - 1 - sessionStateW
-		if titleW < 8 {
-			return "TITLE"
-		}
-		return "    " + pad("TITLE", titleW) + " " + pad("LAST", sessionAgeW) + " " + pad("STATE", sessionStateW)
-	}
-	return "    " + pad("TITLE", titleW) + " " + pad("ACCOUNT", sessionAccountW) + " " + pad("LAST", sessionAgeW) +
-		" " + pad("SIZE", sessionSizeW) + " " + pad("BRANCH", sessionBranchW) + " " + pad("STATE", sessionStateW)
+	return prefix + pad(r.title(), titleW) + " " + pad(humanizeAgo(r.s.LastTS, r.now()), sessionAgeW)
 }
 
 // loadSessions is the fast path for one project: liveness once, then

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -12,18 +13,30 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
 
-// screenMode is lazygit's +/_ cycle: the side column at a third, at half,
-// or hidden behind the main pane.
+// screenMode overrides the automatic layout: auto shows the side column
+// and the preview together when the terminal is wide enough; mainOnly
+// gives the preview the whole width; sideOnly hides it until enter.
 type screenMode int
 
 const (
-	modeNormal screenMode = iota
-	modeHalf
+	modeAuto screenMode = iota
 	modeMainOnly
-	modeCount
+	modeSideOnly
+)
+
+// sideAndMainMinWidth is the breakpoint below which the side column and
+// the preview no longer fit together (tui-v2 §2, the floor): the panels
+// take the width and enter shows the preview.
+const sideAndMainMinWidth = 110
+
+// The hard minimum; below it the frame is replaced by a message.
+const (
+	minWidth  = 40
+	minHeight = 12
 )
 
 // itemsTab is what panel 3 lists for the project.
@@ -34,24 +47,25 @@ const (
 	tabMemory
 )
 
-// workspace is the browse layer (tui-v2 §2): four stacked panels in a
-// side column — roots, projects, sessions|memory, files — and a main
-// pane previewing the focused panel's selection. Panels are lists; the
-// chain root → project → item → file is re-derived after every cursor
-// move by sync, which loads only what changed. Overlays (action screens,
-// the menu, the keys) are the app's; the workspace only draws the frame
+// workspace is the browse layer (tui-v2 §2): three stacked panels in a
+// side column — accounts, projects, sessions|memory — and a main pane
+// previewing the focused panel's selection. Panels are lists; the chain
+// account → project → item is re-derived after every cursor move by
+// sync, which loads only what changed. Overlays (action screens, the
+// menu, the keys) are the app's; the workspace only draws the frame
 // they sit in.
 type workspace struct {
 	svc       *services
 	panels    [panelCount]*panel
 	focus     panelID
-	mainFocus bool // the main pane scrolls with the keys
+	mainFocus bool // the main pane has the keys (scrolling; the only view in sideOnly)
 	mode      screenMode
 	tab       itemsTab
 	width     int
 	height    int
 
 	roots      []transcripts.Root
+	account    string // the perspective: the selected row of panel 1
 	rootKey    string
 	root       transcripts.Root
 	project    *projectRow
@@ -59,7 +73,7 @@ type workspace struct {
 	placed     bool   // the cursor was put on the process's project once
 
 	// sessions tab: the rows, their index, the selection and the title
-	// reads in flight — as the old sessions screen kept them.
+	// reads in flight.
 	sessRows      []*sessionRow
 	byID          map[string]*sessionRow
 	sel           map[string]bool
@@ -72,8 +86,6 @@ type workspace struct {
 	memDir       string
 	memLoadedFor string
 
-	filesKey string
-
 	vp          viewport.Model
 	previewKey  string
 	previewGen  int
@@ -83,10 +95,9 @@ type workspace struct {
 
 func newWorkspace(svc *services) *workspace {
 	ws := &workspace{svc: svc, focus: panelProjects, byID: map[string]*sessionRow{}, sel: map[string]bool{}, pending: map[string]bool{}, vp: newViewport()}
-	ws.panels[panelRoots] = newPanel(panelRoots, "roots", "root", "roots", "no roots")
+	ws.panels[panelAccounts] = newPanel(panelAccounts, "accounts", "account", "accounts", "no accounts — bffs login adds one")
 	ws.panels[panelProjects] = newPanel(panelProjects, "projects", "project", "projects", "no projects")
 	ws.panels[panelItems] = newPanel(panelItems, "sessions", "session", "sessions", "no sessions")
-	ws.panels[panelFiles] = newPanel(panelFiles, "files", "file", "files", "nothing selected")
 	if svc.start == "memories" {
 		ws.tab = tabMemory
 		ws.focus = panelItems
@@ -98,16 +109,17 @@ func newWorkspace(svc *services) *workspace {
 // rootID identifies a root for the selection chain.
 func rootID(r transcripts.Root) string { return r.ConfigDir + "\x00" + r.Dir }
 
-// applyTab renames panels 3 and 4 for the active tab.
+// joinName joins a memory dir and a slash-relative file name.
+func joinName(dir, name string) string { return filepath.Join(dir, filepath.FromSlash(name)) }
+
+// applyTab renames panel 3 for the active tab.
 func (ws *workspace) applyTab() {
-	items, files := ws.panels[panelItems], ws.panels[panelFiles]
+	items := ws.panels[panelItems]
 	switch ws.tab {
 	case tabSessions:
 		items.name, items.empty = "sessions", "no sessions"
-		files.name, files.empty = "files", "select a session"
 	case tabMemory:
 		items.name, items.empty = "memory", "no memory dir"
-		files.name, files.empty = "references", "select a memory file"
 	}
 	ws.layout()
 }
@@ -119,39 +131,57 @@ func (ws *workspace) setSize(width, height int) {
 	ws.layout()
 }
 
-// sideWidth is the side column's inner width, 0 when hidden.
-func (ws *workspace) sideWidth() int {
+// tooSmall reports whether the frame cannot be drawn honestly.
+func (ws *workspace) tooSmall() bool { return ws.width < minWidth || ws.height < minHeight }
+
+// sideOnly reports whether the side column takes the whole width and
+// the preview shows on enter.
+func (ws *workspace) sideOnly() bool {
 	switch ws.mode {
+	case modeSideOnly:
+		return true
 	case modeMainOnly:
-		return 0
-	case modeHalf:
-		return max(0, (ws.width-3)/2)
+		return false
 	}
-	w := ws.width / 3
-	if ws.width < 90 {
-		w = (ws.width - 3) / 2
-	}
-	return max(0, min(max(w, 30), 64))
+	return ws.width < sideAndMainMinWidth
 }
 
-// mainWidth is the main pane's inner width.
-func (ws *workspace) mainWidth() int {
-	side := ws.sideWidth()
-	if side == 0 {
+// mainOnly reports whether only the preview is drawn.
+func (ws *workspace) mainOnly() bool {
+	return ws.mode == modeMainOnly || (ws.sideOnly() && ws.mainFocus)
+}
+
+// sideWidth is the side column's inner width, 0 when hidden.
+func (ws *workspace) sideWidth() int {
+	switch {
+	case ws.mainOnly():
+		return 0
+	case ws.sideOnly():
 		return max(0, ws.width-2)
 	}
-	return max(0, ws.width-3-side)
+	return max(0, min(max(ws.width/3, 34), 60))
+}
+
+// mainWidth is the main pane's inner width, 0 when hidden.
+func (ws *workspace) mainWidth() int {
+	switch {
+	case ws.mainOnly():
+		return max(0, ws.width-2)
+	case ws.sideOnly():
+		return 0
+	}
+	return max(0, ws.width-3-ws.sideWidth())
 }
 
 // bodyHeight is what the frame leaves for panel rows.
 func (ws *workspace) bodyHeight() int { return max(0, ws.height-2) }
 
 // panelHeights shares the body rows: the focused panel gets what the
-// others (one to three rows each) leave.
+// others (one to four rows each) leave.
 func (ws *workspace) panelHeights() [panelCount]int {
 	var hs [panelCount]int
 	h := ws.bodyHeight() - (int(panelCount) - 1) // separators
-	u := min(3, max(1, h/8))
+	u := min(4, max(1, h/6))
 	for i := range hs {
 		hs[i] = u
 	}
@@ -161,6 +191,9 @@ func (ws *workspace) panelHeights() [panelCount]int {
 
 func (ws *workspace) layout() {
 	side := ws.sideWidth()
+	if side == 0 {
+		side = max(0, ws.width-2) // lists keep a real width while hidden
+	}
 	hs := ws.panelHeights()
 	for i, p := range ws.panels {
 		if p == nil {
@@ -168,32 +201,19 @@ func (ws *workspace) layout() {
 		}
 		p.setSize(side, hs[i])
 	}
-	ws.applyHeaders(side)
-	ws.vp.SetWidth(ws.mainWidth())
-	ws.vp.SetHeight(ws.bodyHeight())
-}
-
-// applyHeaders sets the column headers the lists show in their title row.
-func (ws *workspace) applyHeaders(width int) {
-	inner := max(0, width-2)
-	ws.panels[panelRoots].list.Title = "ROOT"
-	ws.panels[panelProjects].list.Title = projectsHeader(inner)
-	if ws.tab == tabSessions {
-		ws.panels[panelItems].list.Title = sessionsHeader(inner)
-	} else {
-		ws.panels[panelItems].list.Title = memoriesHeader(inner)
+	mw := ws.mainWidth()
+	if mw == 0 {
+		mw = max(0, ws.width-2)
 	}
-	ws.panels[panelFiles].list.Title = "FILE"
+	ws.vp.SetWidth(mw)
+	ws.vp.SetHeight(ws.bodyHeight())
 }
 
 // --- selection chain --------------------------------------------------
 
-func (ws *workspace) selectedRoot() (transcripts.Root, bool) {
-	r, ok := ws.panels[panelRoots].selected().(*rootRow)
-	if !ok {
-		return transcripts.Root{}, false
-	}
-	return r.root, true
+func (ws *workspace) selectedAccount() *accountRow {
+	r, _ := ws.panels[panelAccounts].selected().(*accountRow)
+	return r
 }
 
 func (ws *workspace) selectedProject() *projectRow {
@@ -217,7 +237,6 @@ func (ws *workspace) selectedMemFile() *memoryFileRow {
 	return r
 }
 
-// slug and cwd of the selected project.
 func (ws *workspace) projectSlug() string {
 	if ws.project == nil {
 		return ""
@@ -247,29 +266,77 @@ func (ws *workspace) memoryDir() string {
 	return memoryDirFor(ws.root, ws.project.slug, ws.project.cwd)
 }
 
-// setRoots fills panel 1 and starts the chain.
+// setRoots fills panel 1 from the accounts and roots and starts the
+// chain on the active account.
 func (ws *workspace) setRoots(roots []transcripts.Root) tea.Cmd {
 	ws.roots = roots
-	rows := make([]row, 0, len(roots))
-	for _, r := range roots {
-		rows = append(rows, &rootRow{root: r, label: rootLabel(r)})
+	return tea.Batch(ws.reloadAccounts(), ws.sync())
+}
+
+// reloadAccounts rebuilds panel 1's rows, keeping the cursor on the
+// same name (the active account the first time).
+func (ws *workspace) reloadAccounts() tea.Cmd {
+	rows := accountRows(ws.svc)
+	p := ws.panels[panelAccounts]
+	keep := ws.account
+	if keep == "" {
+		keep = ws.svc.state.Active
 	}
-	cmd := ws.panels[panelRoots].setRows(rows)
-	return tea.Batch(cmd, ws.sync())
+	out := make([]row, 0, len(rows))
+	at := -1
+	for i, r := range rows {
+		out = append(out, r)
+		if r.name == keep {
+			at = i
+		}
+	}
+	if at < 0 {
+		// No active account: start from the pool claude uses unmanaged.
+		for i, r := range rows {
+			if r.kind == "partial" || r.kind == "api key" || r.kind == "home" {
+				at = i
+				break
+			}
+		}
+	}
+	cmd := p.setRows(out)
+	if at >= 0 {
+		p.list.Select(at)
+	}
+	p.setStatus(ws.accountsStatus(rows))
+	return cmd
+}
+
+func (ws *workspace) accountsStatus(rows []*accountRow) string {
+	n := 0
+	for _, r := range rows {
+		if r.kind != "home" && r.kind != "orphan" {
+			n++
+		}
+	}
+	s := countNoun(n, "account")
+	if ws.svc.state.Active != "" {
+		s += " · active " + transcripts.Sanitize(ws.svc.state.Active)
+	}
+	return s
 }
 
 // sync re-derives the chain from the cursors and loads what changed.
 func (ws *workspace) sync() tea.Cmd {
 	var cmds []tea.Cmd
-	if r, ok := ws.selectedRoot(); ok && rootID(r) != ws.rootKey {
-		ws.rootKey, ws.root = rootID(r), r
-		ws.project, ws.projectKey = nil, ""
-		ws.clearSessions()
-		ws.clearMemory()
-		ws.placed = false
-		p := ws.panels[panelProjects]
-		p.loading = true
-		cmds = append(cmds, p.setRows(nil), loadProjects(ws.svc.ctx, r, ws.svc.now))
+	if a := ws.selectedAccount(); a != nil {
+		ws.account = a.name
+		if rootID(a.root) != ws.rootKey {
+			ws.rootKey, ws.root = rootID(a.root), a.root
+			ws.project, ws.projectKey = nil, ""
+			ws.clearSessions()
+			ws.clearMemory()
+			ws.placed = false
+			p := ws.panels[panelProjects]
+			p.loading = true
+			p.setStatus("")
+			cmds = append(cmds, p.setRows(nil), loadProjects(ws.svc.ctx, a.root, ws.svc.now))
+		}
 	}
 	if pr := ws.selectedProject(); pr == nil {
 		if ws.projectKey != "" {
@@ -293,18 +360,10 @@ func (ws *workspace) sync() tea.Cmd {
 	}
 	if ws.project == nil && ws.itemsKey != "" {
 		ws.itemsKey = ""
+		ws.panels[panelItems].setStatus("")
 		cmds = append(cmds, ws.panels[panelItems].setRows(nil))
 	}
-	fk, fcmd := ws.filesFor()
-	if fk != ws.filesKey {
-		ws.filesKey = fk
-		f := ws.panels[panelFiles]
-		cmds = append(cmds, f.setRows(nil))
-		f.loading = fcmd != nil
-		if fcmd != nil {
-			cmds = append(cmds, fcmd)
-		}
-	}
+	ws.updateItemsStatus()
 	pk, pcmd := ws.previewFor()
 	if pk != ws.previewKey {
 		ws.previewKey, ws.previewGen = pk, ws.gen
@@ -335,6 +394,56 @@ func (ws *workspace) clearMemory() {
 	ws.mem, ws.memDir, ws.memLoadedFor = nil, "", ""
 	if ws.tab == tabMemory {
 		ws.itemsKey = ""
+	}
+}
+
+// updateItemsStatus writes panel 3's title row.
+func (ws *workspace) updateItemsStatus() {
+	p := ws.panels[panelItems]
+	if ws.project == nil {
+		p.setStatus("")
+		return
+	}
+	switch ws.tab {
+	case tabSessions:
+		if ws.sessLoadedFor != ws.projectKey {
+			p.setStatus("")
+			return
+		}
+		live := 0
+		for _, r := range ws.sessRows {
+			if r.s.Live {
+				live++
+			}
+		}
+		s := countNoun(len(ws.sessRows), "session")
+		if live > 0 {
+			s += " · " + countNoun(live, "live")
+		}
+		if n := len(ws.sel); n > 0 {
+			s += " · " + fmt.Sprintf("%d marked", n)
+		}
+		p.setStatus(s)
+	case tabMemory:
+		if ws.memLoadedFor != ws.projectKey {
+			p.setStatus("")
+			return
+		}
+		if ws.mem == nil {
+			p.setStatus("no memory dir")
+			return
+		}
+		pinned := 0
+		for _, f := range ws.mem.Files {
+			if f.Pinned {
+				pinned++
+			}
+		}
+		s := countNoun(len(ws.mem.Files), "file")
+		if pinned > 0 {
+			s += " · " + countNoun(pinned, "pinned")
+		}
+		p.setStatus(s + " · " + shortPath(ws.mem.Dir))
 	}
 }
 
@@ -403,76 +512,52 @@ func pickMemory(root transcripts.Root, slug, project string, mems []transcripts.
 	return nil, want
 }
 
-// filesFor names panel 4's contents and how to load them.
-func (ws *workspace) filesFor() (string, tea.Cmd) {
-	if r := ws.selectedSession(); r != nil {
-		return artifactKey(r.s), loadArtifacts(ws.root, r.s)
-	}
-	if r := ws.selectedMemFile(); r != nil {
-		return refsKey(r.dir, r.f.Name), loadRefs(r.dir, r.f.Name)
-	}
-	return "", nil
-}
-
 // previewFor names the main pane's subject and how to build it.
 func (ws *workspace) previewFor() (string, tea.Cmd) {
-	focus := ws.focus
-	if focus == panelFiles {
-		switch r := ws.panels[panelFiles].selected().(type) {
-		case *artifactRow:
-			k := "artifact:" + r.path
-			return k, previewCmd(k, ws.gen, artifactPreview(r))
-		case *refRow:
-			k := fmt.Sprintf("ref:%s:%d:%s", r.ref.File, r.ref.Line, r.ref.Path)
-			return k, previewCmd(k, ws.gen, refPreview(r))
-		}
-		focus = panelItems
-	}
-	switch focus {
-	case panelRoots:
-		if r, ok := ws.selectedRoot(); ok {
-			k := "root:" + rootID(r)
-			return k, previewCmd(k, ws.gen, rootPreview(ws.svc, r, len(ws.panels[panelProjects].rows())))
+	switch ws.focus {
+	case panelAccounts:
+		if a := ws.selectedAccount(); a != nil {
+			k := "account:" + a.name + "\x00" + rootID(a.root)
+			return k, previewCmd(k, ws.gen, accountPreview(ws.svc, a))
 		}
 		return "", nil
 	case panelItems:
 		if r := ws.selectedSession(); r != nil {
 			k := "session:" + r.s.Path
-			return k, previewCmd(k, ws.gen, sessionPreview(ws.svc, r.s, r.resolved))
+			return k, previewCmd(k, ws.gen, sessionPreview(ws.svc, r.s, r.resolved, ws.account))
 		}
 		if r := ws.selectedMemFile(); r != nil {
-			k := "memfile:" + filepath.Join(r.dir, filepath.FromSlash(r.f.Name))
+			k := "memfile:" + joinName(r.dir, r.f.Name)
 			return k, previewCmd(k, ws.gen, memoryFilePreview(ws.svc, ws.root, ws.projectSlug(), ws.projectCwd(), r.dir, r.f.Name))
 		}
 		if ws.tab == tabMemory && ws.project != nil && ws.memLoadedFor == ws.projectKey && ws.mem == nil {
 			k := "nomem:" + ws.projectKey
-			dir := ws.memDir
-			label := ws.projectLabel()
+			dir, label := ws.memDir, ws.projectLabel()
 			return k, previewCmd(k, ws.gen, func() ([]string, error) {
-				return []string{styleHeader.Render("no memory dir for " + label), kvLine("would be", shortPath(dir)), "", styleFaint.Render("Claude creates it the first time it saves a memory for the project")}, nil
+				return []string{styleHeader.Render(label), "no memory dir yet", "", kvLine("would be", shortPath(dir)), "", styleFaint.Render("Claude creates it the first time it saves a memory for the project")}, nil
 			})
 		}
 	}
 	if ws.project != nil {
-		k := "drift:" + ws.projectKey
-		return k, previewCmd(k, ws.gen, driftPreview(ws.svc, ws.root, ws.project.slug, ws.project.cwd))
+		k := "drift:" + ws.projectKey + "\x00" + ws.account
+		return k, previewCmd(k, ws.gen, driftPreview(ws.svc, ws.root, ws.project.slug, ws.project.cwd, ws.account))
 	}
-	if r, ok := ws.selectedRoot(); ok {
-		k := "root:" + rootID(r)
-		return k, previewCmd(k, ws.gen, rootPreview(ws.svc, r, len(ws.panels[panelProjects].rows())))
+	if a := ws.selectedAccount(); a != nil {
+		k := "account:" + a.name + "\x00" + rootID(a.root)
+		return k, previewCmd(k, ws.gen, accountPreview(ws.svc, a))
 	}
 	return "", nil
 }
 
-// refresh reloads everything below the root after an action changed the
-// tree; cursors stay where they are when the rows still exist.
+// refresh reloads everything below the account after an action changed
+// the tree; cursors stay where they are when the rows still exist.
 func (ws *workspace) refresh() tea.Cmd {
 	ws.gen++
 	for k := range ws.svc.memories {
 		delete(ws.svc.memories, k)
 	}
 	ws.sessLoadedFor, ws.memLoadedFor = "", ""
-	ws.itemsKey, ws.filesKey, ws.previewKey = "", "", ""
+	ws.itemsKey, ws.previewKey = "", ""
 	ws.pending = map[string]bool{}
 	if ws.rootKey == "" {
 		return ws.sync()
@@ -499,6 +584,7 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 			rows = append(rows, r)
 		}
 		cmd := p.setRows(rows)
+		p.setStatus(countNoun(len(rows), "project") + " in " + shortPath(ws.root.Dir))
 		if !ws.placed {
 			ws.placed = true
 			if i := ws.currentProjectIndex(msg.rows); i >= 0 {
@@ -506,8 +592,8 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 			}
 		}
 		ws.projectKey = "" // rows are new objects: re-derive the chain
-		if strings.HasPrefix(ws.previewKey, "root:") {
-			ws.previewKey = "" // the root preview counts the projects
+		if strings.HasPrefix(ws.previewKey, "account:") {
+			ws.previewKey = ""
 		}
 		return tea.Batch(cmd, ws.sync())
 
@@ -579,17 +665,6 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 		}
 		return tea.Batch(cmd, ws.sync())
 
-	case filesLoadedMsg:
-		if msg.key != ws.filesKey {
-			return nil
-		}
-		p := ws.panels[panelFiles]
-		p.loading = false
-		if msg.err != nil {
-			return statusError(msg.err)
-		}
-		return tea.Batch(p.setRows(msg.rows), ws.sync())
-
 	case previewLoadedMsg:
 		if msg.key != ws.previewKey || msg.gen != ws.previewGen {
 			return nil
@@ -602,6 +677,14 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 		ws.vp.SetContentLines(lines)
 		ws.vp.GotoTop()
 		return nil
+
+	case switchedMsg:
+		if msg.err != nil {
+			return statusError(msg.err)
+		}
+		ws.svc.state.Active = msg.account
+		ws.previewKey = ""
+		return tea.Batch(ws.reloadAccounts(), ws.sync(), status(fmt.Sprintf("active account is now %s — claude uses it from its next launch", transcripts.Sanitize(msg.account))))
 
 	case refreshMsg:
 		return ws.refresh()
@@ -718,7 +801,7 @@ func (ws *workspace) switchTab(delta int) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// updatePanel forwards msg to the focused panel's list.
+// updatePanel forwards msg to a panel's list.
 func (ws *workspace) updatePanel(p *panel, msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	p.list, cmd = p.list.Update(msg)
@@ -729,12 +812,24 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	p := ws.panels[ws.focus]
 	if p.filtering() {
 		cmd := ws.updatePanel(p, msg)
-		return tea.Batch(cmd, ws.sync(), ws.requestTitles())
+		return tea.Batch(cmd, ws.sync())
 	}
 	if ws.mainFocus {
-		if key.Matches(msg, keys.Back) || key.Matches(msg, keys.PrevPanel) {
+		switch {
+		case key.Matches(msg, keys.Back):
 			ws.mainFocus = false
+			ws.layout()
 			return nil
+		case key.Matches(msg, keys.Open):
+			if r := ws.selectedSession(); r != nil {
+				return pushScreen(newTranscriptScreen(ws.svc, r.s))
+			}
+			return nil
+		case key.Matches(msg, keys.Menu):
+			return pushScreen(newMenuScreen(ws.menuTitle(), ws.actions()))
+		}
+		if cmd, ok := ws.action(msg); ok {
+			return cmd
 		}
 		var cmd tea.Cmd
 		ws.vp, cmd = ws.vp.Update(msg)
@@ -742,13 +837,11 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	switch {
 	case key.Matches(msg, keys.Panel1):
-		return ws.setFocus(panelRoots)
+		return ws.setFocus(panelAccounts)
 	case key.Matches(msg, keys.Panel2):
 		return ws.setFocus(panelProjects)
 	case key.Matches(msg, keys.Panel3):
 		return ws.setFocus(panelItems)
-	case key.Matches(msg, keys.Panel4):
-		return ws.setFocus(panelFiles)
 	case key.Matches(msg, keys.NextPanel):
 		return ws.setFocus((ws.focus + 1) % panelCount)
 	case key.Matches(msg, keys.PrevPanel):
@@ -758,28 +851,29 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, keys.PrevTab):
 		return ws.switchTab(-1)
 	case key.Matches(msg, keys.ScreenMode):
-		ws.mode = (ws.mode + 1) % modeCount
+		if ws.mode == modeMainOnly {
+			ws.mode = modeAuto
+		} else {
+			ws.mode = modeMainOnly
+		}
 		ws.layout()
 		return nil
 	case key.Matches(msg, keys.ScreenModePrev):
-		ws.mode = (ws.mode + modeCount - 1) % modeCount
+		if ws.mode == modeSideOnly {
+			ws.mode = modeAuto
+		} else {
+			ws.mode = modeSideOnly
+		}
 		ws.layout()
 		return nil
 	case key.Matches(msg, keys.Menu):
 		return pushScreen(newMenuScreen(ws.menuTitle(), ws.actions()))
 	case key.Matches(msg, keys.Open):
 		return ws.open()
+	case key.Matches(msg, keys.Back):
+		return ws.back()
 	case key.Matches(msg, keys.Select):
-		if r := ws.selectedSession(); r != nil && ws.focus == panelItems {
-			if ws.sel[r.s.ID] {
-				delete(ws.sel, r.s.ID)
-			} else {
-				ws.sel[r.s.ID] = true
-			}
-			p.list.CursorDown()
-			return ws.sync()
-		}
-		return nil
+		return ws.space()
 	case key.Matches(msg, keys.SelectAll):
 		if ws.tab == tabSessions && ws.focus == panelItems {
 			visible := p.list.VisibleItems()
@@ -798,6 +892,7 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 					ws.sel[id] = true
 				}
 			}
+			ws.updateItemsStatus()
 		}
 		return nil
 	case key.Matches(msg, keys.Filter):
@@ -806,25 +901,72 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return tea.Batch(cmd, ws.requestAllTitles())
 		}
 		return cmd
-	case key.Matches(msg, keys.Back):
-		if p.list.FilterState() == list.FilterApplied {
-			cmd := ws.updatePanel(p, msg)
-			return tea.Batch(cmd, ws.sync())
-		}
-		return status("q quits · x opens the menu")
 	}
 	if cmd, ok := ws.action(msg); ok {
 		return cmd
 	}
 	cmd := ws.updatePanel(p, msg)
-	return tea.Batch(cmd, ws.sync(), ws.requestTitles())
+	return tea.Batch(cmd, ws.sync())
 }
 
-// open is enter: drill down a panel, open a session's transcript, or
-// hand the keys to the main pane to scroll a file.
+// space marks a session, or makes an account the active one.
+func (ws *workspace) space() tea.Cmd {
+	switch ws.focus {
+	case panelItems:
+		r := ws.selectedSession()
+		if r == nil {
+			return nil
+		}
+		if ws.sel[r.s.ID] {
+			delete(ws.sel, r.s.ID)
+		} else {
+			ws.sel[r.s.ID] = true
+		}
+		ws.panels[panelItems].list.CursorDown()
+		ws.updateItemsStatus()
+		return ws.sync()
+	case panelAccounts:
+		a := ws.selectedAccount()
+		if a == nil {
+			return nil
+		}
+		switch a.kind {
+		case "home":
+			return status("home is the unmanaged ~/.claude, not an account; bffs switch --clear makes claude use it")
+		case "orphan":
+			return status("an orphan session dir has no account to switch to")
+		}
+		if a.active {
+			return status(transcripts.Sanitize(a.name) + " is already the active account")
+		}
+		return switchAccount(ws.svc.cfgDir, a.name)
+	}
+	return nil
+}
+
+// switchAccount writes state.toml the way `bffs switch <name>` does.
+func switchAccount(cfgDir, name string) tea.Cmd {
+	return func() tea.Msg {
+		state, err := store.LoadState(cfgDir)
+		if err != nil {
+			return switchedMsg{account: name, err: err}
+		}
+		state.Active = name
+		if err := store.SaveState(cfgDir, state); err != nil {
+			return switchedMsg{account: name, err: err}
+		}
+		return switchedMsg{account: name}
+	}
+}
+
+// open is enter: drill one panel down, show the preview when the side
+// column stands alone, open a session's transcript.
 func (ws *workspace) open() tea.Cmd {
 	switch ws.focus {
-	case panelRoots:
+	case panelAccounts:
+		if a := ws.selectedAccount(); a == nil {
+			return nil
+		}
 		return ws.setFocus(panelProjects)
 	case panelProjects:
 		if ws.project == nil {
@@ -832,27 +974,34 @@ func (ws *workspace) open() tea.Cmd {
 		}
 		return ws.setFocus(panelItems)
 	case panelItems:
+		if ws.selectedSession() == nil && ws.selectedMemFile() == nil {
+			return nil
+		}
+		if ws.sideOnly() {
+			ws.mainFocus = true
+			ws.layout()
+			return nil
+		}
 		if r := ws.selectedSession(); r != nil {
 			return pushScreen(newTranscriptScreen(ws.svc, r.s))
 		}
-		if ws.selectedMemFile() != nil {
-			ws.mainFocus = true
-		}
+		ws.mainFocus = true
 		return nil
-	case panelFiles:
-		switch r := ws.panels[panelFiles].selected().(type) {
-		case *artifactRow:
-			if r.exists && !r.isDir && filepath.Ext(r.path) == ".jsonl" {
-				if s := ws.selectedSession(); s != nil && r.path == s.s.Path {
-					return pushScreen(newTranscriptScreen(ws.svc, s.s))
-				}
-			}
-			ws.mainFocus = true
-		case *refRow:
-			ws.mainFocus = true
-		}
 	}
 	return nil
+}
+
+// back is esc: leave the preview, clear a filter, else go one panel up.
+func (ws *workspace) back() tea.Cmd {
+	p := ws.panels[ws.focus]
+	if p.list.FilterState() == list.FilterApplied {
+		cmd := ws.updatePanel(p, tea.KeyPressMsg{Code: tea.KeyEscape})
+		return tea.Batch(cmd, ws.sync())
+	}
+	if ws.focus == panelAccounts {
+		return status("q quits · x opens the menu")
+	}
+	return ws.setFocus(ws.focus - 1)
 }
 
 // --- actions ------------------------------------------------------------
@@ -889,8 +1038,8 @@ func (ws *workspace) chosen() []transcripts.Session {
 }
 
 func (ws *workspace) menuTitle() string {
-	if ws.project == nil {
-		return "actions for " + shortRootLabel(ws.root)
+	if ws.project == nil || ws.focus == panelAccounts {
+		return "actions for " + transcripts.Sanitize(ws.account) + "  (" + shortRootLabel(ws.root) + ")"
 	}
 	return "actions for " + ws.projectLabel() + "  (" + shortRootLabel(ws.root) + ")"
 }
@@ -907,8 +1056,12 @@ func (ws *workspace) actions() []menuItem {
 	if ws.rootKey == "" {
 		return items
 	}
+	if a := ws.selectedAccount(); a != nil && ws.focus == panelAccounts && !a.active && a.kind != "home" && a.kind != "orphan" {
+		name := a.name
+		add("space", "switch claude to "+transcripts.Sanitize(name)+" (bffs switch)", func() tea.Cmd { return switchAccount(svc.cfgDir, name) })
+	}
 	add("i", "receive a bundle over the LAN into "+shortRootLabel(root), func() tea.Cmd { return receiveInto(svc, root) })
-	if ws.project == nil {
+	if ws.project == nil || ws.focus == panelAccounts {
 		return items
 	}
 	tgt := ws.target()
@@ -955,7 +1108,7 @@ func (ws *workspace) actions() []menuItem {
 var actionHints = map[string]string{
 	"e": "select a project first", "s": "select a project first", "c": "select a project first",
 	"R": "select a session on the sessions tab", "L": "select a session on the sessions tab",
-	"r": "nothing to rehome: select sessions with space (no pending imports)",
+	"r": "nothing to rehome: mark sessions with space (no pending imports)",
 	"t": "no cwd recorded for this project; nothing to trust",
 	"S": "no memory dir for this project", "p": "no memory dir for this project",
 	"d": "d never deletes — use bffs sessions rm",
@@ -975,46 +1128,55 @@ func (ws *workspace) action(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
-// keys are the bindings the help line shows for the focused panel.
+// keys are the 3–5 bindings the footer shows for the focused panel.
 func (ws *workspace) keys() []key.Binding {
-	ks := []key.Binding{keys.Up, keys.Down, keys.NextPanel}
-	switch {
-	case ws.mainFocus:
-		return []key.Binding{keys.Up, keys.Down, keys.PageUp, keys.PageDn, key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back to panels"))}
-	case ws.focus == panelItems && ws.tab == tabSessions:
-		ks = append(ks, keys.Open, keys.Select, keys.NextTab, keys.Resume, keys.Rehome, keys.Pointer)
-	case ws.focus == panelItems:
-		ks = append(ks, keys.Open, keys.PrevTab, keys.SyncMemory)
-	case ws.focus == panelProjects:
-		ks = append(ks, keys.Open, keys.Export, keys.Send, keys.Copy, keys.Trust)
-	case ws.focus == panelRoots:
-		ks = append(ks, keys.Open, keys.Receive)
-	default:
-		ks = append(ks, keys.Open)
+	if ws.mainFocus {
+		ks := []key.Binding{keys.Up, keys.Down, keys.PageDn}
+		if ws.selectedSession() != nil {
+			ks = append(ks, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "transcript")))
+		}
+		return append(ks, key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back to panels")))
+	}
+	var ks []key.Binding
+	switch ws.focus {
+	case panelAccounts:
+		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.Receive}
+	case panelProjects:
+		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "sessions")), keys.Export, keys.Copy, keys.Trust, keys.SyncMemory}
+	case panelItems:
+		if ws.tab == tabSessions {
+			open := "transcript"
+			if ws.sideOnly() {
+				open = "preview"
+			}
+			ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", open)), keys.Select, keys.Resume, keys.Export, keys.NextTab}
+		} else {
+			ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")), keys.SyncMemory, keys.ScanPaths, keys.PrevTab}
+		}
 	}
 	if ws.panels[ws.focus].list.FilterState() == list.FilterApplied {
 		ks = append(ks, keys.ClearFilter)
 	}
-	return append(ks, keys.Filter, keys.Menu)
+	return ks
 }
 
 // helpGroups are the full key listing for the ? overlay.
 func (ws *workspace) helpGroups() [][]key.Binding {
 	return [][]key.Binding{
-		{keys.Panel1, keys.Panel2, keys.Panel3, keys.Panel4, keys.NextPanel, keys.PrevPanel, keys.NextTab, keys.PrevTab},
-		{keys.Up, keys.Down, keys.PageUp, keys.PageDn, keys.Open, keys.Select, keys.SelectAll, keys.Filter},
+		{keys.Panel1, keys.Panel2, keys.Panel3, keys.NextPanel, keys.PrevPanel, keys.NextTab, keys.PrevTab, keys.Back},
+		{keys.Up, keys.Down, keys.PageUp, keys.PageDn, keys.Open, keys.Select, keys.SelectAll, keys.Activate, keys.Filter},
 		{keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
 		{keys.Trust, keys.SyncMemory, keys.Pointer, keys.ScanPaths},
-		{keys.ScreenMode, keys.ScreenModePrev, keys.Menu, keys.Help, keys.Back, keys.Quit, reservedKeys},
+		{keys.ScreenMode, keys.ScreenModePrev, keys.Menu, keys.Help, keys.Quit, reservedKeys},
 	}
 }
 
-// crumb is the header's context.
+// crumb is the header's context: the perspective and the selection.
 func (ws *workspace) crumb() string {
 	if ws.rootKey == "" {
 		return ""
 	}
-	parts := []string{shortRootLabel(ws.root)}
+	parts := []string{transcripts.Sanitize(ws.account)}
 	if ws.project != nil {
 		parts = append(parts, ws.projectLabel())
 		if ws.tab == tabMemory {
@@ -1041,8 +1203,8 @@ func (ws *workspace) previewTitle() string {
 		if r := ws.selectedMemFile(); r != nil {
 			return "memory " + transcripts.Sanitize(r.f.Name)
 		}
-	case strings.HasPrefix(ws.previewKey, "root:"):
-		return "root"
+	case strings.HasPrefix(ws.previewKey, "account:"):
+		return "account " + transcripts.Sanitize(ws.account)
 	}
 	return "preview"
 }
@@ -1082,17 +1244,21 @@ func titled(title string, inner int, focused bool) string {
 	return "─" + t + strings.Repeat("─", max(0, inner-1-w))
 }
 
-// panelTitle is the frame title of panel i.
+// panelTitle is the frame title of panel i; panel 3 names its tabs with
+// the active one in capitals.
 func (ws *workspace) panelTitle(i panelID) string {
 	p := ws.panels[i]
 	if i == panelItems {
 		if ws.tab == tabSessions {
-			return p.title("sessions (memory)")
+			return p.title("SESSIONS | memory")
 		}
-		return p.title("memory (sessions)")
+		return p.title("sessions | MEMORY")
 	}
 	return p.title("")
 }
+
+// errTooSmall is the message drawn below the minimum size.
+var errTooSmall = errors.New("too small")
 
 // View draws the frame: the side column with its panels and the main
 // pane. main and mainTitle override the preview (an overlay's view);
@@ -1101,13 +1267,35 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 	if width != ws.width || height != ws.height {
 		ws.setSize(width, height)
 	}
+	if ws.tooSmall() {
+		return fmt.Sprintf("%v: need %d×%d", errTooSmall, minWidth, minHeight)
+	}
 	side, mi, h := ws.sideWidth(), ws.mainWidth(), ws.bodyHeight()
 	if main == nil {
 		main = strings.Split(ws.vp.View(), "\n")
 		mainTitle, mainFocused = ws.previewTitle(), ws.mainFocus
+	} else if mi == 0 {
+		// An overlay always needs the main pane: draw it alone.
+		side, mi = 0, max(0, width-2)
 	}
 	var out []string
-	if side == 0 {
+	switch {
+	case mi == 0:
+		hs := ws.panelHeights()
+		for i, p := range ws.panels {
+			focused := panelID(i) == ws.focus
+			if i == 0 {
+				out = append(out, "┌"+titled(ws.panelTitle(panelID(i)), side, focused)+"┐")
+			} else {
+				out = append(out, "├"+titled(ws.panelTitle(panelID(i)), side, focused)+"┤")
+			}
+			for _, l := range p.body(side, hs[i], focused) {
+				out = append(out, "│"+cell(l, side)+"│")
+			}
+		}
+		out = append(out, "└"+strings.Repeat("─", side)+"┘")
+		return strings.Join(out, "\n")
+	case side == 0:
 		main = fill(main, h)
 		out = append(out, "┌"+titled(mainTitle, mi, mainFocused)+"┐")
 		for _, l := range main {

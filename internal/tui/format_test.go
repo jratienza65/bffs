@@ -73,8 +73,8 @@ func TestRowsSanitize(t *testing.T) {
 	now := func() time.Time { return time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC) }
 	s := transcripts.Session{ID: "1e005053-380a-4245-a145-52c2715afa73", Title: osc52 + "Plan: session export", GitBranch: osc52 + "main", Account: "aviate", Size: 42_600_000, LastTS: now().Add(-2 * time.Hour)}
 	r := &sessionRow{s: s, resolved: true, sel: map[string]bool{}, now: now}
-	line := r.render(120)
-	for _, want := range []string{"Plan: session export", "aviate", "2h ago", "42.6 MB", "main"} {
+	line := r.render(60)
+	for _, want := range []string{"Plan: session export", "2h ago"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("row missing %q: %q", want, line)
 		}
@@ -82,10 +82,15 @@ func TestRowsSanitize(t *testing.T) {
 	if strings.Contains(line, "\x1b") || strings.Contains(line, "52;c;") {
 		t.Errorf("escape reached the row: %q", line)
 	}
-	// Narrow terminals keep title, age and state.
-	narrow := r.render(50)
-	if !strings.Contains(narrow, "Plan: session export") || strings.Contains(narrow, "aviate") {
-		t.Errorf("narrow row = %q", narrow)
+	// Account, size and branch belong to the preview, not the row; a
+	// marked live row carries its two glyphs.
+	if strings.Contains(line, "aviate") || strings.Contains(line, "42.6 MB") {
+		t.Errorf("row carries preview fields: %q", line)
+	}
+	r.sel[s.ID] = true
+	r.s.Live = true
+	if marked := r.render(60); !strings.HasPrefix(marked, "*● Plan") {
+		t.Errorf("marked live row = %q", marked)
 	}
 	// Unresolved rows show the id until the windows are read.
 	r.resolved = false
@@ -142,7 +147,7 @@ func TestRowsFillWidth(t *testing.T) {
 		&sessionRow{s: transcripts.Session{ID: "1e005053-380a-4245-a145-52c2715afa73", Title: "Plan", Account: "aviate", GitBranch: "main", LastTS: now().Add(-time.Hour)}, resolved: true, sel: map[string]bool{}, now: now},
 		&projectRow{slug: "-Users-x", cwd: "/Users/x", sessions: 3, hasMemory: true, newest: now().Add(-time.Hour), now: now},
 		&memoryFileRow{f: transcripts.MemoryFile{Name: "notes.md", Size: 10, ModTime: now(), Pinned: true, AbsolutePaths: []string{"/a"}, AtRefs: []string{"@/b"}}, svc: &services{now: now}},
-		&rootRow{label: "shared pool"},
+		&accountRow{name: "aviate", kind: "partial", active: true},
 	}
 	for _, r := range rows {
 		for _, w := range []int{20, 40, 60, 118, 298} {
@@ -151,13 +156,6 @@ func TestRowsFillWidth(t *testing.T) {
 			}
 			if got := r.render(w); lipglossWidth(got) > w {
 				t.Errorf("%T at width %d overflows to %d cells: %q", r, w, lipglossWidth(got), got)
-			}
-		}
-	}
-	for _, w := range []int{20, 60, 118} {
-		for name, h := range map[string]string{"sessions": sessionsHeader(w), "projects": projectsHeader(w), "memories": memoriesHeader(w)} {
-			if lipglossWidth(h) > w {
-				t.Errorf("%s header at width %d overflows: %q", name, w, h)
 			}
 		}
 	}

@@ -3,7 +3,7 @@ package tui
 import "charm.land/bubbles/v2/key"
 
 // keyMap is every binding the browser uses. The workspace returns the
-// subset that applies to the focused panel from keys(); overlays return
+// 3–5 that matter for the focused panel from keys(); overlays return
 // theirs from Keys(); the app adds the global ones.
 type keyMap struct {
 	Up, Down       key.Binding
@@ -11,6 +11,7 @@ type keyMap struct {
 	Back           key.Binding
 	Select         key.Binding
 	SelectAll      key.Binding
+	Activate       key.Binding // space on the accounts panel
 	Filter         key.Binding
 	ClearFilter    key.Binding
 	ScanPaths      key.Binding
@@ -20,11 +21,11 @@ type keyMap struct {
 
 	// Workspace navigation, lazygit's conventions: panels by number or
 	// by cycling, the tabs of the items panel, screen modes, the menu.
-	NextPanel, PrevPanel           key.Binding
-	Panel1, Panel2, Panel3, Panel4 key.Binding
-	NextTab, PrevTab               key.Binding
-	ScreenMode, ScreenModePrev     key.Binding
-	Menu                           key.Binding
+	NextPanel, PrevPanel       key.Binding
+	Panel1, Panel2, Panel3     key.Binding
+	NextTab, PrevTab           key.Binding
+	ScreenMode, ScreenModePrev key.Binding
+	Menu                       key.Binding
 
 	// The action keys (plan §11, tui-v2 §1): each opens an overlay over
 	// the main pane; i (receive) works from every panel.
@@ -51,8 +52,9 @@ var keys = keyMap{
 	Down:        key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
 	Open:        key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 	Back:        key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
-	Select:      key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "select")),
-	SelectAll:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "select all")),
+	Select:      key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "mark")),
+	SelectAll:   key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "mark all")),
+	Activate:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "switch to account")),
 	Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 	ClearFilter: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
 	ScanPaths:   key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "scan paths")),
@@ -61,37 +63,31 @@ var keys = keyMap{
 	PageUp:      key.NewBinding(key.WithKeys("pgup", "ctrl+b"), key.WithHelp("pgup", "page up")),
 	PageDn:      key.NewBinding(key.WithKeys("pgdown", "ctrl+f"), key.WithHelp("pgdown", "page down")),
 
-	NextPanel:      key.NewBinding(key.WithKeys("tab", "l", "right"), key.WithHelp("tab/l", "next panel")),
-	PrevPanel:      key.NewBinding(key.WithKeys("shift+tab", "h", "left"), key.WithHelp("shift+tab/h", "prev panel")),
-	Panel1:         key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "roots")),
+	NextPanel:      key.NewBinding(key.WithKeys("tab", "l", "right"), key.WithHelp("tab", "next panel")),
+	PrevPanel:      key.NewBinding(key.WithKeys("shift+tab", "h", "left"), key.WithHelp("shift+tab", "prev panel")),
+	Panel1:         key.NewBinding(key.WithKeys("1"), key.WithHelp("1", "accounts")),
 	Panel2:         key.NewBinding(key.WithKeys("2"), key.WithHelp("2", "projects")),
 	Panel3:         key.NewBinding(key.WithKeys("3"), key.WithHelp("3", "sessions/memory")),
-	Panel4:         key.NewBinding(key.WithKeys("4"), key.WithHelp("4", "files")),
-	NextTab:        key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next tab")),
-	PrevTab:        key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev tab")),
-	ScreenMode:     key.NewBinding(key.WithKeys("+", "="), key.WithHelp("+", "screen mode")),
-	ScreenModePrev: key.NewBinding(key.WithKeys("_", "-"), key.WithHelp("_", "screen mode back")),
-	Menu:           key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "menu")),
+	NextTab:        key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "memory tab")),
+	PrevTab:        key.NewBinding(key.WithKeys("["), key.WithHelp("[", "sessions tab")),
+	ScreenMode:     key.NewBinding(key.WithKeys("+", "="), key.WithHelp("+", "bigger preview")),
+	ScreenModePrev: key.NewBinding(key.WithKeys("_", "-"), key.WithHelp("_", "smaller preview")),
+	Menu:           key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "more")),
 
-	Export:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "export to file")),
-	Send:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "send over LAN")),
+	Export:     key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "export")),
+	Send:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "send")),
 	Receive:    key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "receive")),
-	Copy:       key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy to account")),
+	Copy:       key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy")),
 	Rehome:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rehome")),
-	Resume:     key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "resume in claude")),
+	Resume:     key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "resume")),
 	Trust:      key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trust")),
-	SyncMemory: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "sync memory to account")),
-	Pointer:    key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "set last-session pointer")),
+	SyncMemory: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "sync memory")),
+	Pointer:    key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "last session")),
 
 	Yes:    key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("y", "yes")),
 	No:     key.NewBinding(key.WithKeys("n", "N", "esc"), key.WithHelp("n", "no")),
 	Cancel: key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel")),
 	Done:   key.NewBinding(key.WithKeys("esc", "enter"), key.WithHelp("esc", "done")),
-}
-
-// navKeys are the workspace bindings every panel shares.
-func navKeys() []key.Binding {
-	return []key.Binding{keys.Up, keys.Down, keys.NextPanel, keys.PrevPanel, keys.Filter, keys.Menu}
 }
 
 // reservedKeys are the action slots an overlay does not bind: d (delete

@@ -37,41 +37,30 @@ func (r *projectRow) label() string {
 	return transcripts.Sanitize(r.slug)
 }
 
-const (
-	projectSessionsW = 12
-	projectMemoryW   = 6
-	projectAgeW      = 9
-	projectFixedW    = 2 + 1 + projectSessionsW + 1 + projectMemoryW + 1 + projectAgeW
-)
+const projectAgeW = 8
 
+// render lays the row out for the side column: a ! for a directory
+// missing on this machine, the name, the session count, a "mem" tag and
+// the newest age.
 func (r *projectRow) render(width int) string {
-	mark := "  "
+	mark := " "
 	if r.cwd != "" && !r.cwdExists {
-		mark = "! "
+		mark = "!"
 	}
-	memory := ""
+	mem := "   "
 	if r.hasMemory {
-		memory = "MEMORY"
+		mem = "mem"
 	}
 	age := ""
 	if !r.newest.IsZero() {
 		age = humanizeAgo(r.newest, r.now())
 	}
-	nameW := width - projectFixedW
-	if nameW < 12 {
-		return truncate(mark+r.label(), width)
+	right := fmt.Sprintf("%3d %s %s", r.sessions, mem, pad(age, projectAgeW))
+	nameW := width - 2 - 1 - len([]rune(right))
+	if nameW < 8 {
+		return truncate(mark+" "+r.label(), width)
 	}
-	return mark + pad(r.label(), nameW) + " " + pad(countNoun(r.sessions, "session"), projectSessionsW) +
-		" " + pad(memory, projectMemoryW) + " " + pad(age, projectAgeW)
-}
-
-// projectsHeader is the column header laid out like the rows.
-func projectsHeader(width int) string {
-	nameW := width - projectFixedW
-	if nameW < 12 {
-		return "PROJECT"
-	}
-	return "  " + pad("PROJECT", nameW) + " " + pad("SESSIONS", projectSessionsW) + " " + pad("MEMORY", projectMemoryW) + " " + pad("NEWEST", projectAgeW)
+	return mark + " " + pad(r.label(), nameW) + " " + right
 }
 
 // loadProjects lists root's projects/ directory: one fast-path List

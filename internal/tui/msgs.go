@@ -81,12 +81,6 @@ type (
 		lines []string
 		err   error
 	}
-	// filesLoadedMsg carries panel 4's rows for one selection.
-	filesLoadedMsg struct {
-		key  string
-		rows []row
-		err  error
-	}
 	// transcriptLoadedMsg carries the full viewer's rendering.
 	transcriptLoadedMsg struct {
 		path      string
@@ -98,6 +92,11 @@ type (
 	}
 	// pointerDoneMsg ends a last-session pointer write.
 	pointerDoneMsg struct {
+		account string
+		err     error
+	}
+	// switchedMsg ends an active-account switch (state.toml written).
+	switchedMsg struct {
 		account string
 		err     error
 	}

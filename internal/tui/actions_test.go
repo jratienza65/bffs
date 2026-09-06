@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -990,5 +991,59 @@ func TestReceiveKeysWhileResolvingAndConfirming(t *testing.T) {
 	}
 	if _, open := <-rs.op.ch; open {
 		t.Error("the op channel should be drained and closed before quitting")
+	}
+}
+
+// A confirmation whose summary is longer than the pane scrolls between
+// a fixed head and the prompt, which is never pushed off-screen — the
+// case that bites when exporting a whole pool.
+func TestConfirmScrolls(t *testing.T) {
+	f := newFixture(t)
+	f.memory()
+	f.transcript(f.slug, sid1, f.project, "prompt one", fixedNow.Add(-time.Hour))
+	for i, name := range []string{"alpha", "beta", "gamma", "delta"} {
+		dir := filepath.Join(f.home, "src", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		slug, err := transcripts.Slug(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.transcript(slug, fmt.Sprintf("%08d-1111-4222-8333-44445555666%d", i+1, i), dir, "prompt in "+name, fixedNow.Add(-time.Duration(i+2)*time.Hour))
+	}
+	h := f.start("sessions")
+	h.send(tea.WindowSizeMsg{Width: 400, Height: 15}) // the shortest pane the frame allows
+	h.keys("1", "e")                                  // the accounts panel exports the whole pool
+	sc, ok := h.a.top().(*exportScreen)
+	if !ok || !sc.tgt.allProjects {
+		t.Fatalf("e on the accounts panel should export every project, got %T", h.a.top())
+	}
+	h.keys("enter")
+	if sc.state != exportConfirm {
+		t.Fatalf("state = %v:\n%s", sc.state, h.view())
+	}
+	// The prompt is visible from the start, and so is the scroll hint.
+	out := h.view()
+	wantAll(t, out, "Write ", "[y/N]", "↑/↓ scroll · lines 1-")
+	h.keys("down", "down")
+	if sc.box.offset != 2 {
+		t.Errorf("down should scroll, offset = %d", sc.box.offset)
+	}
+	wantAll(t, h.view(), "[y/N]", "↑/↓ scroll · lines 3-")
+	h.keys("pgup")
+	if sc.box.offset != 0 {
+		t.Errorf("pgup should return to the top, got %d", sc.box.offset)
+	}
+	// Scrolling past the end stops at the last window, prompt intact.
+	for i := 0; i < 60; i++ {
+		h.keys("down")
+	}
+	out = h.view()
+	wantAll(t, out, "[y/N]", "total ")
+	// y still answers.
+	h.keys("y")
+	if _, ok := h.a.top().(*resultScreen); !ok {
+		t.Fatalf("y should still answer the confirmation, got %T:\n%s", h.a.top(), h.view())
 	}
 }

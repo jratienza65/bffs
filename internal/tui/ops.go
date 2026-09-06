@@ -294,6 +294,57 @@ const quitPrompt = "an operation is running — quit anyway? it is cancelled fir
 const cancelling = "cancelling…"
 
 // joinLines renders lines for a screen, each sanitised and cut to width.
+// scrollBox keeps a confirmation readable when its summary is longer
+// than the pane: the head and the footer (the [y/N] prompt, which must
+// never be off-screen) stay put and the body scrolls between them.
+type scrollBox struct{ offset int }
+
+// view lays head, a window of body and footer into height lines.
+func (b *scrollBox) view(head, body, footer []string, width, height int) string {
+	out := append([]string{}, head...)
+	avail := max(1, height-len(head)-len(footer))
+	if len(body) <= avail {
+		b.offset = 0
+		out = append(out, body...)
+	} else {
+		inner := max(1, avail-1)
+		if b.offset > len(body)-inner {
+			b.offset = len(body) - inner
+		}
+		if b.offset < 0 {
+			b.offset = 0
+		}
+		end := min(len(body), b.offset+inner)
+		out = append(out, body[b.offset:end]...)
+		out = append(out, fmt.Sprintf("  ↑/↓ scroll · lines %d-%d of %d", b.offset+1, end, len(body)))
+	}
+	return joinLines(append(out, footer...), width)
+}
+
+// key handles the scrolling keys; ok is false for anything else, which
+// the screen then answers itself.
+func (b *scrollBox) key(msg tea.KeyPressMsg) (ok bool) {
+	switch {
+	case key.Matches(msg, keys.Up):
+		b.offset--
+	case key.Matches(msg, keys.Down):
+		b.offset++
+	case key.Matches(msg, keys.PageUp):
+		b.offset -= 10
+	case key.Matches(msg, keys.PageDn):
+		b.offset += 10
+	default:
+		return false
+	}
+	if b.offset < 0 {
+		b.offset = 0
+	}
+	return true
+}
+
+// scrollKeys are the bindings a scrollable confirmation shows.
+func scrollKeys() []key.Binding { return []key.Binding{keys.Up, keys.Down} }
+
 func joinLines(lines []string, width int) string {
 	out := make([]string, len(lines))
 	for i, l := range lines {

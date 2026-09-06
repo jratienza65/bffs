@@ -4,10 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/list"
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
 
@@ -56,58 +52,4 @@ func shortRootLabel(r transcripts.Root) string {
 // accountList joins account names for display.
 func accountList(names []string) string {
 	return transcripts.Sanitize(strings.Join(names, ", "))
-}
-
-// rootsScreen lists every pool; the app skips it when there is one.
-type rootsScreen struct {
-	svc  *services
-	list list.Model
-}
-
-func newRootsScreen(svc *services, roots []transcripts.Root) *rootsScreen {
-	items := make([]list.Item, 0, len(roots))
-	for _, r := range roots {
-		items = append(items, &rootRow{root: r, label: rootLabel(r)})
-	}
-	s := &rootsScreen{svc: svc, list: newList(items, "root", "roots")}
-	s.list.Title = "ROOT"
-	return s
-}
-
-func (s *rootsScreen) Init() tea.Cmd        { return nil }
-func (s *rootsScreen) Title() string        { return "roots" }
-func (s *rootsScreen) capturingInput() bool { return s.list.SettingFilter() }
-func (s *rootsScreen) Keys() []key.Binding {
-	return append([]key.Binding{keys.Up, keys.Down, keys.Open, keys.Filter, keys.Receive}, filterKeys(s.list)...)
-}
-
-func (s *rootsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		s.list.SetSize(msg.Width, msg.Height)
-		return s, nil
-	case tea.KeyPressMsg:
-		if s.list.SettingFilter() {
-			break
-		}
-		switch {
-		case key.Matches(msg, keys.Open):
-			if r, ok := s.list.SelectedItem().(*rootRow); ok {
-				return s, pushScreen(newProjectsScreen(s.svc, r.root))
-			}
-			return s, nil
-		case key.Matches(msg, keys.Receive):
-			if r, ok := s.list.SelectedItem().(*rootRow); ok {
-				return s, receiveInto(s.svc, r.root)
-			}
-			return s, nil
-		}
-	}
-	var cmd tea.Cmd
-	s.list, cmd = s.list.Update(msg)
-	return s, cmd
-}
-
-func (s *rootsScreen) View(width, height int) string {
-	return s.list.View()
 }

@@ -72,6 +72,35 @@ type (
 		refs []transcripts.PathRef
 		err  error
 	}
+	// previewLoadedMsg carries the main pane's lines for one selection;
+	// key names the selection, gen the reload generation it was built
+	// for (a stale one is dropped).
+	previewLoadedMsg struct {
+		key   string
+		gen   int
+		lines []string
+		err   error
+	}
+	// filesLoadedMsg carries panel 4's rows for one selection.
+	filesLoadedMsg struct {
+		key  string
+		rows []row
+		err  error
+	}
+	// transcriptLoadedMsg carries the full viewer's rendering.
+	transcriptLoadedMsg struct {
+		path      string
+		lines     []string
+		records   int
+		hidden    int
+		truncated bool
+		err       error
+	}
+	// pointerDoneMsg ends a last-session pointer write.
+	pointerDoneMsg struct {
+		account string
+		err     error
+	}
 )
 
 // Operation messages (plan §11 "Long ops"): an action screen's goroutine

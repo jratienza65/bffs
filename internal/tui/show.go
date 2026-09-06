@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/jratienza65/bffs/internal/transcripts"
@@ -217,52 +215,4 @@ func shellWord(s string) string {
 		return "''"
 	}
 	return s
-}
-
-// showScreen is the read-only detail of one session, in a viewport.
-type showScreen struct {
-	svc      *services
-	session  transcripts.Session
-	resolved bool
-	vp       viewport.Model
-	busy     bool
-}
-
-func newShowScreen(svc *services, s transcripts.Session, resolved bool) *showScreen {
-	return &showScreen{svc: svc, session: s, resolved: resolved, vp: newViewport(), busy: true}
-}
-
-func (s *showScreen) Init() tea.Cmd       { return loadDetail(s.svc, s.session, s.resolved) }
-func (s *showScreen) Title() string       { return "session " + shortID(s.session.ID) }
-func (s *showScreen) loading() bool       { return s.busy }
-func (s *showScreen) Keys() []key.Binding { return viewportKeys() }
-
-func (s *showScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		s.vp.SetWidth(msg.Width)
-		s.vp.SetHeight(msg.Height)
-		return s, nil
-	case showLoadedMsg:
-		if msg.id != s.session.ID {
-			return s, nil
-		}
-		s.busy = false
-		if msg.err != nil {
-			return s, statusError(msg.err)
-		}
-		s.session = msg.detail.Session
-		s.vp.SetContentLines(detailLines(msg.detail, s.svc.now()))
-		return s, nil
-	}
-	var cmd tea.Cmd
-	s.vp, cmd = s.vp.Update(msg)
-	return s, cmd
-}
-
-func (s *showScreen) View(width, height int) string {
-	if s.busy {
-		return styleFaint.Render("loading…")
-	}
-	return s.vp.View()
 }

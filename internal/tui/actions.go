@@ -29,6 +29,14 @@ type actionTarget struct {
 	project string                // decoded cwd of the project, "" when unknown
 	rows    []transcripts.Session // every session of the project, in row order
 	ids     []string              // selected session ids, in row order
+	only    string                // "" (sessions + memory), or "memories": the S sync
+}
+
+// memoryOnly narrows the target to the project's memory directory.
+func (t actionTarget) memoryOnly() actionTarget {
+	t.only = "memories"
+	t.ids = nil
+	return t
 }
 
 // allIDs lists every session of the project.
@@ -50,6 +58,9 @@ func (t actionTarget) label() string {
 
 // what says in a few words what the selection covers.
 func (t actionTarget) what() string {
+	if t.only == "memories" {
+		return "the memory of " + t.label()
+	}
 	if len(t.ids) > 0 {
 		return countNoun(len(t.ids), "selected session")
 	}
@@ -61,6 +72,11 @@ func (t actionTarget) what() string {
 // else — a project without a recorded cwd — every listed session.
 func (t actionTarget) selectOptions(now time.Time) porter.SelectOptions {
 	o := porter.SelectOptions{IncludeLive: true, Now: now}
+	if t.only == "memories" && t.project != "" {
+		o.Only = t.only
+		o.Projects = []string{t.project}
+		return o
+	}
 	switch {
 	case len(t.ids) > 0:
 		o.Sessions = t.ids

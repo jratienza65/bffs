@@ -182,7 +182,7 @@ func (f *fixture) start(start string) *harness {
 	svc.now = func() time.Time { return fixedNow }
 	h := &harness{t: f.t, a: newApp(svc)}
 	h.run(h.a.Init())
-	h.send(tea.WindowSizeMsg{Width: 300, Height: 40})
+	h.send(tea.WindowSizeMsg{Width: 400, Height: 40})
 	return h
 }
 
@@ -285,41 +285,74 @@ func TestSupportedFalseWithoutTTY(t *testing.T) {
 	}
 }
 
-func TestSingleRootSkipsRootsScreen(t *testing.T) {
+// wsCursor is the row under the cursor of a panel.
+func wsCursor(h *harness, id panelID) row { return h.a.ws.panels[id].selected() }
+
+func TestWorkspaceSingleRoot(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	f.transcript(f.slug, sid2, f.project, "first prompt of two", fixedNow.Add(-2*24*time.Hour))
 	f.transcript("-home-nobody-src-x", sid3, "/home/nobody/src/x", "elsewhere", fixedNow.Add(-5*24*time.Hour))
 	f.memory()
 	h := f.start("sessions")
+	ws := h.a.ws
 
-	if _, ok := h.a.top().(*projectsScreen); !ok || len(h.a.stack) != 1 {
-		t.Fatalf("one root should open the projects screen directly, stack = %T x%d", h.a.top(), len(h.a.stack))
+	if h.a.top() != nil || ws.focus != panelProjects {
+		t.Fatalf("the workspace should start on the projects panel with no overlay: top=%T focus=%d", h.a.top(), ws.focus)
 	}
 	out := h.view()
-	wantAll(t, out, "bffs test", "shared pool: work", "PROJECT", "SESSIONS", "MEMORY", "NEWEST",
-		shortPath(f.project), "2 sessions", "1h ago", "! /home/nobody/src/x", "1 session", "5d ago")
-	wantNone(t, out, "roots", "\x1b]")
+	wantAll(t, out, "bffs test", "shared pool: work", "1 roots 1/1", "2 projects 1/2", "3 sessions (memory)", "4 files",
+		shortPath(f.project), "2 sessions", "1h ago", "! /home/nobody/src/x", "1 session", "5d ago",
+		// the preview: the project's drift tables
+		"project "+shortPath(f.project), "across roots", "shared pool: work", "2 files (reference)", "per account", "ACCOUNT", "TRUST", "LAST-SESSION")
+	wantNone(t, out, "\x1b]")
 	// The cursor starts on the process's own project.
-	if line := cursorLine(out); !strings.Contains(line, shortPath(f.project)) {
-		t.Errorf("cursor not on the current project: %q", line)
+	if r, ok := wsCursor(h, panelProjects).(*projectRow); !ok || r.cwd != f.project {
+		t.Errorf("cursor not on the current project: %+v", wsCursor(h, panelProjects))
 	}
-	// p is bound only where there is a memory dir to scan; here it is a
-	// reserved slot like the rest.
+	// p scans the memory of the project; d never deletes; esc at the top
+	// stays put.
 	h.keys("p")
-	wantAll(t, h.view(), reservedHint)
-	if _, ok := h.a.top().(*projectsScreen); !ok {
-		t.Errorf("p on projects must stay put, got %T", h.a.top())
+	if _, ok := h.a.top().(*scanPathsScreen); !ok {
+		t.Fatalf("p should open scan paths, got %T", h.a.top())
 	}
-	// esc at the bottom of the stack does not pop.
+	wantAll(t, h.view(), "notes.md:4: /Users/jonas/x", "@ref MEMORY.md:2: @~/notes.md", "3 references")
 	h.keys("esc")
-	if len(h.a.stack) != 1 {
-		t.Errorf("esc popped the last screen")
+	h.keys("d")
+	wantAll(t, h.view(), "never deletes")
+	h.keys("esc")
+	if h.a.top() != nil {
+		t.Errorf("esc opened something: %T", h.a.top())
 	}
 	wantAll(t, h.view(), "q quits")
+	// Panels cycle with tab and h/l; numbers jump.
+	h.keys("tab")
+	if ws.focus != panelItems {
+		t.Errorf("tab should focus panel 3, got %d", ws.focus)
+	}
+	h.keys("h", "h")
+	if ws.focus != panelRoots {
+		t.Errorf("h twice should focus panel 1, got %d", ws.focus)
+	}
+	h.keys("4")
+	if ws.focus != panelFiles {
+		t.Errorf("4 should focus the files panel, got %d", ws.focus)
+	}
+	// Screen modes: half, main only (no side column), back to normal.
+	h.keys("+")
+	if ws.mode != modeHalf || ws.sideWidth() != (400-3)/2 {
+		t.Errorf("+ should give the half mode: mode=%d side=%d", ws.mode, ws.sideWidth())
+	}
+	h.keys("+")
+	wantNone(t, h.view(), "1 roots")
+	h.keys("+")
+	wantAll(t, h.view(), "1 roots")
+	if ws.mode != modeNormal {
+		t.Errorf("mode = %d, want normal", ws.mode)
+	}
 }
 
-func TestRootsScreenWithSeveralRoots(t *testing.T) {
+func TestRootsPanelWithSeveralRoots(t *testing.T) {
 	f := newFixture(t)
 	f.accounts.Accounts["full"] = store.Account{Type: store.TypeOAuth, Isolation: store.IsolationFull}
 	for _, name := range []string{"full", "gone"} {
@@ -329,29 +362,32 @@ func TestRootsScreenWithSeveralRoots(t *testing.T) {
 	}
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	h := f.start("sessions")
+	ws := h.a.ws
 
-	if _, ok := h.a.top().(*rootsScreen); !ok {
-		t.Fatalf("several roots should open the roots screen, got %T", h.a.top())
-	}
 	out := h.view()
-	wantAll(t, out, "ROOT",
-		"shared pool ("+shortPath(f.claudeDir)+") — accounts: work",
-		"full [full isolation]",
-		"orphan: gone (read-only)",
-		"warning: orphan session dir")
-	// Open the second root, then come back.
-	h.keys("down", "enter")
-	if s, ok := h.a.top().(*projectsScreen); !ok || s.root.Owner != "full" {
-		t.Fatalf("enter should open the full root's projects, got %T", h.a.top())
+	wantAll(t, out, "1 roots 1/3", "shared pool ("+shortPath(f.claudeDir)+") — accounts: work", "warning: orphan session dir")
+	h.keys("1")
+	out = h.view()
+	wantAll(t, out, "full [full isolation]", "orphan: gone (read-only)",
+		// the root preview
+		"kind:         shared pool", "accounts:     work", "projects:     1", "retention:")
+	// Move to the full root: its projects are empty, the preview says so.
+	h.keys("down")
+	if ws.root.Owner != "full" {
+		t.Fatalf("down should select the full root, got %q", ws.root.Owner)
 	}
-	wantAll(t, h.view(), "roots › account: full", "No projects")
-	h.keys("esc")
-	if _, ok := h.a.top().(*rootsScreen); !ok {
-		t.Errorf("esc should pop to the roots screen, got %T", h.a.top())
+	wantAll(t, h.view(), "full isolation — its own transcripts", "no projects", "account: full")
+	h.keys("enter")
+	if ws.focus != panelProjects {
+		t.Errorf("enter on a root should focus the projects, got %d", ws.focus)
+	}
+	h.keys("1", "up")
+	if ws.root.Owner != "" || ws.project == nil {
+		t.Errorf("up should return to the home root and its project: owner=%q project=%v", ws.root.Owner, ws.project)
 	}
 }
 
-func TestSessionsScreen(t *testing.T) {
+func TestSessionsPanel(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour),
 		map[string]any{"type": "custom-title", "sessionId": sid1, "customTitle": osc52 + "Plan: session export"})
@@ -362,92 +398,88 @@ func TestSessionsScreen(t *testing.T) {
 	f.lastSession("work", f.project, sid3)
 	f.memory()
 	h := f.start("sessions")
-	h.keys("enter")
+	ws := h.a.ws
+	h.keys("3")
 
-	s, ok := h.a.top().(*sessionsScreen)
-	if !ok {
-		t.Fatalf("enter on a project should open its sessions, got %T", h.a.top())
-	}
 	out := h.view()
-	wantAll(t, out, shortPath(f.project)+" › sessions", "project "+shortPath(f.project)+"  (shared pool: work)",
-		"TITLE", "ACCOUNT", "LAST", "SIZE", "BRANCH", "STATE",
+	wantAll(t, out, "shared pool: work › "+shortPath(f.project)+" › sessions", "3 sessions (memory) 1/3",
+		"TITLE", "LAST", "STATE",
 		"Plan: session export", "1h ago", "live",
-		"first prompt of three", "work", "3h ago",
+		"first prompt of three", "3h ago",
 		"prompt two", "9d ago", "imported·pending",
-		"main", "3 sessions")
+		// the preview of the cursor's session
+		"session "+sid1[:8],
+		"session:      "+sid1,
+		"title:        Plan: session export  (custom)",
+		"cwd:          "+shortPath(f.project)+"  (exists)",
+		"state:        live",
+		"branch:       main",
+		"resume:       cd "+shellWord(f.project)+" && claude --resume "+sid1,
+		"per account", "excerpt", "first prompt:  first prompt of one",
+		// the files panel lists the artifacts of the cursor's session
+		"transcript "+sid1[:8]+".jsonl", "sidecar/", "(absent)")
 	wantNone(t, out, "\x1b]", "52;c;", "(1e005053)")
-	if line := cursorLine(out); !strings.Contains(line, "Plan: session export") {
-		t.Errorf("cursor should start on the newest session: %q", line)
+	if r, ok := wsCursor(h, panelItems).(*sessionRow); !ok || r.s.ID != sid1 {
+		t.Errorf("cursor should start on the newest session: %+v", wsCursor(h, panelItems))
 	}
 
 	// Multi-select: space toggles and moves down, a selects every visible
 	// row, a again clears.
 	h.keys("space")
-	wantAll(t, h.view(), "[x] Plan: session export", "1 selected")
-	h.keys("a")
-	wantAll(t, h.view(), "3 selected")
-	h.keys("a")
-	wantNone(t, h.view(), "selected", "[x]")
-
-	// d (delete) is the one reserved slot; p opens scan paths.
-	h.keys("d")
-	wantAll(t, h.view(), reservedHint)
-	h.keys("p")
-	if _, ok := h.a.top().(*scanPathsScreen); !ok {
-		t.Fatalf("p should open scan paths, got %T", h.a.top())
+	wantAll(t, h.view(), "[x] Plan: session export")
+	if len(ws.sel) != 1 {
+		t.Errorf("sel = %v", ws.sel)
 	}
-	wantAll(t, h.view(), "scan paths", "notes.md:4: /Users/jonas/x", "@ref MEMORY.md:2: @~/notes.md", "3 references")
-	h.keys("esc")
-	if h.a.top() != s {
-		t.Fatalf("esc should pop back to the sessions screen, got %T", h.a.top())
+	h.keys("a")
+	if len(ws.sel) != 3 {
+		t.Errorf("a should select all: %v", ws.sel)
+	}
+	h.keys("a")
+	if len(ws.sel) != 0 {
+		t.Errorf("a again should clear: %v", ws.sel)
 	}
 
-	// Filter: only the matching row stays; esc clears the filter first,
-	// then goes back.
+	// Filter: only the matching row stays; esc clears the filter.
 	h.keys("/", "t", "h", "r", "e", "e", "enter")
 	out = h.view()
-	wantAll(t, out, "first prompt of three", "“three”", "2 filtered")
+	wantAll(t, out, "first prompt of three", "3 sessions (memory) 1/1")
 	wantNone(t, out, "Plan: session export", "prompt two")
 	h.keys("esc")
-	wantAll(t, h.view(), "Plan: session export", "prompt two", "3 sessions")
-	if h.a.top() != s {
-		t.Fatalf("esc with a filter applied must clear it, not pop; top = %T", h.a.top())
+	wantAll(t, h.view(), "Plan: session export", "prompt two", "3 sessions (memory) 1/3")
+	if h.a.top() != nil {
+		t.Fatalf("esc with a filter applied must clear it, not open anything; top = %T", h.a.top())
 	}
 
-	// Help toggles the full view, with the actions and the reserved slot named.
+	// ? opens the keys overlay with the actions named; ? closes it.
 	h.keys("?")
-	wantAll(t, h.view(), "export to file", "send over LAN", "rehome", "resume in claude", "no delete here", "select all", "sessions⇄memories")
+	if _, ok := h.a.top().(*helpScreen); !ok {
+		t.Fatalf("? should open the keys, got %T", h.a.top())
+	}
+	wantAll(t, h.view(), "export to file", "send over LAN", "rehome", "resume in claude", "sync memory to account", "set last-session pointer", "no delete here", "next tab")
 	h.keys("?")
+	if h.a.top() != nil {
+		t.Fatalf("? again should close the keys, got %T", h.a.top())
+	}
 
-	// enter opens the read-only detail of the cursor's session.
+	// enter opens the full transcript of the cursor's session.
 	h.keys("enter")
-	if _, ok := h.a.top().(*showScreen); !ok {
-		t.Fatalf("enter should open the show screen, got %T", h.a.top())
+	if _, ok := h.a.top().(*transcriptScreen); !ok {
+		t.Fatalf("enter should open the transcript, got %T", h.a.top())
 	}
 	out = h.view()
-	wantAll(t, out, "session "+sid1[:8],
-		"session:      "+sid1,
-		"title:        Plan: session export  (custom)",
-		"root:         "+shortPath(filepath.Join(f.claudeDir, "projects"))+"  (shared pool: work)",
-		"cwd:          "+shortPath(f.project)+"  (exists)",
-		"state:        live",
-		"branch:       main",
-		"version:      2.1.259",
-		"transcript:   "+shortPath(filepath.Join(f.claudeDir, "projects", f.slug, sid1+".jsonl")),
-		"resume:       cd "+shellWord(f.project)+" && claude --resume "+sid1)
+	wantAll(t, out, "transcript "+sid1[:8], "> first prompt of one", "— title: Plan: session export", "2 records shown")
 	wantNone(t, out, "\x1b]", "52;c;")
 	h.keys("esc")
 
-	// The imported session's detail carries the record.
-	h.keys("down", "down", "enter")
+	// The imported session's preview carries the record.
+	h.keys("down", "down")
 	out = h.view()
 	wantAll(t, out, "session:      "+sid2, "cwd:          /home/nobody/src/x  (missing on this machine)",
 		"state:        imported·pending", "import:       bundle 6f1e2c0a-0000-4000-8000-000000000001", "from mac-a (jonas, /Users/jonas), account work, status pending",
 		"old cwd:      /home/nobody/src/x")
-	h.keys("esc", "esc")
-	if _, ok := h.a.top().(*projectsScreen); !ok {
-		t.Fatalf("esc should pop to the projects screen, got %T", h.a.top())
-	}
+	// The per-account row names the pointer that claude recorded.
+	h.keys("up")
+	wantAll(t, h.view(), "last-session pointer: work (claude-recorded)", "work         trust", "last-session "+sid3[:8]+" (this session)")
 
 	// q quits; the view goes blank.
 	h.keys("q")
@@ -456,123 +488,102 @@ func TestSessionsScreen(t *testing.T) {
 	}
 }
 
-// Titles are read after the listing: the page shows ids until the
-// windows arrive, then the titles, cached by (path, mtime, size).
+// Titles are read after the listing and cached by (path, mtime, size):
+// the sessions panel resolves the visible page, and a tab switch away
+// and back serves them from the cache.
 func TestSessionsLazyTitles(t *testing.T) {
 	f := newFixture(t)
-	f.saveAccounts()
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	f.transcript(f.slug, sid2, f.project, "first prompt of two", fixedNow.Add(-2*time.Hour))
-	svc, err := loadServices(context.Background(), Options{CfgDir: f.cfgDir, HomeClaudeDir: f.claudeDir})
-	if err != nil {
-		t.Fatal(err)
+	f.memory()
+	h := f.start("sessions")
+	ws := h.a.ws
+	h.keys("3")
+	wantAll(t, h.view(), "first prompt of one", "first prompt of two")
+	wantNone(t, h.view(), "(1e005053)")
+	if len(ws.svc.titles) != 2 {
+		t.Errorf("title cache holds %d entries, want 2", len(ws.svc.titles))
 	}
-	svc.now = func() time.Time { return fixedNow }
-	root, err := transcripts.RootFor(svc.roots, transcripts.HomeName)
-	if err != nil {
-		t.Fatal(err)
+	if len(ws.pending) != 0 {
+		t.Errorf("reads still pending: %v", ws.pending)
 	}
-	s := newSessionsScreen(svc, root, f.slug, f.project)
-	_, _ = s.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
-	if !s.loading() {
-		t.Fatal("screen should be loading before its page arrives")
+	h.keys("]", "[")
+	if ws.tab != tabSessions || ws.sessLoadedFor == "" {
+		t.Fatalf("tab switch lost the sessions: tab=%d loaded=%q", ws.tab, ws.sessLoadedFor)
 	}
-	page := s.Init()()
-	if m, ok := page.(sessionsPageMsg); !ok || len(m.items) != 2 || m.items[0].Title != "" {
-		t.Fatalf("page = %#v", page)
+	wantAll(t, h.view(), "first prompt of one", "first prompt of two")
+	if len(ws.svc.titles) != 2 || len(ws.pending) != 0 {
+		t.Errorf("titles re-read after the tab switch: cache=%d pending=%v", len(ws.svc.titles), ws.pending)
 	}
-	_, cmd := s.Update(page)
-	out := s.View(120, 20)
-	wantAll(t, out, "(1e005053)", "(b19c4e20)", "1h ago", "2h ago")
-	wantNone(t, out, "first prompt")
-	if cmd == nil {
-		t.Fatal("the page should request the visible titles")
-	}
-	msg := cmd()
-	if m, ok := msg.(titlesResolvedMsg); !ok || len(m.metas) != 2 {
-		t.Fatalf("titles = %#v", msg)
-	}
-	_, cmd = s.Update(msg)
-	if cmd != nil {
-		if m, ok := cmd().(titlesResolvedMsg); ok && len(m.metas) > 0 {
-			t.Errorf("titles requested twice: %v", m.metas)
-		}
-	}
-	out = s.View(120, 20)
-	wantAll(t, out, "first prompt of one", "first prompt of two")
-	wantNone(t, out, "(1e005053)")
-	if len(svc.titles) != 2 {
-		t.Errorf("title cache holds %d entries, want 2", len(svc.titles))
-	}
-	// A fresh screen over the same pool serves the titles from the cache
-	// without a read command.
-	again := newSessionsScreen(svc, root, f.slug, f.project)
-	_, _ = again.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
-	_, cmd = again.Update(again.Init()())
-	if cmd != nil {
-		if m, ok := cmd().(titlesResolvedMsg); ok && len(m.metas) > 0 {
-			t.Errorf("cached titles were read again: %v", m.metas)
-		}
-	}
-	wantAll(t, again.View(120, 20), "first prompt of one", "first prompt of two")
 }
 
-func TestMemoriesTab(t *testing.T) {
+func TestMemoryTab(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	dir := f.memory()
 	h := f.start("memories")
-	h.keys("enter")
+	ws := h.a.ws
 
-	if _, ok := h.a.top().(*memoriesScreen); !ok {
-		t.Fatalf("bffs memory opens a project on the memories tab, got %T", h.a.top())
+	if ws.focus != panelItems || ws.tab != tabMemory {
+		t.Fatalf("bffs memory opens on the memory tab: focus=%d tab=%d", ws.focus, ws.tab)
 	}
 	out := h.view()
-	wantAll(t, out, shortPath(f.project)+" › memories", "memory "+shortPath(dir)+"  (shared pool — visible to: work)",
-		"NAME", "SIZE", "MODIFIED", "PINNED", "PATHS", "@REFS",
-		"MEMORY.md", "@refs 1", "notes.md", "pinned", "paths 2", "2 files")
+	wantAll(t, out, shortPath(f.project)+" › memory", "3 memory (sessions) 1/2", "NAME", "SIZE",
+		"MEMORY.md", "notes.md", "pinned",
+		// the preview of the cursor's file: who reads it, drift, contents
+		"memory MEMORY.md", "read by:      shared pool — visible to: work", "drift:        no other root on this machine",
+		"# Memory", "- [Notes](notes.md) — see @~/notes.md",
+		// the references panel for MEMORY.md
+		"4 references 1/1", "@ 2: @~/notes.md")
 
-	// tab flips to sessions and back.
-	h.keys("tab")
-	if _, ok := h.a.top().(*sessionsScreen); !ok || len(h.a.stack) != 2 {
-		t.Fatalf("tab should replace the tab with sessions, got %T x%d", h.a.top(), len(h.a.stack))
+	// [ flips to sessions and ] back; the selection chain survives.
+	h.keys("[")
+	if ws.tab != tabSessions {
+		t.Fatalf("[ should switch to sessions, got %d", ws.tab)
 	}
-	wantAll(t, h.view(), "first prompt of one")
-	h.keys("tab")
-	if _, ok := h.a.top().(*memoriesScreen); !ok {
-		t.Fatalf("tab should flip back to memories, got %T", h.a.top())
+	wantAll(t, h.view(), "first prompt of one", "3 sessions (memory)")
+	h.keys("]")
+	if ws.tab != tabMemory {
+		t.Fatalf("] should switch back to memory, got %d", ws.tab)
 	}
 
-	// enter opens the file read-only.
+	// enter hands the keys to the main pane; esc returns them.
 	h.keys("enter")
-	if _, ok := h.a.top().(*fileScreen); !ok {
-		t.Fatalf("enter should open the file, got %T", h.a.top())
+	if !ws.mainFocus {
+		t.Fatal("enter on a memory file should focus the main pane")
 	}
-	wantAll(t, h.view(), "MEMORY.md", "2 lines", "# Memory", "- [Notes](notes.md) — see @~/notes.md")
 	h.keys("esc")
+	if ws.mainFocus {
+		t.Fatal("esc should return to the panels")
+	}
+
+	// The references panel previews one reference.
+	h.keys("down", "4")
+	wantAll(t, h.view(), "4 references 1/2", "kind:         absolute path", "found in:     notes.md:4", "on this machine")
 
 	// p scans the directory's paths.
 	h.keys("p")
 	if _, ok := h.a.top().(*scanPathsScreen); !ok {
 		t.Fatalf("p should open scan paths, got %T", h.a.top())
 	}
-	wantAll(t, h.view(), "notes.md:4: /Users/jonas/x", "notes.md:4: /Users/jonas/y", "@ref MEMORY.md:2: @~/notes.md")
-	h.keys("esc", "esc")
-	if _, ok := h.a.top().(*projectsScreen); !ok {
-		t.Fatalf("esc twice should be back on projects, got %T", h.a.top())
+	wantAll(t, h.view(), "notes.md:4: /Users/jonas/x", "notes.md:4: /Users/jonas/y", "@ref MEMORY.md:2: @~/notes.md", shortPath(dir))
+	h.keys("esc")
+	if h.a.top() != nil {
+		t.Fatalf("esc should close the overlay, got %T", h.a.top())
 	}
 }
 
-func TestMemoriesTabWithoutMemoryDir(t *testing.T) {
+func TestMemoryTabWithoutMemoryDir(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	h := f.start("memories")
-	h.keys("enter")
-	wantAll(t, h.view(), "no memory dir for "+shortPath(f.project), "(would be "+shortPath(filepath.Join(f.claudeDir, "projects", f.slug, "memory"))+")")
+	wantAll(t, h.view(), "no memory dir for "+shortPath(f.project), "would be:     "+shortPath(filepath.Join(f.claudeDir, "projects", f.slug, "memory")), "3 memory (sessions) 0")
 	h.keys("p")
-	wantAll(t, h.view(), "no memory dir for "+shortPath(f.project))
-	if _, ok := h.a.top().(*memoriesScreen); !ok {
-		t.Errorf("p without a memory dir must stay put, got %T", h.a.top())
+	wantAll(t, h.view(), "no memory dir for this project")
+	h.keys("S")
+	wantAll(t, h.view(), "no memory dir for this project")
+	if h.a.top() != nil {
+		t.Errorf("p or S without a memory dir must stay put, got %T", h.a.top())
 	}
 }
 
@@ -600,8 +611,8 @@ func TestCtrlCQuitsEvenWhileFiltering(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	h := f.start("sessions")
-	h.keys("enter", "/")
-	if c, ok := h.a.top().(inputCapturer); !ok || !c.capturingInput() {
+	h.keys("3", "/")
+	if !h.a.ws.capturing() {
 		t.Fatal("/ should start typing a filter")
 	}
 	// q is typed into the filter, not a quit.
@@ -615,11 +626,37 @@ func TestCtrlCQuitsEvenWhileFiltering(t *testing.T) {
 	}
 }
 
+// pump runs a workspace command chain the way the harness runs the
+// app's, feeding every message back to the workspace, until stop says
+// a message is the one the caller wants to inspect first.
+func pump(ws *workspace, cmd tea.Cmd, stop func(tea.Msg) bool) tea.Msg {
+	pending := []tea.Cmd{cmd}
+	for len(pending) > 0 {
+		c := pending[0]
+		pending = pending[1:]
+		if c == nil {
+			continue
+		}
+		msg := c()
+		switch m := msg.(type) {
+		case nil:
+		case tea.BatchMsg:
+			pending = append(pending, m...)
+		default:
+			if stop != nil && stop(m) {
+				return m
+			}
+			pending = append(pending, ws.Update(m))
+		}
+	}
+	return nil
+}
+
 // The listing is the fast path: a transcript whose body is not JSON at
 // all lists like any other (id, mtime, size from ReadDir + Info) with no
 // error, shows its id until the windows are read, then "-" — proof that
 // nothing on the way to the first frame parsed the file. The projects
-// screen decodes the cwd from the newest transcript's head and falls
+// panel decodes the cwd from the newest transcript's head and falls
 // back to the slug when that fails, still without an error.
 func TestListingNeverOpensTranscripts(t *testing.T) {
 	f := newFixture(t)
@@ -638,14 +675,10 @@ func TestListingNeverOpensTranscripts(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.now = func() time.Time { return fixedNow }
-	root, err := transcripts.RootFor(svc.roots, transcripts.HomeName)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	s := newSessionsScreen(svc, root, f.slug, f.project)
-	_, _ = s.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
-	page := s.Init()()
+	ws := newWorkspace(svc)
+	ws.setSize(200, 40)
+	page := pump(ws, ws.setRoots(svc.roots), func(m tea.Msg) bool { _, ok := m.(sessionsPageMsg); return ok })
 	m, ok := page.(sessionsPageMsg)
 	if !ok || m.err != nil || len(m.items) != 1 {
 		t.Fatalf("page = %#v", page)
@@ -653,31 +686,27 @@ func TestListingNeverOpensTranscripts(t *testing.T) {
 	if it := m.items[0]; it.ID != sid1 || it.Title != "" || it.Cwd != "" || it.Size != int64(len(body)) || !it.LastTS.Equal(mtime) {
 		t.Fatalf("fast-path item = %+v", it)
 	}
-	_, cmd := s.Update(page)
-	wantAll(t, s.View(120, 20), "(1e005053)", "1h ago")
-	if cmd == nil {
+	ws.focus = panelItems
+	cmd := ws.Update(page)
+	wantAll(t, ws.View(200, 40, nil, "", false), "(1e005053)", "1h ago")
+	titles := pump(ws, cmd, func(m tea.Msg) bool { _, ok := m.(titlesResolvedMsg); return ok })
+	if titles == nil {
 		t.Fatal("the page should request the visible titles")
 	}
-	_, _ = s.Update(cmd())
-	if r := s.rows[0]; !r.resolved || r.title() != "-" {
+	pump(ws, ws.Update(titles), nil)
+	if r := ws.sessRows[0]; !r.resolved || r.title() != "-" {
 		t.Errorf("after the windows were read: resolved=%v title=%q", r.resolved, r.title())
-	}
-	if s.err != nil {
-		t.Errorf("unexpected screen error: %v", s.err)
 	}
 
 	// End to end through the app: projects lists the slug (no cwd could be
-	// decoded), enter opens the sessions screen without an error.
+	// decoded), the sessions panel shows the session without an error.
 	h := f.start("sessions")
 	wantAll(t, h.view(), f.slug, "1 session", "1h ago")
-	h.keys("enter")
-	if _, ok := h.a.top().(*sessionsScreen); !ok {
-		t.Fatalf("enter should open the sessions screen, got %T", h.a.top())
-	}
+	h.keys("3")
 	if h.a.statusErr {
 		t.Errorf("status shows an error: %q", h.a.status)
 	}
-	wantAll(t, h.view(), "1 session")
+	wantAll(t, h.view(), "3 sessions (memory) 1/1")
 }
 
 // Labels built from names read off the disk are sanitised too: an orphan

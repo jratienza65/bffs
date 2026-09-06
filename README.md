@@ -299,6 +299,16 @@ new account's `.claude.json` from `~/.claude.json` once — never again on a
 previously active account's answers over for every project whose directory
 still exists (`--no-trust-carry` skips that).
 
+## Browse sessions and memory
+
+`bffs sessions` and `bffs memory` without a subcommand open a browser in the terminal (add `--plain` for the table). It is laid out like lazygit: four stacked panels on the left — roots, projects, sessions or memory (`[` `]` switch), and the files of the selected item — and a preview on the right for whatever the focused panel points at.
+
+- A **project** previews its drift: how many sessions each root holds, whether its memory files are the same on the other roots (by checksum), and what each account's `.claude.json` records for it — folder trust, the external-imports answer and the last-session pointer. Under partial isolation every account reads the same pool, so memory cannot drift between those accounts; drift appears against a full-isolation account or a machine you imported from.
+- A **session** previews its facts, the account it is attributed to (and any rival claimant), the per-account row, the resume command and an excerpt. `enter` opens the full transcript.
+- A **memory file** previews who reads it, how the same file compares on the other roots, and its contents.
+
+Keys: `1`–`4` or `tab`/`h`/`l` move between panels, `/` filters, `+`/`_` change the screen mode, `x` opens the action menu and `?` lists every key. Actions run the same engines as the commands: `e` export to a file, `s` send over the LAN, `i` receive, `c` copy to another account, `r` rehome, `R` resume in claude, `t` trust matrix, `S` sync the project's memory into a full-isolation account, `L` point an account's last session at the selected one, `p` scan memory paths. Nothing in the browser deletes; that stays `bffs sessions rm`.
+
 ## Export & import
 
 `bffs export` packs Claude Code sessions and auto-memory into one `.bffs`

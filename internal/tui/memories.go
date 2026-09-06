@@ -170,6 +170,8 @@ func (s *fileScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, cmd
 }
 
+func (s *fileScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd { return vpMouse(&s.vp, msg) }
+
 func (s *fileScreen) View(width, height int) string {
 	head := countNoun(s.lines, "line")
 	if s.truncated {

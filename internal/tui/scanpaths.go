@@ -77,6 +77,8 @@ func (s *scanPathsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, cmd
 }
 
+func (s *scanPathsScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd { return vpMouse(&s.vp, msg) }
+
 func (s *scanPathsScreen) View(width, height int) string {
 	head := fmt.Sprintf("%s in %s", countNoun(s.refs, "reference"), shortPath(s.dir))
 	if s.busy {

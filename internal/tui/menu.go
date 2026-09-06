@@ -76,6 +76,34 @@ func (s *menuScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, nil
 }
 
+// menuTop is the line the first item is drawn on (title, blank).
+const menuTop = 2
+
+// mouse picks the item under the pointer; the wheel moves the cursor.
+func (s *menuScreen) mouse(msg tea.MouseMsg, _, y int) tea.Cmd {
+	switch e := msg.(type) {
+	case tea.MouseWheelMsg:
+		switch e.Button {
+		case tea.MouseWheelUp:
+			s.cursor = max(0, s.cursor-1)
+		case tea.MouseWheelDown:
+			s.cursor = min(len(s.items)-1, s.cursor+1)
+		}
+	case tea.MouseClickMsg:
+		if e.Button != tea.MouseLeft {
+			return nil
+		}
+		i := y - menuTop
+		if i < 0 || i >= len(s.items) {
+			return nil
+		}
+		s.cursor = i
+		run := s.items[i].run
+		return func() tea.Msg { return menuChoiceMsg{run: run} }
+	}
+	return nil
+}
+
 func (s *menuScreen) View(width, height int) string {
 	lines := []string{styleFaint.Render(truncate(s.title, width)), ""}
 	if len(s.items) == 0 {
@@ -127,5 +155,7 @@ func (s *helpScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	s.vp, cmd = s.vp.Update(msg)
 	return s, cmd
 }
+
+func (s *helpScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd { return vpMouse(&s.vp, msg) }
 
 func (s *helpScreen) View(width, height int) string { return s.vp.View() }

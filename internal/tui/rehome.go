@@ -386,6 +386,15 @@ func (s *rehomeScreen) keyPress(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	return s, nil
 }
 
+// mouse scrolls the confirmation summary; every other state is
+// read-only or driven by a prompt.
+func (s *rehomeScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
+	if s.state == rehomeConfirm {
+		s.box.mouse(msg)
+	}
+	return nil
+}
+
 func (s *rehomeScreen) View(width, height int) string {
 	head := styleFaint.Render(truncate(fmt.Sprintf("rehome %s  in %s", countNoun(len(s.chosen), "session"), shortRootLabel(s.tgt.root)), width))
 	switch s.state {

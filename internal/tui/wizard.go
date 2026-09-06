@@ -65,6 +65,7 @@ type wizardScreen struct {
 	projItem []checkItem // the pool-wide scope: one per project
 	rows     []checkRow  // the rendered rows, rebuilt on each change
 	offset   int         // scroll offset of the checklist
+	bodyTop  int         // the line the first drawn row sits on (mouse)
 }
 
 // wizardScope is what the send covers.
@@ -809,6 +810,7 @@ func (s *wizardScreen) checklistView(lines []string, width, height int) string {
 	if s.offset > 0 {
 		lines = append(lines, styleFaint.Render(fmt.Sprintf("  ↑ %d more", s.offset)))
 	}
+	s.bodyTop = len(lines)
 	end := min(len(body), s.offset+avail)
 	lines = append(lines, body[s.offset:end]...)
 	if end < len(body) {
@@ -818,6 +820,59 @@ func (s *wizardScreen) checklistView(lines []string, width, height int) string {
 		lines = append(lines, "", styleError.Render(truncate(s.note, width)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// mouse picks the row or option under the pointer; the wheel moves the
+// cursor. The typed steps (a path) stay keyboard-only.
+func (s *wizardScreen) mouse(msg tea.MouseMsg, _, y int) tea.Cmd {
+	if s.step == wizRecvFile || s.step == wizSendSSH {
+		return nil
+	}
+	checklist := s.step == wizSendWhat
+	switch e := msg.(type) {
+	case tea.MouseWheelMsg:
+		switch {
+		case e.Button == tea.MouseWheelUp && checklist:
+			s.move(-1, wheelLines)
+		case e.Button == tea.MouseWheelDown && checklist:
+			s.move(1, wheelLines)
+		case e.Button == tea.MouseWheelUp:
+			s.cursor = max(0, s.cursor-1)
+		case e.Button == tea.MouseWheelDown:
+			s.cursor = min(len(s.options())-1, s.cursor+1)
+		}
+	case tea.MouseClickMsg:
+		if e.Button != tea.MouseLeft {
+			return nil
+		}
+		if checklist {
+			i := s.offset + y - s.bodyTop
+			if i < 0 || i >= len(s.rows) || !s.rows[i].selectable() {
+				return nil
+			}
+			s.cursor = i
+			if s.rows[i].cont {
+				return s.run(s.choose)
+			}
+			s.toggleRow()
+			return nil
+		}
+		// One option is two lines: its label and its description.
+		i := (y - s.bodyTop) / 2
+		if i < 0 || i >= len(s.options()) {
+			return nil
+		}
+		s.cursor = i
+		return s.run(s.choose)
+	}
+	return nil
+}
+
+// run adapts a step handler to a command (the screen itself never
+// changes identity).
+func (s *wizardScreen) run(f func() (Screen, tea.Cmd)) tea.Cmd {
+	_, cmd := f()
+	return cmd
 }
 
 func (s *wizardScreen) View(width, height int) string {
@@ -870,6 +925,7 @@ func (s *wizardScreen) View(width, height int) string {
 		}
 		return strings.Join(lines, "\n")
 	}
+	s.bodyTop = len(lines)
 	for i, o := range s.options() {
 		label := o.label
 		if o.on != nil {

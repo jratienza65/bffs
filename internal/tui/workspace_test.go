@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/jratienza65/bffs/internal/claudejson"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
@@ -222,4 +224,96 @@ func TestSessionPreviewFiles(t *testing.T) {
 	out := h.view()
 	wantAll(t, out, "FILES", "transcript   0 KB", "sidecar      0 KB, 1 subagent")
 	wantNone(t, out, "(absent)", "file-history", "tasks")
+}
+
+// click and wheel drive the frame the way the keys do: a click focuses
+// the panel under it and picks the row, the wheel scrolls whatever is
+// under the pointer, and the preview takes the keys when clicked.
+func TestMouse(t *testing.T) {
+	f := newFixture(t)
+	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
+	f.transcript(f.slug, sid2, f.project, "first prompt of two", fixedNow.Add(-2*time.Hour))
+	f.transcript(f.slug, sid3, f.project, "first prompt of three", fixedNow.Add(-3*time.Hour))
+	h := f.start("sessions")
+	ws := h.a.ws
+	if v := h.a.View(); v.MouseMode != tea.MouseModeCellMotion {
+		t.Fatalf("the view should ask for mouse reporting, got %v", v.MouseMode)
+	}
+
+	// The frame: the header is line 0, the box starts on line 1, and
+	// each panel is a title line followed by its rows.
+	hs := ws.panelHeights()
+	row := func(n int) int { return 1 + (1 + hs[0]) + (1 + hs[1]) + 1 + n }
+	// A click on the third session row of the (unfocused) items panel
+	// focuses it and selects that row.
+	h.send(tea.MouseClickMsg{X: 4, Y: row(2), Button: tea.MouseLeft})
+	if ws.focus != panelItems {
+		t.Fatalf("a click should focus the panel under it, got %d", ws.focus)
+	}
+	if r, ok := wsCursor(h, panelItems).(*sessionRow); !ok || r.s.ID != sid3 {
+		t.Errorf("cursor row = %+v, want the third session", wsCursor(h, panelItems))
+	}
+	wantAll(t, h.view(), "first prompt of three", "session "+sid3[:8])
+
+	// The wheel over the same panel moves its cursor without changing
+	// focus; over the preview it scrolls the pane.
+	h.send(tea.MouseWheelMsg{X: 4, Y: row(1), Button: tea.MouseWheelUp})
+	if r, ok := wsCursor(h, panelItems).(*sessionRow); !ok || r.s.ID != sid1 {
+		t.Errorf("wheel up should move the cursor to the top, got %+v", wsCursor(h, panelItems))
+	}
+	// Over the preview the wheel scrolls the pane (a short window, so
+	// the session preview overflows it) and never moves focus.
+	h.send(tea.WindowSizeMsg{Width: 400, Height: 18})
+	mainX := ws.sideWidth() + 2 + paneGap + 2
+	before := ws.vp.YOffset()
+	h.send(tea.MouseWheelMsg{X: mainX, Y: 4, Button: tea.MouseWheelDown})
+	if ws.vp.YOffset() <= before {
+		t.Errorf("the wheel over the preview should scroll it: %d → %d", before, ws.vp.YOffset())
+	}
+	if ws.focus != panelItems || ws.mainFocus {
+		t.Errorf("the wheel must not move focus: focus=%d main=%v", ws.focus, ws.mainFocus)
+	}
+	h.send(tea.WindowSizeMsg{Width: 400, Height: 40})
+	hs = ws.panelHeights()
+
+	// A click on the preview hands it the keys; esc gives them back.
+	h.send(tea.MouseClickMsg{X: ws.sideWidth() + 2 + paneGap + 2, Y: 6, Button: tea.MouseLeft})
+	if !ws.mainFocus {
+		t.Fatal("a click on the preview should focus it")
+	}
+	h.keys("esc")
+	if ws.mainFocus {
+		t.Error("esc should return to the panels")
+	}
+
+	// A click on a panel's title line focuses it without touching its
+	// cursor; the gutter between the boxes is inert.
+	h.send(tea.MouseClickMsg{X: 4, Y: 1, Button: tea.MouseLeft})
+	if ws.focus != panelAccounts {
+		t.Errorf("a click on the accounts title should focus it, got %d", ws.focus)
+	}
+	h.send(tea.MouseClickMsg{X: ws.sideWidth() + 2, Y: 5, Button: tea.MouseLeft})
+	if ws.focus != panelAccounts {
+		t.Errorf("the gutter should be inert, focus moved to %d", ws.focus)
+	}
+
+	// Over an overlay the mouse belongs to the overlay: the wheel
+	// scrolls the transcript, a click on the frame behind does nothing.
+	h.keys("3", "enter")
+	tv, ok := h.a.top().(*transcriptScreen)
+	if !ok {
+		t.Fatalf("enter should open the transcript, got %T", h.a.top())
+	}
+	h.send(tea.MouseClickMsg{X: 4, Y: row(1), Button: tea.MouseLeft})
+	if h.a.top() != tv {
+		t.Error("a click behind an overlay must not reach the frame")
+	}
+	h.keys("esc")
+
+	// In the menu a click runs the item under the pointer.
+	h.keys("x")
+	h.send(tea.MouseClickMsg{X: ws.sideWidth() + 6, Y: 2 + menuTop + 1, Button: tea.MouseLeft})
+	if _, ok := h.a.top().(*receiveScreen); !ok {
+		t.Fatalf("a click on the second menu item should open receive, got %T", h.a.top())
+	}
 }

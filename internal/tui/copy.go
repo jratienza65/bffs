@@ -273,6 +273,15 @@ func (s *copyScreen) start() (Screen, tea.Cmd) {
 	return s, cmd
 }
 
+// mouse scrolls the confirmation summary; every other state is
+// read-only or driven by a prompt.
+func (s *copyScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
+	if s.state == copyConfirm {
+		s.box.mouse(msg)
+	}
+	return nil
+}
+
 func (s *copyScreen) View(width, height int) string {
 	head := styleFaint.Render(truncate("copy "+s.tgt.what()+"  from "+shortRootLabel(s.tgt.root), width))
 	switch s.state {

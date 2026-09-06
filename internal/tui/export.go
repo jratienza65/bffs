@@ -352,6 +352,15 @@ func (s *exportScreen) key(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	}
 }
 
+// mouse scrolls the confirmation summary; every other state is
+// read-only or driven by a prompt.
+func (s *exportScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
+	if s.state == exportConfirm {
+		s.box.mouse(msg)
+	}
+	return nil
+}
+
 func (s *exportScreen) View(width, height int) string {
 	head := styleFaint.Render(truncate("export "+s.tgt.what()+"  from "+shortRootLabel(s.tgt.root), width))
 	switch s.state {

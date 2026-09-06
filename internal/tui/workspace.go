@@ -1267,6 +1267,7 @@ func (ws *workspace) helpGroups() [][]key.Binding {
 		{keys.Wizard, keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
 		{keys.Trust, keys.SyncMemory, keys.Pointer, keys.ScanPaths},
 		{keys.ScreenMode, keys.ScreenModePrev, keys.Theme, keys.Menu, keys.Help, keys.Quit, reservedKeys},
+		{key.NewBinding(key.WithKeys("mouse"), key.WithHelp("click", "focus a panel and pick a row")), key.NewBinding(key.WithKeys("wheel"), key.WithHelp("wheel", "scroll what is under the pointer")), key.NewBinding(key.WithKeys("shift"), key.WithHelp("shift+drag", "select text (the terminal's own selection)"))},
 	}
 }
 
@@ -1472,4 +1473,141 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 	last := ws.focus == panelCount-1 && !ws.mainFocus
 	out = append(out, bar("└"+strings.Repeat("─", side)+"┘", last)+gap+bar("└"+strings.Repeat("─", mi)+"┘", mainFocused))
 	return strings.Join(out, "\n")
+}
+
+// --- mouse ----------------------------------------------------------------
+
+// hit is where a mouse position lands in the frame; y is relative to
+// the frame's first line.
+type hit struct {
+	panel panelID
+	row   int  // -1 = the panel's title border, else the n-th body line
+	main  bool // the preview or the overlay above it
+	none  bool // a border, the gutter, or outside
+}
+
+// hitTest maps a position in the frame to what is drawn there.
+func (ws *workspace) hitTest(x, y int) hit {
+	side, mi := ws.sideWidth(), ws.mainWidth()
+	if y < 0 || y >= ws.bodyHeight() || x < 0 || x >= ws.width {
+		return hit{none: true}
+	}
+	if side == 0 {
+		if mi > 0 {
+			return hit{main: true}
+		}
+		return hit{none: true}
+	}
+	switch {
+	case mi > 0 && x >= side+2+paneGap:
+		return hit{main: true}
+	case x > side+1:
+		return hit{none: true} // the gutter
+	}
+	hs := ws.panelHeights()
+	line := 0
+	for i := range ws.panels {
+		if y == line {
+			return hit{panel: panelID(i), row: -1}
+		}
+		line++
+		if y < line+hs[i] {
+			return hit{panel: panelID(i), row: y - line}
+		}
+		line += hs[i]
+	}
+	return hit{none: true}
+}
+
+// rowIndex is the list index a body line of a panel shows, or -1: the
+// focused panel draws its status row first, an unfocused one starts at
+// its own cursor.
+func (ws *workspace) rowIndex(id panelID, line int) int {
+	p := ws.panels[id]
+	items := p.list.VisibleItems()
+	idx := p.list.Index() + line
+	if id == ws.focus && !ws.mainFocus {
+		if line == 0 {
+			return -1 // the status / filter row
+		}
+		per := max(1, p.list.Paginator.PerPage)
+		idx = p.list.Paginator.Page*per + line - 1
+	}
+	if idx < 0 || idx >= len(items) {
+		return -1
+	}
+	return idx
+}
+
+// wheelLines is how far one wheel notch moves a list or the preview.
+const wheelLines = 3
+
+// mouse answers a mouse event over the frame: a click focuses the panel
+// under it and selects the row, or hands the keys to the preview; the
+// wheel scrolls whatever is under the pointer without moving focus.
+// Every action stays reachable from the keyboard.
+func (ws *workspace) mouse(msg tea.MouseMsg, y int) tea.Cmd {
+	m := msg.Mouse()
+	h := ws.hitTest(m.X, y)
+	if h.none {
+		return nil
+	}
+	switch e := msg.(type) {
+	case tea.MouseWheelMsg:
+		up := e.Button == tea.MouseWheelUp
+		if !up && e.Button != tea.MouseWheelDown {
+			return nil
+		}
+		if h.main {
+			if up {
+				ws.vp.ScrollUp(wheelLines)
+			} else {
+				ws.vp.ScrollDown(wheelLines)
+			}
+			return nil
+		}
+		p := ws.panels[h.panel]
+		for i := 0; i < wheelLines; i++ {
+			if up {
+				p.list.CursorUp()
+			} else {
+				p.list.CursorDown()
+			}
+		}
+		if h.panel != ws.focus {
+			// Scrolling an unfocused panel moves its cursor; the chain
+			// below it follows, as it does from the keyboard.
+			return ws.sync()
+		}
+		return tea.Batch(ws.sync(), ws.requestTitles())
+
+	case tea.MouseClickMsg:
+		if e.Button != tea.MouseLeft {
+			return nil
+		}
+		if h.main {
+			if ws.previewKey == "" {
+				return nil
+			}
+			ws.mainFocus = true
+			ws.layout()
+			return nil
+		}
+		// The row is read before the focus moves: the focused panel
+		// draws a status row above its rows and an unfocused one does
+		// not, so the line means different things either side of it.
+		idx := -1
+		if h.row >= 0 {
+			idx = ws.rowIndex(h.panel, h.row)
+		}
+		var cmds []tea.Cmd
+		if ws.focus != h.panel || ws.mainFocus {
+			cmds = append(cmds, ws.setFocus(h.panel))
+		}
+		if idx >= 0 {
+			ws.panels[h.panel].list.Select(idx)
+		}
+		return tea.Batch(append(cmds, ws.sync(), ws.requestTitles())...)
+	}
+	return nil
 }

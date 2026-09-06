@@ -258,6 +258,8 @@ func (s *resultScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 
 func (s *resultScreen) View(width, height int) string { return s.vp.View() }
 
+func (s *resultScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd { return vpMouse(&s.vp, msg) }
+
 // tickEvery is the countdown period; a test may shorten it.
 var tickEvery = time.Second
 
@@ -340,6 +342,42 @@ func (b *scrollBox) key(msg tea.KeyPressMsg) (ok bool) {
 		b.offset = 0
 	}
 	return true
+}
+
+// mouse scrolls the box on a wheel event; ok is false for anything else.
+func (b *scrollBox) mouse(msg tea.MouseMsg) (ok bool) {
+	e, isWheel := msg.(tea.MouseWheelMsg)
+	if !isWheel {
+		return false
+	}
+	switch e.Button {
+	case tea.MouseWheelUp:
+		b.offset -= wheelLines
+	case tea.MouseWheelDown:
+		b.offset += wheelLines
+	default:
+		return false
+	}
+	if b.offset < 0 {
+		b.offset = 0
+	}
+	return true
+}
+
+// vpMouse scrolls a viewport on the wheel — the read-only overlays'
+// whole mouse story.
+func vpMouse(vp *viewport.Model, msg tea.MouseMsg) tea.Cmd {
+	e, ok := msg.(tea.MouseWheelMsg)
+	if !ok {
+		return nil
+	}
+	switch e.Button {
+	case tea.MouseWheelUp:
+		vp.ScrollUp(wheelLines)
+	case tea.MouseWheelDown:
+		vp.ScrollDown(wheelLines)
+	}
+	return nil
 }
 
 // scrollKeys are the bindings a scrollable confirmation shows.

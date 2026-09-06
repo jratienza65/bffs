@@ -324,6 +324,8 @@ func (s *transcriptScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, cmd
 }
 
+func (s *transcriptScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd { return vpMouse(&s.vp, msg) }
+
 func (s *transcriptScreen) View(width, height int) string {
 	if s.busy {
 		return styleFaint.Render("reading transcript…")

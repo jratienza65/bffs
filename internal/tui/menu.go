@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -24,9 +25,12 @@ type menuChoiceMsg struct{ run func() tea.Cmd }
 // menuScreen lists the actions available for the current selection
 // (lazygit's options menu).
 type menuScreen struct {
-	title  string
-	items  []menuItem
-	cursor int
+	title   string
+	items   []menuItem
+	cursor  int
+	offset  int // first item drawn: the wheel moves this, not the cursor
+	lastCur int
+	avail   int
 }
 
 func newMenuScreen(title string, items []menuItem) *menuScreen {
@@ -79,21 +83,23 @@ func (s *menuScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 // menuTop is the line the first item is drawn on (title, blank).
 const menuTop = 2
 
-// mouse picks the item under the pointer; the wheel moves the cursor.
+// mouse picks the item under the pointer; the wheel scrolls the list's
+// text and leaves the selection alone.
 func (s *menuScreen) mouse(msg tea.MouseMsg, _, y int) tea.Cmd {
 	switch e := msg.(type) {
 	case tea.MouseWheelMsg:
 		switch e.Button {
 		case tea.MouseWheelUp:
-			s.cursor = max(0, s.cursor-1)
+			s.offset -= wheelLines
 		case tea.MouseWheelDown:
-			s.cursor = min(len(s.items)-1, s.cursor+1)
+			s.offset += wheelLines
 		}
+		s.clamp()
 	case tea.MouseClickMsg:
 		if e.Button != tea.MouseLeft {
 			return nil
 		}
-		i := y - menuTop
+		i := s.offset + y - menuTop
 		if i < 0 || i >= len(s.items) {
 			return nil
 		}
@@ -104,13 +110,35 @@ func (s *menuScreen) mouse(msg tea.MouseMsg, _, y int) tea.Cmd {
 	return nil
 }
 
+// clamp keeps the view inside the items.
+func (s *menuScreen) clamp() {
+	if s.offset > len(s.items)-max(1, s.avail) {
+		s.offset = len(s.items) - max(1, s.avail)
+	}
+	if s.offset < 0 {
+		s.offset = 0
+	}
+}
+
 func (s *menuScreen) View(width, height int) string {
 	lines := []string{styleFaint.Render(truncate(s.title, width)), ""}
 	if len(s.items) == 0 {
 		lines = append(lines, "nothing to do here")
 	}
-	for i, it := range s.items {
-		line := pad("  "+pad(it.key, 4)+it.label, max(0, width-2))
+	// Two lines of chrome above, two below (the hint and its blank).
+	s.avail = max(1, height-menuTop-2)
+	if s.cursor != s.lastCur {
+		s.lastCur = s.cursor
+		if s.cursor < s.offset {
+			s.offset = s.cursor
+		}
+		if s.cursor >= s.offset+s.avail {
+			s.offset = s.cursor - s.avail + 1
+		}
+	}
+	s.clamp()
+	for i := s.offset; i < len(s.items) && i < s.offset+s.avail; i++ {
+		line := pad("  "+pad(s.items[i].key, 4)+s.items[i].label, max(0, width-2))
 		if i == s.cursor {
 			line = styleCursor.Render("> " + line)
 		} else {
@@ -118,7 +146,11 @@ func (s *menuScreen) View(width, height int) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "", styleFaint.Render("enter or the key runs it · esc closes"))
+	hint := "enter or the key runs it · esc closes"
+	if len(s.items) > s.avail {
+		hint = fmt.Sprintf("items %d-%d of %d · ↑/↓ or the wheel · enter runs it · esc closes", s.offset+1, min(len(s.items), s.offset+s.avail), len(s.items))
+	}
+	lines = append(lines, "", styleFaint.Render(truncate(hint, width)))
 	return strings.Join(lines, "\n")
 }
 

@@ -65,6 +65,8 @@ type wizardScreen struct {
 	projItem []checkItem // the pool-wide scope: one per project
 	rows     []checkRow  // the rendered rows, rebuilt on each change
 	offset   int         // scroll offset of the checklist
+	lastCur  int         // the cursor the last render followed
+	avail    int         // rows the last render had for the checklist
 	bodyTop  int         // the line the first drawn row sits on (mouse)
 }
 
@@ -799,13 +801,24 @@ func (s *wizardScreen) checklistView(lines []string, width, height int) string {
 		}
 		body = append(body, line)
 	}
-	// Keep the cursor visible in the rows the pane has left.
+	// The view follows the cursor only when the cursor moved: the wheel
+	// scrolls the text and leaves the selection where it is.
 	avail := max(3, height-len(lines)-2)
-	if s.cursor < s.offset {
-		s.offset = s.cursor
+	s.avail = avail
+	if s.cursor != s.lastCur {
+		s.lastCur = s.cursor
+		if s.cursor < s.offset {
+			s.offset = s.cursor
+		}
+		if s.cursor >= s.offset+avail {
+			s.offset = s.cursor - avail + 1
+		}
 	}
-	if s.cursor >= s.offset+avail {
-		s.offset = s.cursor - avail + 1
+	if s.offset > len(body)-avail {
+		s.offset = len(body) - avail
+	}
+	if s.offset < 0 {
+		s.offset = 0
 	}
 	if s.offset > 0 {
 		lines = append(lines, styleFaint.Render(fmt.Sprintf("  ↑ %d more", s.offset)))
@@ -831,15 +844,22 @@ func (s *wizardScreen) mouse(msg tea.MouseMsg, _, y int) tea.Cmd {
 	checklist := s.step == wizSendWhat
 	switch e := msg.(type) {
 	case tea.MouseWheelMsg:
-		switch {
-		case e.Button == tea.MouseWheelUp && checklist:
-			s.move(-1, wheelLines)
-		case e.Button == tea.MouseWheelDown && checklist:
-			s.move(1, wheelLines)
-		case e.Button == tea.MouseWheelUp:
-			s.cursor = max(0, s.cursor-1)
-		case e.Button == tea.MouseWheelDown:
-			s.cursor = min(len(s.options())-1, s.cursor+1)
+		// The wheel scrolls the checklist's text; the selection stays
+		// where it is, and the short option steps do not scroll at all.
+		if !checklist {
+			return nil
+		}
+		switch e.Button {
+		case tea.MouseWheelUp:
+			s.offset -= wheelLines
+		case tea.MouseWheelDown:
+			s.offset += wheelLines
+		}
+		if s.offset > len(s.rows)-max(1, s.avail) {
+			s.offset = len(s.rows) - max(1, s.avail)
+		}
+		if s.offset < 0 {
+			s.offset = 0
 		}
 	case tea.MouseClickMsg:
 		if e.Button != tea.MouseLeft {

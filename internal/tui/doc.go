@@ -11,7 +11,7 @@
 // pointer per account); a session's title, one-line summary, resume
 // command and excerpt from the head/tail windows, then its per-account
 // row, files and details; a memory file with who reads it, how it
-// compares elsewhere, its path references and its contents. Below 110
+// compares elsewhere, its path references and its contents. Below 96
 // columns the panels take the width and enter shows the preview; below
 // 40×12 a message names the minimum.
 //

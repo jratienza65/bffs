@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -288,6 +289,27 @@ func TestSupportedFalseWithoutTTY(t *testing.T) {
 // wsCursor is the row under the cursor of a panel.
 func wsCursor(h *harness, id panelID) row { return h.a.ws.panels[id].selected() }
 
+// plain strips SGR sequences so frame lines can be matched as text.
+func plain(l string) string { return ansiSGR.ReplaceAllString(l, "") }
+
+var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// wantCounter asserts that the frame line carrying a panel's label ends
+// with the counter on its right: "─ 3 SESSIONS | memory ──── 1/16 ─".
+func wantCounter(t *testing.T, out, label, counter string) {
+	t.Helper()
+	for _, l := range strings.Split(out, "\n") {
+		l = plain(l)
+		if strings.Contains(l, label) && strings.Contains(l, "─") {
+			if !strings.Contains(l, " "+counter+" ─") {
+				t.Errorf("panel %q should show the counter %q on the right: %q", label, counter, l)
+			}
+			return
+		}
+	}
+	t.Errorf("no frame line carries %q:\n%s", label, out)
+}
+
 func TestWorkspaceSingleRoot(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
@@ -302,14 +324,17 @@ func TestWorkspaceSingleRoot(t *testing.T) {
 	}
 	out := h.view()
 	wantAll(t, out, "bffs test", "work › "+shortPath(f.project)+" › sessions",
-		"1 accounts 1/1", "work", "partial", "1 account",
-		"2 projects 1/2", "2 projects in "+shortPath(filepath.Join(f.claudeDir, "projects")),
+		"1 accounts", "work", "partial", "1 account",
+		"2 projects", "2 projects in "+shortPath(filepath.Join(f.claudeDir, "projects")),
 		shortPath(f.project), "  2 mem 1h ago", "! /home/nobody/src/x", "  1     5d ago",
 		"3 SESSIONS | memory",
 		// the preview: the project's summary and drift tables
 		"2 sessions · memory 2 files · newest 1h ago", "ACROSS ROOTS", "reference: shared pool: work", "shared pool: work", "2 files",
 		"one root on this machine", "PER ACCOUNT", "work        ← –", "home          –")
-	wantNone(t, out, "\x1b]", "4 files", "(absent)")
+	wantNone(t, out, "\x1b]", "4 files", "(absent)", "accounts 1/1", "projects 1/2")
+	wantCounter(t, out, "1 accounts", "1/1")
+	wantCounter(t, out, "2 projects", "1/2")
+	wantCounter(t, out, "3 SESSIONS | memory", "1/2")
 	if r, ok := wsCursor(h, panelProjects).(*projectRow); !ok || r.cwd != f.project {
 		t.Errorf("cursor not on the current project: %+v", wsCursor(h, panelProjects))
 	}
@@ -417,7 +442,8 @@ func TestAccountsPanel(t *testing.T) {
 	ws := h.a.ws
 
 	out := h.view()
-	wantAll(t, out, "1 accounts 1/3", "full", "● active", "work", "partial", "gone", "orphan", "warning: orphan session dir", "no projects")
+	wantAll(t, out, "1 accounts", "full", "● active", "work", "partial", "gone", "orphan", "warning: orphan session dir", "no projects")
+	wantCounter(t, out, "1 accounts", "1/3")
 	if ws.account != "full" || ws.root.Owner != "full" {
 		t.Fatalf("the active account should be the perspective: account=%q owner=%q", ws.account, ws.root.Owner)
 	}
@@ -463,7 +489,8 @@ func TestSessionsPanel(t *testing.T) {
 	h.keys("3")
 
 	out := h.view()
-	wantAll(t, out, "work › "+shortPath(f.project)+" › sessions", "3 SESSIONS | memory 1/3", "3 sessions · 1 live",
+	wantCounter(t, out, "3 SESSIONS | memory", "1/3")
+	wantAll(t, out, "work › "+shortPath(f.project)+" › sessions", "3 SESSIONS | memory", "3 sessions · 1 live",
 		" ● Plan: session export", "1h ago",
 		"   first prompt of three", "3h ago",
 		" ↓ prompt two", "9d ago",
@@ -493,10 +520,12 @@ func TestSessionsPanel(t *testing.T) {
 	// Filter: only the matching row stays; esc clears the filter.
 	h.keys("/", "t", "h", "r", "e", "e", "enter")
 	out = h.view()
-	wantAll(t, out, "first prompt of three", "3 SESSIONS | memory 1/1")
+	wantAll(t, out, "first prompt of three")
+	wantCounter(t, out, "3 SESSIONS | memory", "1/1")
 	wantNone(t, out, "Plan: session export", "prompt two")
 	h.keys("esc")
-	wantAll(t, h.view(), "Plan: session export", "prompt two", "3 SESSIONS | memory 1/3")
+	wantAll(t, h.view(), "Plan: session export", "prompt two")
+	wantCounter(t, h.view(), "3 SESSIONS | memory", "1/3")
 	if h.a.top() != nil || ws.focus != panelItems {
 		t.Fatalf("esc with a filter applied must clear it, not move; top=%T focus=%d", h.a.top(), ws.focus)
 	}
@@ -579,7 +608,8 @@ func TestMemoryTab(t *testing.T) {
 		t.Fatalf("bffs memory opens on the memory tab: focus=%d tab=%d", ws.focus, ws.tab)
 	}
 	out := h.view()
-	wantAll(t, out, shortPath(f.project)+" › memory", "3 sessions | MEMORY 1/2", "2 files · 1 pinned",
+	wantCounter(t, out, "3 sessions | MEMORY", "1/2")
+	wantAll(t, out, shortPath(f.project)+" › memory", "3 sessions | MEMORY", "2 files · 1 pinned",
 		"MEMORY.md", "notes.md", "pin",
 		// the preview of the cursor's file: who reads it, drift, references, contents
 		"memory MEMORY.md", "read by      shared pool — visible to: work", "drift        no other root on this machine",
@@ -626,7 +656,8 @@ func TestMemoryTabWithoutMemoryDir(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	h := f.start("memories")
-	wantAll(t, h.view(), "no memory dir yet", "would be     "+shortPath(filepath.Join(f.claudeDir, "projects", f.slug, "memory")), "3 sessions | MEMORY 0", "no memory dir")
+	wantAll(t, h.view(), "no memory dir yet", "would be     "+shortPath(filepath.Join(f.claudeDir, "projects", f.slug, "memory")), "3 sessions | MEMORY", "no memory dir")
+	wantCounter(t, h.view(), "3 sessions | MEMORY", "0")
 	h.keys("p")
 	wantAll(t, h.view(), "no memory dir for this project")
 	h.keys("S")
@@ -755,7 +786,7 @@ func TestListingNeverOpensTranscripts(t *testing.T) {
 	if h.a.statusErr {
 		t.Errorf("status shows an error: %q", h.a.status)
 	}
-	wantAll(t, h.view(), "3 SESSIONS | memory 1/1")
+	wantCounter(t, h.view(), "3 SESSIONS | memory", "1/1")
 }
 
 // Labels built from names read off the disk are sanitised too: an orphan

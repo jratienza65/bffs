@@ -97,16 +97,22 @@ func (p *panel) setStatus(s string) {
 // filtering reports whether the panel's filter input has the keyboard.
 func (p *panel) filtering() bool { return p.list.SettingFilter() }
 
-// title is the frame title: number, name (or tabs) and the count.
-func (p *panel) title(tabs string) string {
-	t := fmt.Sprintf("%d %s", int(p.id)+1, p.name)
+// label is the frame title's left part: the number and the name (or
+// the tabs).
+func (p *panel) label(tabs string) string {
 	if tabs != "" {
-		t = fmt.Sprintf("%d %s", int(p.id)+1, tabs)
+		return fmt.Sprintf("%d %s", int(p.id)+1, tabs)
 	}
+	return fmt.Sprintf("%d %s", int(p.id)+1, p.name)
+}
+
+// counter is the frame title's right part: cursor/visible, or … while
+// the rows load.
+func (p *panel) counter() string {
 	if p.loading {
-		return t + " …"
+		return "…"
 	}
-	return t + " " + p.count()
+	return p.count()
 }
 
 // body draws height lines of width cells: the list when focused, else

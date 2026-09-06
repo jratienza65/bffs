@@ -1241,35 +1241,51 @@ func cell(s string, width int) string {
 	return s
 }
 
-// titled draws a horizontal border of inner cells carrying a title.
-func titled(title string, inner int, focused bool) string {
+// titled draws a horizontal border of inner cells carrying a title on
+// the left and, when given, a counter on the right:
+// "─ 3 SESSIONS | memory ──────── 1/16 ─".
+func titled(title, right string, inner int, focused bool) string {
 	if inner <= 0 {
 		return ""
 	}
-	t := " " + truncate(title, max(0, inner-3)) + " "
+	r := ""
+	rw := 0
+	if right != "" {
+		r = " " + right + " "
+		rw = lipgloss.Width(r)
+		if rw+4 > inner {
+			r, rw = "", 0
+		}
+	}
+	t := " " + truncate(title, max(0, inner-3-rw)) + " "
 	w := lipgloss.Width(t)
-	if w > inner-1 {
+	if w > inner-1-rw {
 		t, w = "", 0
 	}
+	style := styleFaint
 	if focused {
-		t = styleHeader.Render(t)
-	} else {
-		t = styleFaint.Render(t)
+		style = styleHeader
 	}
-	return "─" + t + strings.Repeat("─", max(0, inner-1-w))
+	line := "─" + style.Render(t) + strings.Repeat("─", max(0, inner-1-w-rw-1))
+	if r != "" {
+		line += style.Render(r) + "─"
+	} else {
+		line += "─"
+	}
+	return line
 }
 
-// panelTitle is the frame title of panel i; panel 3 names its tabs with
-// the active one in capitals.
-func (ws *workspace) panelTitle(i panelID) string {
+// panelTitle is the frame title of panel i — the label and the counter;
+// panel 3 names its tabs with the active one in capitals.
+func (ws *workspace) panelTitle(i panelID) (string, string) {
 	p := ws.panels[i]
 	if i == panelItems {
 		if ws.tab == tabSessions {
-			return p.title("SESSIONS | memory")
+			return p.label("SESSIONS | memory"), p.counter()
 		}
-		return p.title("sessions | MEMORY")
+		return p.label("sessions | MEMORY"), p.counter()
 	}
-	return p.title("")
+	return p.label(""), p.counter()
 }
 
 // errTooSmall is the message drawn below the minimum size.
@@ -1299,10 +1315,11 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 		hs := ws.panelHeights()
 		for i, p := range ws.panels {
 			focused := panelID(i) == ws.focus
+			label, counter := ws.panelTitle(panelID(i))
 			if i == 0 {
-				out = append(out, "┌"+titled(ws.panelTitle(panelID(i)), side, focused)+"┐")
+				out = append(out, "┌"+titled(label, counter, side, focused)+"┐")
 			} else {
-				out = append(out, "├"+titled(ws.panelTitle(panelID(i)), side, focused)+"┤")
+				out = append(out, "├"+titled(label, counter, side, focused)+"┤")
 			}
 			for _, l := range p.body(side, hs[i], focused) {
 				out = append(out, "│"+cell(l, side)+"│")
@@ -1312,7 +1329,7 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 		return strings.Join(out, "\n")
 	case side == 0:
 		main = fill(main, h)
-		out = append(out, "┌"+titled(mainTitle, mi, mainFocused)+"┐")
+		out = append(out, "┌"+titled(mainTitle, "", mi, mainFocused)+"┐")
 		for _, l := range main {
 			out = append(out, "│"+cell(l, mi)+"│")
 		}
@@ -1336,10 +1353,11 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 	}
 	for i, p := range ws.panels {
 		focused := panelID(i) == ws.focus && !ws.mainFocus
+		label, counter := ws.panelTitle(panelID(i))
 		if i == 0 {
-			out = append(out, "┌"+titled(ws.panelTitle(panelID(i)), side, focused)+"┬"+titled(mainTitle, mi, mainFocused)+"┐")
+			out = append(out, "┌"+titled(label, counter, side, focused)+"┬"+titled(mainTitle, "", mi, mainFocused)+"┐")
 		} else {
-			out = append(out, "├"+titled(ws.panelTitle(panelID(i)), side, focused)+"┤"+next()+"│")
+			out = append(out, "├"+titled(label, counter, side, focused)+"┤"+next()+"│")
 		}
 		for _, l := range p.body(side, hs[i], focused) {
 			out = append(out, "│"+cell(l, side)+"│"+next()+"│")

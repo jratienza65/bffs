@@ -73,7 +73,7 @@ func (a *app) contentHeight() int { return max(0, a.height-3) }
 
 // mainSize is the size an overlay draws into: the main pane's inside.
 func (a *app) mainSize() tea.WindowSizeMsg {
-	return tea.WindowSizeMsg{Width: a.ws.mainWidth(), Height: a.ws.bodyHeight()}
+	return tea.WindowSizeMsg{Width: a.ws.mainInner(), Height: a.ws.bodyHeight()}
 }
 
 // forward sends msg to the top overlay and stores what it returns.

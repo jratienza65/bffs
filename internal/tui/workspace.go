@@ -40,6 +40,13 @@ const (
 	minHeight = 12
 )
 
+// paneGap is the gutter between the side column and the preview; padX
+// the cells between a pane's border and its content.
+const (
+	paneGap = 1
+	padX    = 1
+)
+
 // itemsTab is what panel 3 lists for the project.
 type itemsTab int
 
@@ -177,7 +184,8 @@ func (ws *workspace) sideWidth() int {
 	return max(0, min(max(ws.width/3, 34), 60))
 }
 
-// mainWidth is the main pane's inner width, 0 when hidden.
+// mainWidth is the main pane's inner width (between its borders), 0
+// when hidden.
 func (ws *workspace) mainWidth() int {
 	switch {
 	case ws.mainOnly():
@@ -185,8 +193,15 @@ func (ws *workspace) mainWidth() int {
 	case ws.sideOnly():
 		return 0
 	}
-	return max(0, ws.width-3-ws.sideWidth())
+	return max(0, ws.width-2-ws.sideWidth()-paneGap-2)
 }
+
+// mainInner is the width the preview's content gets: the pane minus
+// its padding.
+func (ws *workspace) mainInner() int { return max(0, ws.mainWidth()-2*padX) }
+
+// sideInner is the width the lists get inside the side column.
+func (ws *workspace) sideInner() int { return max(0, ws.sideWidth()-2*padX) }
 
 // bodyHeight is what the frame leaves for panel rows.
 func (ws *workspace) bodyHeight() int { return max(0, ws.height-2) }
@@ -205,9 +220,9 @@ func (ws *workspace) panelHeights() [panelCount]int {
 }
 
 func (ws *workspace) layout() {
-	side := ws.sideWidth()
-	if side == 0 {
-		side = max(0, ws.width-2) // lists keep a real width while hidden
+	side := ws.sideInner()
+	if ws.sideWidth() == 0 {
+		side = max(0, ws.width-2-2*padX) // lists keep a real width while hidden
 	}
 	hs := ws.panelHeights()
 	for i, p := range ws.panels {
@@ -216,9 +231,9 @@ func (ws *workspace) layout() {
 		}
 		p.setSize(side, hs[i])
 	}
-	mw := ws.mainWidth()
-	if mw == 0 {
-		mw = max(0, ws.width-2)
+	mw := ws.mainInner()
+	if ws.mainWidth() == 0 {
+		mw = max(0, ws.width-2-2*padX)
 	}
 	ws.vp.SetWidth(mw)
 	ws.vp.SetHeight(ws.bodyHeight())
@@ -1327,9 +1342,18 @@ func (ws *workspace) panelTitle(i panelID) (string, string) {
 // errTooSmall is the message drawn below the minimum size.
 var errTooSmall = errors.New("too small")
 
-// View draws the frame: the side column with its panels and the main
-// pane. main and mainTitle override the preview (an overlay's view);
-// nil draws the preview.
+// padded fits a line into inner cells with padX of space on each side.
+func padded(l string, inner int) string {
+	if inner <= 2*padX {
+		return cell(l, inner)
+	}
+	return strings.Repeat(" ", padX) + cell(l, inner-2*padX) + strings.Repeat(" ", padX)
+}
+
+// View draws the frame: the side column with its panels and, across a
+// gutter, the main pane — two boxes, each with padded content. main and
+// mainTitle override the preview (an overlay's view); nil draws the
+// preview.
 func (ws *workspace) View(width, height int, main []string, mainTitle string, mainFocused bool) string {
 	if width != ws.width || height != ws.height {
 		ws.setSize(width, height)
@@ -1345,6 +1369,7 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 		// An overlay always needs the main pane: draw it alone.
 		side, mi = 0, max(0, width-2)
 	}
+	gap := strings.Repeat(" ", paneGap)
 	var out []string
 	switch {
 	case mi == 0:
@@ -1358,8 +1383,8 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 			} else {
 				out = append(out, bar("├", above)+titled(label, counter, side, focused)+bar("┤", above))
 			}
-			for _, l := range p.body(side, hs[i], focused) {
-				out = append(out, bar("│", focused)+cell(l, side)+bar("│", focused))
+			for _, l := range p.body(side-2*padX, hs[i], focused) {
+				out = append(out, bar("│", focused)+padded(l, side)+bar("│", focused))
 			}
 		}
 		last := ws.focus == panelCount-1
@@ -1369,7 +1394,7 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 		main = fill(main, h)
 		out = append(out, bar("┌", mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar("┐", mainFocused))
 		for _, l := range main {
-			out = append(out, bar("│", mainFocused)+cell(l, mi)+bar("│", mainFocused))
+			out = append(out, bar("│", mainFocused)+padded(l, mi)+bar("│", mainFocused))
 		}
 		out = append(out, bar("└"+strings.Repeat("─", mi)+"┘", mainFocused))
 		return strings.Join(out, "\n")
@@ -1387,22 +1412,22 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 			l = main[row]
 		}
 		row++
-		return cell(l, mi)
+		return bar("│", mainFocused) + padded(l, mi) + bar("│", mainFocused)
 	}
 	for i, p := range ws.panels {
 		focused := panelID(i) == ws.focus && !ws.mainFocus
 		above := focused || (i > 0 && panelID(i-1) == ws.focus && !ws.mainFocus)
 		label, counter := ws.panelTitle(panelID(i))
 		if i == 0 {
-			out = append(out, bar("┌", focused)+titled(label, counter, side, focused)+bar("┬", focused || mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar("┐", mainFocused))
+			out = append(out, bar("┌", focused)+titled(label, counter, side, focused)+bar("┐", focused)+gap+bar("┌", mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar("┐", mainFocused))
 		} else {
-			out = append(out, bar("├", above)+titled(label, counter, side, focused)+bar("┤", above || mainFocused)+next()+bar("│", mainFocused))
+			out = append(out, bar("├", above)+titled(label, counter, side, focused)+bar("┤", above)+gap+next())
 		}
-		for _, l := range p.body(side, hs[i], focused) {
-			out = append(out, bar("│", focused)+cell(l, side)+bar("│", focused || mainFocused)+next()+bar("│", mainFocused))
+		for _, l := range p.body(side-2*padX, hs[i], focused) {
+			out = append(out, bar("│", focused)+padded(l, side)+bar("│", focused)+gap+next())
 		}
 	}
 	last := ws.focus == panelCount-1 && !ws.mainFocus
-	out = append(out, bar("└"+strings.Repeat("─", side), last)+bar("┴", last || mainFocused)+bar(strings.Repeat("─", mi)+"┘", mainFocused))
+	out = append(out, bar("└"+strings.Repeat("─", side)+"┘", last)+gap+bar("└"+strings.Repeat("─", mi)+"┘", mainFocused))
 	return strings.Join(out, "\n")
 }

@@ -1,13 +1,17 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jratienza65/bffs/internal/claudejson"
 	"github.com/jratienza65/bffs/internal/imports"
 	"github.com/jratienza65/bffs/internal/rehome"
 	"github.com/jratienza65/bffs/internal/store"
@@ -232,11 +236,13 @@ func TestRunRehomeEndToEnd(t *testing.T) {
 	if strings.Contains(got, "Done. Check it") {
 		t.Errorf("import-style footer in rehome output:\n%s", got)
 	}
-	// The home .claude.json now points --continue at the session.
+	// The home .claude.json now points --continue at the session. Read
+	// the entries rather than the bytes: a Windows path is escaped in
+	// JSON, so a raw substring search would miss it.
 	key, _ := transcripts.ProjectKey(nw)
-	raw, err := os.ReadFile(homeJSON)
-	if err != nil || !strings.Contains(string(raw), rehomeSidOld) || !strings.Contains(string(raw), key) {
-		t.Errorf(".claude.json = %s, %v", raw, err)
+	flags, err := claudejson.ReadProjectFlags(homeJSON)
+	if err != nil || flags[key].LastSessionID != rehomeSidOld {
+		t.Errorf(".claude.json[%q] = %+v, %v", key, flags[key], err)
 	}
 
 	// A second run by rule finds nothing: no session is under the old slug
@@ -272,7 +278,7 @@ func TestRunRehomeRefusalsAndScope(t *testing.T) {
 	if err == nil || exitCode(err) != 1 || !strings.Contains(err.Error(), "nothing could be moved: 1 session refused") {
 		t.Errorf("err = %v (exit %d)", err, exitCode(err))
 	}
-	if got := out.String(); !strings.Contains(got, `refused 0c5e19b2: target directory "`+gone+`" does not exist`) || strings.Contains(got, "nothing to rehome") {
+	if got := out.String(); !strings.Contains(got, fmt.Sprintf("refused 0c5e19b2: target directory %q does not exist", gone)) || strings.Contains(got, "nothing to rehome") {
 		t.Errorf("output:\n%s", got)
 	}
 	// --session with an unknown prefix warns and finds nothing (exit 0);
@@ -359,7 +365,7 @@ func TestRunRehomeSuggest(t *testing.T) {
 	if err := runRehome(c, cfgDir, pr, rehomeRequest{Suggest: true, Bundle: "6f1e2c0a", ClaudeDir: claudeDir}, false); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); !strings.Contains(got, old+"\n") || !strings.Contains(got, "no candidate found") || !strings.Contains(got, "--map "+old+"=<dir>") {
+	if got := out.String(); !strings.Contains(got, old+"\n") || !strings.Contains(got, "no candidate found") || !strings.Contains(got, "--map "+rehome.ShellQuote(old)+"=<dir>") {
 		t.Errorf("output:\n%s", got)
 	}
 	// Without records there is nothing to suggest for.
@@ -549,7 +555,13 @@ func TestRenderRehomeResult(t *testing.T) {
 // a liveness scan that fails is an error, not a warning.
 func TestRunRehomeRefusesWithoutLiveness(t *testing.T) {
 	cfgDir, claudeDir, old, nw := rehomePool(t)
-	writeTestFile(t, filepath.Join(claudeDir, transcripts.RuntimeSessionsSubdir), "not a directory\n")
+	// Withhold the answer through the seam: what a broken sessions dir
+	// looks like to os.ReadDir differs per OS, the refusal does not.
+	prev := liveScan
+	liveScan = func(context.Context, []string) (map[string]transcripts.LiveSession, error) {
+		return nil, errors.New("sessions dir unreadable")
+	}
+	t.Cleanup(func() { liveScan = prev })
 	c, pr, out := newTestCmd("")
 	req := rehomeRequest{Maps: []string{old + "=" + nw}, ClaudeDir: claudeDir, Cwd: t.TempDir(), Now: time.Now(), Yes: true}
 	err := runRehome(c, cfgDir, pr, req, false)

@@ -376,7 +376,7 @@ func runSessionsList(cmd *cobra.Command) error {
 	} else {
 		q.Imports = imports.BySession(recs)
 	}
-	if live, err := transcripts.Live(ctx, env.configDirs()); err != nil {
+	if live, err := liveScan(ctx, env.configDirs()); err != nil {
 		fmt.Fprintln(errOut, "warning: liveness unavailable:", err)
 	} else {
 		q.LiveMap = live
@@ -685,6 +685,11 @@ func formatSince(d time.Duration) string {
 
 // cmdContext is the command's context, or a background one when the
 // command was not executed through the cobra tree (tests).
+// liveScan is transcripts.Live behind a package var: the commands that
+// refuse to touch a session a running claude owns need a liveness answer
+// they can trust, and a test needs a portable way to withhold one.
+var liveScan = transcripts.Live
+
 func cmdContext(cmd *cobra.Command) context.Context {
 	if ctx := cmd.Context(); ctx != nil {
 		return ctx
@@ -795,7 +800,7 @@ func runSessionsShow(cmd *cobra.Command, idOrPrefix string) error {
 		return err
 	}
 	ctx := cmdContext(cmd)
-	live, err := transcripts.Live(ctx, env.configDirs())
+	live, err := liveScan(ctx, env.configDirs())
 	if err != nil {
 		fmt.Fprintln(errOut, "warning: liveness unavailable:", err)
 	}
@@ -967,7 +972,7 @@ func runSessionsRm(cmd *cobra.Command, args []string, pr *prompter, yes, tty boo
 	}
 	out := cmd.OutOrStdout()
 	ctx := cmdContext(cmd)
-	live, err := transcripts.Live(ctx, env.configDirs())
+	live, err := liveScan(ctx, env.configDirs())
 	if err != nil {
 		return fmt.Errorf("cannot tell which sessions are open in a running claude: %w; nothing was removed", err)
 	}

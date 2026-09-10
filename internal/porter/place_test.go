@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -203,7 +204,7 @@ func TestImportMappedMissingTargetFallsBack(t *testing.T) {
 	if len(rep.Imported) != 0 || !reflect.DeepEqual(rep.Pending, []string{sidB, sidA}) {
 		t.Errorf("Imported=%v Pending=%v", rep.Imported, rep.Pending)
 	}
-	if !containsWarning(rep.Warnings, `mapped directory "`+gone+`" does not exist; importing as-is`) {
+	if !containsWarning(rep.Warnings, fmt.Sprintf("mapped directory %q does not exist; importing as-is", gone)) {
 		t.Errorf("warnings = %v", rep.Warnings)
 	}
 	if got := readFile(t, filepath.Join(dst.root.Dir, src.slug(t), sidA+".jsonl")); strings.Contains(got, "relocated") {

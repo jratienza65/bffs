@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -474,7 +475,7 @@ func TestPlanRefusals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(pl.Moves) != 0 || len(pl.Refusals) != 3 || !strings.Contains(pl.Refusals[0].Reason, `target directory "`+missing+`" does not exist`) {
+		if len(pl.Moves) != 0 || len(pl.Refusals) != 3 || !strings.Contains(pl.Refusals[0].Reason, fmt.Sprintf("target directory %q does not exist", missing)) {
 			t.Errorf("plan = %+v", pl)
 		}
 		res, _ := Apply(context.Background(), p.root, pl, Options{DryRun: true})

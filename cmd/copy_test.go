@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jratienza65/bffs/internal/rehome"
 	"github.com/jratienza65/bffs/internal/sessions"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
@@ -50,10 +51,11 @@ func TestRenderNothingToCopy(t *testing.T) {
 	var sb strings.Builder
 	renderNothingToCopy(&sb, "aviate", "innomind", filepath.Join(home, "build", "projects", "bffs"))
 	out := sb.String()
+	project := filepath.Join(home, "build", "projects", "bffs")
 	for _, want := range []string{
 		`nothing to copy: "aviate" and "innomind" share one projects pool (partial isolation) — the transcripts and the memory`,
-		"for ~/build/projects/bffs are already the same files. What differs per account is trust:",
-		"    bffs trust sync --from aviate --to innomind --project " + filepath.Join(home, "build", "projects", "bffs"),
+		"for " + short(project) + " are already the same files. What differs per account is trust:",
+		"    bffs trust sync --from aviate --to innomind --project " + shellWord(project),
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
@@ -160,7 +162,7 @@ func TestRunCopyPoolToFull(t *testing.T) {
 	if _, err := os.Stat(src); err != nil {
 		t.Errorf("a copy must keep the source: %v", err)
 	}
-	for _, s := range []string{"plan: 1 session, 0 memory dirs", "copied 1 session", "verify:  cd " + f.project + " && BFFS_ACCOUNT=work claude --resume " + testSID1} {
+	for _, s := range []string{"plan: 1 session, 0 memory dirs", "copied 1 session", "verify:  cd " + rehome.ShellQuote(f.project) + " && BFFS_ACCOUNT=work claude --resume " + testSID1} {
 		if !strings.Contains(out.String(), s) {
 			t.Errorf("output lacks %q:\n%s", s, out.String())
 		}

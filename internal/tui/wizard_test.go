@@ -209,9 +209,7 @@ func TestWizardReceiveFromFile(t *testing.T) {
 	// ask where it lives. Windows refuses to rename the process's own
 	// working directory, and the fixture chdir'd into the project.
 	t.Chdir(t.TempDir())
-	if err := os.Rename(a.project, a.project+"-moved"); err != nil {
-		t.Fatal(err)
-	}
+	renameEventually(t, a.project, a.project+"-moved")
 	b := newFixture(t) // a second machine: a fresh HOME without the project
 	hb := b.start("sessions")
 	hb.keys("w", "down", "enter", "down", "enter")
@@ -382,4 +380,30 @@ func TestOverlayWheelScrollsTextOnly(t *testing.T) {
 	if m.cursor != before {
 		t.Errorf("the wheel must not move the menu's selection: %d → %d", before, m.cursor)
 	}
+}
+
+// renameEventually renames a directory, retrying briefly: on Windows a
+// directory stays busy for a moment after anything inside it is touched
+// (the scanner reads a new file, a child process exits), and the test
+// only cares that it eventually moves.
+func renameEventually(t *testing.T, from, to string) {
+	t.Helper()
+	var err error
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		if err = os.Rename(from, to); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	wd, _ := os.Getwd()
+	var names []string
+	if entries, derr := os.ReadDir(from); derr == nil {
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+	}
+	t.Fatalf("rename %s: %v (cwd %s, holds %v)", from, err, wd, names)
 }

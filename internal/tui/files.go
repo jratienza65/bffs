@@ -74,7 +74,10 @@ func refLines(dir, name string) []string {
 			kind = "@ref"
 		}
 		state := ""
-		if p := expandRef(r.Path); filepath.IsAbs(p) {
+		// A memory file written on another machine carries that
+		// machine's paths, so "/Users/…" counts as absolute here even
+		// on Windows, where filepath.IsAbs wants a drive letter.
+		if p := expandRef(r.Path); filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
 			if _, err := os.Stat(p); err == nil {
 				state = "exists"
 			} else {

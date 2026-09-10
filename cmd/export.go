@@ -261,7 +261,7 @@ func runExport(cmd *cobra.Command, dir string, pr *prompter, req exportRequest, 
 		fmt.Fprintln(errOut, "warning:", warning)
 	}
 	ctx := cmdContext(cmd)
-	live, err := transcripts.Live(ctx, env.configDirs())
+	live, err := liveScan(ctx, env.configDirs())
 	if err != nil {
 		fmt.Fprintln(errOut, "warning: liveness unavailable:", err)
 	}

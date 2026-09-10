@@ -493,7 +493,7 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 	}
 
 	ctx := cmdContext(cmd)
-	live, err := transcripts.Live(ctx, env.configDirs())
+	live, err := liveScan(ctx, env.configDirs())
 	if err != nil {
 		fmt.Fprintln(errOut, "warning: liveness unavailable:", err)
 	}
@@ -1347,7 +1347,7 @@ func runImportFromHost(cmd *cobra.Command, dir string, env *catalogEnv, dest imp
 	}
 	sink := func(ctx context.Context, raw []byte, body io.Reader) (transfer.Done, error) {
 		sinkRan = true
-		live, err := transcripts.Live(ctx, env.configDirs())
+		live, err := liveScan(ctx, env.configDirs())
 		if err != nil {
 			fp.println("warning: liveness unavailable: " + err.Error())
 		}

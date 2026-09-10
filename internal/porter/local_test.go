@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jratienza65/bffs/internal/imports"
+	"github.com/jratienza65/bffs/internal/rehome"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
@@ -140,7 +141,7 @@ func TestCopyLocalPoolToFull(t *testing.T) {
 	if len(rep.MemoryDirs) != 1 || rep.HistoryLines == 0 {
 		t.Errorf("MemoryDirs %v HistoryLines %d", rep.MemoryDirs, rep.HistoryLines)
 	}
-	if len(rep.Verify) != 1 || !strings.Contains(rep.Verify[0], "cd "+src.cwd+" && BFFS_ACCOUNT=work claude --resume "+sidB) {
+	if len(rep.Verify) != 1 || !strings.Contains(rep.Verify[0], "cd "+rehome.ShellQuote(src.cwd)+" && BFFS_ACCOUNT=work claude --resume "+sidB) {
 		t.Errorf("Verify = %v", rep.Verify)
 	}
 	rec := copyRecord(t, src.cfgDir)

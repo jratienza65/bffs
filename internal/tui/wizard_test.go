@@ -184,32 +184,48 @@ func TestWizardLANHandoffs(t *testing.T) {
 // project lives, and lands it.
 func TestWizardReceiveFromFile(t *testing.T) {
 	a := newFixture(t)
-	a.transcript(a.slug, sid1, a.project, "first prompt of one", fixedNow.Add(-time.Hour))
-	a.memory()
-	ha := a.start("sessions")
-	ha.keys("e", "enter", "y")
-	ex, ok := ha.a.stack[0].(*resultScreen)
-	if !ok {
-		t.Fatalf("export should end on a result, got %T", ha.a.top())
+	// Machine A's project lives at a path this machine does not have, so
+	// the import has to ask where it belongs — no directory has to be
+	// moved out of the way, which Windows would not allow while anything
+	// still holds it.
+	gone := "/machine-a/src/proj"
+	goneSlug, err := transcripts.Slug(gone)
+	if err != nil {
+		t.Fatal(err)
 	}
-	_ = ex
-	var bundlePath string
-	if entries, err := filepath.Glob(filepath.Join(a.project, "*.bffs")); err == nil && len(entries) == 1 {
-		bundlePath = entries[0]
-	} else {
-		t.Fatalf("bundle not found in %s: %v", a.project, entries)
+	a.transcript(goneSlug, sid1, gone, "first prompt of one", fixedNow.Add(-time.Hour))
+	a.memoryFor(goneSlug)
+	ha := a.start("sessions")
+	// The projects panel lists it (its directory is missing, hence the !);
+	// select it before exporting.
+	ha.keys("2")
+	for i := 0; i < 5; i++ {
+		if r, ok := wsCursor(ha, panelProjects).(*projectRow); ok && r.slug == goneSlug {
+			break
+		}
+		ha.keys("down")
+	}
+	if r, ok := wsCursor(ha, panelProjects).(*projectRow); !ok || r.slug != goneSlug {
+		t.Fatalf("cursor = %+v, want the project of %s", wsCursor(ha, panelProjects), gone)
+	}
+	// Write the bundle outside the project, so nothing was just created
+	// inside the directory the test then moves away: on Windows a fresh
+	// file keeps its directory busy while the scanner reads it.
+	bundlePath := filepath.Join(t.TempDir(), "a.bffs")
+	ha.keys("e")
+	ex, ok := ha.a.top().(*exportScreen)
+	if !ok {
+		t.Fatalf("e should open the export screen, got %T", ha.a.top())
+	}
+	ex.input.SetValue(bundlePath)
+	ha.keys("enter", "y")
+	if _, ok := ha.a.top().(*resultScreen); !ok {
+		t.Fatalf("export should end on a result, got %T:\n%s", ha.a.top(), ha.view())
+	}
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("bundle not written: %v", err)
 	}
 
-	// The bundle travels; the project moves away, as on another machine,
-	// so the import has to ask where it lives.
-	carried := filepath.Join(t.TempDir(), "a.bffs")
-	if err := os.Rename(bundlePath, carried); err != nil {
-		t.Fatal(err)
-	}
-	bundlePath = carried
-	if err := os.Rename(a.project, a.project+"-moved"); err != nil {
-		t.Fatal(err)
-	}
 	b := newFixture(t) // a second machine: a fresh HOME without the project
 	hb := b.start("sessions")
 	hb.keys("w", "down", "enter", "down", "enter")
@@ -226,7 +242,7 @@ func TestWizardReceiveFromFile(t *testing.T) {
 		t.Fatalf("enter should open the file import, got %T", hb.a.top())
 	}
 	out := hb.view()
-	wantAll(t, out, "import "+shortPath(bundlePath), "Bundle", "exists here ✗", "where does "+a.project+" live on this machine?", "import as-is; rehome later")
+	wantAll(t, out, "import "+shortPath(bundlePath), "Bundle", "exists here ✗", "where does "+gone+" live on this machine?", "import as-is; rehome later")
 	// Choose as-is (the last option), then confirm.
 	h := hb
 	for i := 0; i < 4; i++ {
@@ -240,7 +256,7 @@ func TestWizardReceiveFromFile(t *testing.T) {
 		t.Fatalf("y should end on a clean result, got %T err=%v:\n%s", h.a.top(), res.err, h.view())
 	}
 	wantAll(t, h.view(), "Done in", "pending")
-	landed := filepath.Join(b.claudeDir, "projects", a.slug, sid1+".jsonl")
+	landed := filepath.Join(b.claudeDir, "projects", goneSlug, sid1+".jsonl")
 	if _, err := os.Stat(landed); err != nil {
 		t.Errorf("session not landed: %v", err)
 	}

@@ -63,6 +63,7 @@ type exportScreen struct {
 	warnings []string
 	askQuit  bool
 	width    int
+	box      scrollBox
 }
 
 func newExportScreen(svc *services, tgt actionTarget) *exportScreen {
@@ -86,7 +87,7 @@ func (s *exportScreen) Keys() []key.Binding {
 	case exportInput:
 		return []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "export here")), keys.Cancel}
 	case exportConfirm:
-		return []key.Binding{keys.Yes, keys.No}
+		return append([]key.Binding{keys.Yes, keys.No}, scrollKeys()...)
 	}
 	return []key.Binding{keys.Cancel}
 }
@@ -319,6 +320,9 @@ func (s *exportScreen) key(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, cmd
 
 	case exportConfirm:
+		if s.box.key(msg) {
+			return s, nil
+		}
 		switch yesNo(msg) {
 		case 1:
 			s.state = exportWriting
@@ -360,12 +364,11 @@ func (s *exportScreen) View(width, height int) string {
 		}
 		return strings.Join(lines, "\n")
 	case exportConfirm:
-		lines := append([]string{head, ""}, s.summary...)
+		body := append([]string{}, s.summary...)
 		for _, w := range s.warnings {
-			lines = append(lines, "warning: "+w)
+			body = append(body, "warning: "+w)
 		}
-		lines = append(lines, "", fmt.Sprintf("Write %s? [y/N]", shortPath(s.path)))
-		return joinLines(lines, width)
+		return s.box.view([]string{head, ""}, body, []string{"", fmt.Sprintf("Write %s? [y/N]", shortPath(s.path))}, width, height)
 	}
 	lines := []string{head, ""}
 	if s.state == exportWriting {

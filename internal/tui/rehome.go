@@ -85,6 +85,7 @@ type rehomeScreen struct {
 	askQuit bool
 	width   int
 	loadErr error
+	box     scrollBox
 }
 
 func newRehomeScreen(svc *services, tgt actionTarget, chosen []transcripts.Session) *rehomeScreen {
@@ -104,7 +105,7 @@ func (s *rehomeScreen) Keys() []key.Binding {
 	case rehomePath:
 		return []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "use this path")), keys.Cancel}
 	case rehomeConfirm:
-		return []key.Binding{keys.Yes, keys.No}
+		return append([]key.Binding{keys.Yes, keys.No}, scrollKeys()...)
 	case rehomeRunning:
 		return []key.Binding{keys.Cancel}
 	}
@@ -357,6 +358,9 @@ func (s *rehomeScreen) keyPress(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, cmd
 
 	case rehomeConfirm:
+		if s.box.key(msg) {
+			return s, nil
+		}
 		switch yesNo(msg) {
 		case 1:
 			s.state = rehomeRunning
@@ -412,9 +416,7 @@ func (s *rehomeScreen) View(width, height int) string {
 	case rehomePlanning:
 		return head + "\n\nplanning (dry run)…"
 	case rehomeConfirm:
-		lines := append([]string{head, ""}, s.planned...)
-		lines = append(lines, "", fmt.Sprintf("Rehome %s? [y/N]", rehomeCount(s.plan)))
-		return joinLines(lines, width)
+		return s.box.view([]string{head, ""}, s.planned, []string{"", fmt.Sprintf("Rehome %s? [y/N]", rehomeCount(s.plan))}, width, height)
 	}
 	lines := append([]string{head, ""}, joinLines(s.planned, width), "", "applying…  (each session moves transactionally; a cancel rolls the one in flight back)")
 	switch {

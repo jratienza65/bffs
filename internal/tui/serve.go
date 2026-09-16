@@ -92,6 +92,7 @@ type serveScreen struct {
 	sending  bool
 	askQuit  bool
 	width    int
+	box      scrollBox
 }
 
 // newServeScreen checks the local network first (the CLI's prepareServe):
@@ -120,7 +121,7 @@ func (s *serveScreen) running() bool { return s.op.active() }
 
 func (s *serveScreen) Keys() []key.Binding {
 	if s.state == serveConfirm {
-		return []key.Binding{keys.Yes, keys.No}
+		return append([]key.Binding{keys.Yes, keys.No}, scrollKeys()...)
 	}
 	return []key.Binding{keys.Cancel}
 }
@@ -383,6 +384,9 @@ func (s *serveScreen) key(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, nil
 	}
 	if s.state == serveConfirm {
+		if s.box.key(msg) {
+			return s, nil
+		}
 		switch yesNo(msg) {
 		case 1:
 			return s.start()
@@ -443,12 +447,12 @@ func (s *serveScreen) View(width, height int) string {
 		}
 		return strings.Join(lines, "\n")
 	case serveConfirm:
-		lines := append([]string{head, ""}, s.summary...)
+		body := append([]string{}, s.summary...)
 		for _, w := range s.warnings {
-			lines = append(lines, "warning: "+w)
+			body = append(body, "warning: "+w)
 		}
-		lines = append(lines, "", "Serve this over the local network? A pairing code is shown next; the other machine runs bffs import --from <this address>. [y/N]")
-		return joinLines(lines, width)
+		return s.box.view([]string{head, ""}, body,
+			[]string{"", "Serve this over the local network? A pairing code is shown next; the other machine runs bffs import --from <this address>. [y/N]"}, width, height)
 	}
 	lines := append([]string{head, ""}, s.banner(width)...)
 	for _, e := range s.events {

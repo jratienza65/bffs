@@ -138,6 +138,7 @@ type receiveScreen struct {
 	width    int
 	file     string // a .bffs file source instead of a host
 	digest   string // the reviewed manifest's sha256 (file source)
+	box      scrollBox
 }
 
 // newReceiveFileScreen is `bffs import --from <file.bffs>` into root:
@@ -216,7 +217,7 @@ func (s *receiveScreen) Keys() []key.Binding {
 	case recvPlace:
 		return []key.Binding{keys.Up, keys.Down, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose")), keys.Cancel}
 	case recvConfirm:
-		return []key.Binding{keys.Yes, keys.No}
+		return append([]key.Binding{keys.Yes, keys.No}, scrollKeys()...)
 	}
 	return []key.Binding{keys.Cancel}
 }
@@ -825,6 +826,9 @@ func (s *receiveScreen) keyPress(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, cmd
 
 	case recvConfirm:
+		if s.box.key(msg) {
+			return s, nil
+		}
 		switch yesNo(msg) {
 		case 1:
 			if s.file != "" {
@@ -984,9 +988,7 @@ func (s *receiveScreen) View(width, height int) string {
 		}
 		return strings.Join(lines, "\n")
 	case recvConfirm:
-		lines = append([]string{head, ""}, s.summaryLines()...)
-		lines = append(lines, "", fmt.Sprintf("Import into %s? [y/N]", shortPath(s.root.ConfigDir)))
-		return joinLines(lines, width)
+		return s.box.view([]string{head, ""}, s.summaryLines(), []string{"", fmt.Sprintf("Import into %s? [y/N]", shortPath(s.root.ConfigDir))}, width, height)
 	case recvImporting:
 		lines = append([]string{head, ""}, s.events...)
 		lines = append(lines, "", s.prog.view(width))

@@ -66,6 +66,7 @@ type copyScreen struct {
 	op       *op
 	prog     opView
 	askQuit  bool
+	box      scrollBox
 }
 
 // copyRows lists every account of accounts.toml plus "home" with the
@@ -123,7 +124,7 @@ func (s *copyScreen) Keys() []key.Binding {
 	case copyPick:
 		return []key.Binding{keys.Up, keys.Down, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "choose"))}
 	case copyConfirm:
-		return []key.Binding{keys.Yes, keys.No}
+		return append([]key.Binding{keys.Yes, keys.No}, scrollKeys()...)
 	}
 	return []key.Binding{keys.Cancel}
 }
@@ -218,6 +219,9 @@ func (s *copyScreen) key(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, nil
 
 	case copyConfirm:
+		if s.box.key(msg) {
+			return s, nil
+		}
 		switch yesNo(msg) {
 		case 1:
 			return s.start()
@@ -299,23 +303,20 @@ func (s *copyScreen) View(width, height int) string {
 		}
 		return strings.Join(lines, "\n")
 	case copyConfirm:
-		lines := []string{head, "",
-			fmt.Sprintf("plan: %s, %s  from %s  to  %s", countNoun(len(s.sel.Sessions), "session"), countNoun(len(s.sel.Memories), "memory dir"), shortPath(s.tgt.root.Dir), shortPath(s.dest.root.Dir)),
-		}
+		body := []string{fmt.Sprintf("plan: %s, %s  from %s  to  %s", countNoun(len(s.sel.Sessions), "session"), countNoun(len(s.sel.Memories), "memory dir"), shortPath(s.tgt.root.Dir), shortPath(s.dest.root.Dir))}
 		for _, sess := range s.sel.Sessions {
 			if sess.Live {
-				lines = append(lines, fmt.Sprintf("  live (copied as is, may be truncated): %s", shortID(sess.ID)))
+				body = append(body, fmt.Sprintf("  live (copied as is, may be truncated): %s", shortID(sess.ID)))
 			}
 		}
 		for _, w := range s.warnings {
-			lines = append(lines, "warning: "+w)
+			body = append(body, "warning: "+w)
 		}
 		what := countNoun(len(s.sel.Sessions), "session")
 		if len(s.sel.Sessions) == 0 {
 			what = countNoun(len(s.sel.Memories), "memory dir") + " (merged into the destination's memory)"
 		}
-		lines = append(lines, "", fmt.Sprintf("copy %s to %s? [y/N]", what, transcripts.Sanitize(s.dest.name)))
-		return joinLines(lines, width)
+		return s.box.view([]string{head, ""}, body, []string{"", fmt.Sprintf("copy %s to %s? [y/N]", what, transcripts.Sanitize(s.dest.name))}, width, height)
 	}
 	lines := []string{head, "", s.prog.view(width), ""}
 	switch {

@@ -1,0 +1,13 @@
+# Sample bffs.toml
+#
+# Drop this file in a project root. Any `claude` invocation made anywhere
+# inside the project tree resolves to the named account, no matter what the
+# global default is.
+#
+# Walk semantics: bffs walks up from CWD looking for bffs.toml. The walk
+# stops at the first .git directory or at $HOME — so a planted bffs.toml
+# above your working area can't hijack which account `claude` uses.
+#
+# Works for both api_key and oauth account types.
+
+account = "work-oauth"

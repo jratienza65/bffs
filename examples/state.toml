@@ -1,0 +1,24 @@
+# Sample state.toml
+#
+# Lives at <bffs-config>/state.toml. Tracks the global default account and
+# the global isolation preset for oauth accounts.
+#
+# `bffs switch` writes `active`. There is no command for `isolation` yet —
+# edit it here directly if you want a different default than "partial".
+
+# Account to use when nothing else applies.
+# Resolution order: BFFS_ACCOUNT env > nearest bffs.toml > this > none.
+active = "personal"
+
+# Default isolation preset for oauth accounts that don't specify one.
+# One of: "partial" or "full".
+#
+#   partial — every entry in ~/.claude is symlinked into the per-account
+#             session dir EXCEPT .claude.json and .credentials.json.
+#             Settings, skills, plugins, history, projects, todos all
+#             carry across accounts. Drop-in feel; only auth is isolated.
+#             (default)
+#   full    — nothing symlinked; each account is a fresh Claude Code world.
+#
+# Per-account override goes on the Account in accounts.toml.
+isolation = "partial"

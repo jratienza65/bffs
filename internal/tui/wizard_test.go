@@ -184,9 +184,30 @@ func TestWizardLANHandoffs(t *testing.T) {
 // project lives, and lands it.
 func TestWizardReceiveFromFile(t *testing.T) {
 	a := newFixture(t)
-	a.transcript(a.slug, sid1, a.project, "first prompt of one", fixedNow.Add(-time.Hour))
-	a.memory()
+	// Machine A's project lives at a path this machine does not have, so
+	// the import has to ask where it belongs — no directory has to be
+	// moved out of the way, which Windows would not allow while anything
+	// still holds it.
+	gone := "/machine-a/src/proj"
+	goneSlug, err := transcripts.Slug(gone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.transcript(goneSlug, sid1, gone, "first prompt of one", fixedNow.Add(-time.Hour))
+	a.memoryFor(goneSlug)
 	ha := a.start("sessions")
+	// The projects panel lists it (its directory is missing, hence the !);
+	// select it before exporting.
+	ha.keys("2")
+	for i := 0; i < 5; i++ {
+		if r, ok := wsCursor(ha, panelProjects).(*projectRow); ok && r.slug == goneSlug {
+			break
+		}
+		ha.keys("down")
+	}
+	if r, ok := wsCursor(ha, panelProjects).(*projectRow); !ok || r.slug != goneSlug {
+		t.Fatalf("cursor = %+v, want the project of %s", wsCursor(ha, panelProjects), gone)
+	}
 	// Write the bundle outside the project, so nothing was just created
 	// inside the directory the test then moves away: on Windows a fresh
 	// file keeps its directory busy while the scanner reads it.
@@ -205,11 +226,6 @@ func TestWizardReceiveFromFile(t *testing.T) {
 		t.Fatalf("bundle not written: %v", err)
 	}
 
-	// The project moves away, as on another machine, so the import has to
-	// ask where it lives. Windows refuses to rename the process's own
-	// working directory, and the fixture chdir'd into the project.
-	t.Chdir(t.TempDir())
-	renameEventually(t, a.project, a.project+"-moved")
 	b := newFixture(t) // a second machine: a fresh HOME without the project
 	hb := b.start("sessions")
 	hb.keys("w", "down", "enter", "down", "enter")
@@ -226,7 +242,7 @@ func TestWizardReceiveFromFile(t *testing.T) {
 		t.Fatalf("enter should open the file import, got %T", hb.a.top())
 	}
 	out := hb.view()
-	wantAll(t, out, "import "+shortPath(bundlePath), "Bundle", "exists here ✗", "where does "+a.project+" live on this machine?", "import as-is; rehome later")
+	wantAll(t, out, "import "+shortPath(bundlePath), "Bundle", "exists here ✗", "where does "+gone+" live on this machine?", "import as-is; rehome later")
 	// Choose as-is (the last option), then confirm.
 	h := hb
 	for i := 0; i < 4; i++ {
@@ -240,7 +256,7 @@ func TestWizardReceiveFromFile(t *testing.T) {
 		t.Fatalf("y should end on a clean result, got %T err=%v:\n%s", h.a.top(), res.err, h.view())
 	}
 	wantAll(t, h.view(), "Done in", "pending")
-	landed := filepath.Join(b.claudeDir, "projects", a.slug, sid1+".jsonl")
+	landed := filepath.Join(b.claudeDir, "projects", goneSlug, sid1+".jsonl")
 	if _, err := os.Stat(landed); err != nil {
 		t.Errorf("session not landed: %v", err)
 	}
@@ -380,30 +396,4 @@ func TestOverlayWheelScrollsTextOnly(t *testing.T) {
 	if m.cursor != before {
 		t.Errorf("the wheel must not move the menu's selection: %d → %d", before, m.cursor)
 	}
-}
-
-// renameEventually renames a directory, retrying briefly: on Windows a
-// directory stays busy for a moment after anything inside it is touched
-// (the scanner reads a new file, a child process exits), and the test
-// only cares that it eventually moves.
-func renameEventually(t *testing.T, from, to string) {
-	t.Helper()
-	var err error
-	for deadline := time.Now().Add(5 * time.Second); ; {
-		if err = os.Rename(from, to); err == nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	wd, _ := os.Getwd()
-	var names []string
-	if entries, derr := os.ReadDir(from); derr == nil {
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-	}
-	t.Fatalf("rename %s: %v (cwd %s, holds %v)", from, err, wd, names)
 }

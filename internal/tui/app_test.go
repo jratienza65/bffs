@@ -115,9 +115,12 @@ func (f *fixture) live(sid string) {
 
 // memory writes the project's auto-memory directory: an index with an
 // @-reference and a pinned topic file with two absolute paths.
-func (f *fixture) memory() string {
+func (f *fixture) memory() string { return f.memoryFor(f.slug) }
+
+// memoryFor is memory for any slug of the pool.
+func (f *fixture) memoryFor(slug string) string {
 	f.t.Helper()
-	dir := filepath.Join(f.claudeDir, "projects", f.slug, transcripts.MemorySubdir)
+	dir := filepath.Join(f.claudeDir, "projects", slug, transcripts.MemorySubdir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		f.t.Fatal(err)
 	}

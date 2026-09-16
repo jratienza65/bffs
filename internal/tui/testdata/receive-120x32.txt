@@ -3,8 +3,8 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │   alpha                       ● active │ │ receive into shared pool: alpha, beta  (/home/d/.claude/projects)         │
 │   beta                         partial │ │                                                                           │
 │   work                            full │ │ from: IPv4 address, or host[:port], shown on the other machine            │
-│                                        │ │ only an address on a local network of this machine is dialled; the other… │
-├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
+│                                        │ │ only an address on a local network of this machine is dialled; the        │
+├─ 2 projects ───────────────────── 1/3 ─┤ │   other machine runs bffs export --serve (or s here)                      │
 │ 3 projects in /home/d/.claude/projects │ │                                                                           │
 │ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
 │     /home/d/build/si…   4     1d ago   │ │                                                                           │

@@ -84,7 +84,15 @@ func (a *app) contentHeight() int { return max(0, a.height-3) }
 
 // mainSize is the size an overlay draws into: the main pane's inside.
 func (a *app) mainSize() tea.WindowSizeMsg {
-	return tea.WindowSizeMsg{Width: a.ws.mainInner(), Height: a.ws.bodyHeight()}
+	w := a.ws.mainInner()
+	if w == 0 && a.top() != nil {
+		// Below the breakpoint the side column takes the width, but an
+		// overlay is always drawn in the main pane alone (workspace.View
+		// widens it there), so it is as wide as the frame. Telling it
+		// zero is how every head and hint came out empty.
+		w = max(0, a.ws.width-2-2*padX)
+	}
+	return tea.WindowSizeMsg{Width: w, Height: a.ws.bodyHeight()}
 }
 
 // forward sends msg to the top overlay and stores what it returns.

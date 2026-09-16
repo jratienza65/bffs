@@ -17,6 +17,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"charm.land/lipgloss/v2"
 	"github.com/jratienza65/bffs/internal/bundle"
 	"github.com/jratienza65/bffs/internal/porter"
 	"github.com/jratienza65/bffs/internal/rehome"
@@ -1077,5 +1078,73 @@ func TestConfirmScrolls(t *testing.T) {
 	h.keys("y")
 	if _, ok := h.a.top().(*resultScreen); !ok {
 		t.Fatalf("y should still answer the confirmation, got %T:\n%s", h.a.top(), h.view())
+	}
+}
+
+// An overlay's lines are sentences — a path, a warning, a question — so
+// they wrap to the pane instead of being cut at its edge, and the
+// scroll arithmetic counts the lines the reader actually sees.
+func TestOverlayLinesWrapRatherThanTruncate(t *testing.T) {
+	long := "  Exporting from the shared pool (~/.claude; partial isolation: alice, bob, carol) with every session and its memory"
+	got := wrapAll([]string{long}, 40)
+	if len(got) < 3 {
+		t.Fatalf("a 118-cell line in a 40-cell pane produced %d lines:\n%q", len(got), got)
+	}
+	for i, l := range got {
+		if w := lipgloss.Width(l); w > 40 {
+			t.Errorf("line %d is %d cells: %q", i, w, l)
+		}
+	}
+	joined := strings.Join(got, "")
+	for _, want := range []string{"partial isolation", "alice, bob, carol", "every session and its memory"} {
+		if !strings.Contains(strings.Join(strings.Fields(joined), " "), want) {
+			t.Errorf("wrapping lost %q:\n%q", want, got)
+		}
+	}
+	if strings.Contains(strings.Join(got, ""), glyph.ellipsis) {
+		t.Errorf("a wrapped line was also truncated:\n%q", got)
+	}
+	// The continuation is indented past the line's own indent, so it
+	// reads as the tail of the line above.
+	if !strings.HasPrefix(got[1], "    ") {
+		t.Errorf("continuation is not indented: %q", got[1])
+	}
+
+	// Through the box: the window counts wrapped lines, and the [y/N]
+	// footer is still the last thing on screen.
+	var box scrollBox
+	out := box.view([]string{"head", ""}, []string{long, long, long}, []string{"", "Write it? [y/N]"}, 40, 12)
+	lines := strings.Split(out, "\n")
+	if n := len(lines); n > 12 {
+		t.Errorf("the box drew %d lines into 12", n)
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "[y/N]") {
+		t.Errorf("the prompt is not the last line: %q", last)
+	}
+	if !strings.Contains(out, "scroll") {
+		t.Errorf("a body longer than the pane must offer the scroll hint:\n%s", out)
+	}
+}
+
+// Below the 96-column breakpoint the side column takes the width and
+// the preview only shows on enter — but an overlay is always drawn in
+// the main pane alone. It has to be told that width, or every line it
+// fits to the pane comes out empty.
+func TestOverlayBelowTheBreakpointGetsTheFrameWidth(t *testing.T) {
+	a := goldenApp(t, 80, 24, func(a *app) {
+		a.stack = append(a.stack, newExportScreen(a.svc, a.ws.target()))
+	})
+	if got := a.mainSize().Width; got < 60 {
+		t.Fatalf("an overlay at 80 columns was sized %d", got)
+	}
+	frame := frameAt(t, 80, 24, func(a *app) {
+		a.stack = append(a.stack, newExportScreen(a.svc, a.ws.target()))
+	})
+	if !strings.Contains(frame, "export the whole project") {
+		t.Errorf("the overlay's head is missing from the frame:\n%s", frame)
+	}
+	// And with no overlay the preview is still hidden at that width.
+	if got := goldenApp(t, 80, 24, nil).mainSize().Width; got != 0 {
+		t.Errorf("without an overlay the main pane is hidden below the breakpoint; width = %d", got)
 	}
 }

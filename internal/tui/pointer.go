@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -190,5 +189,5 @@ func (s *pointerScreen) View(width, height int) string {
 	default:
 		lines = append(lines, "", styleFaint.Render("enter chooses the account"+sepDot+"esc goes back"))
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }

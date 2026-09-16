@@ -420,7 +420,7 @@ func (s *rehomeScreen) View(width, height int) string {
 				lines = append(lines, styleError.Render(truncate(s.note, width)))
 			}
 		}
-		return strings.Join(lines, "\n")
+		return joinLines(lines, width)
 	case rehomePlanning:
 		return head + "\n\nplanning (dry run)" + glyph.ellipsis
 	case rehomeConfirm:
@@ -433,5 +433,5 @@ func (s *rehomeScreen) View(width, height int) string {
 	case s.op.cancelled():
 		lines = append(lines, "", cancelling)
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }

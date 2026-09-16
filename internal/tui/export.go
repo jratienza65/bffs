@@ -362,16 +362,16 @@ func (s *exportScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
 }
 
 func (s *exportScreen) View(width, height int) string {
-	head := styleFaint.Render(truncate("export "+s.tgt.what()+"  from "+shortRootLabel(s.tgt.root), width))
+	head := styleFaint.Render("export " + s.tgt.what() + "  from " + shortRootLabel(s.tgt.root))
 	switch s.state {
 	case exportInput:
 		lines := []string{head, "", s.input.View()}
 		if s.note != "" {
-			lines = append(lines, styleError.Render(truncate(s.note, width)))
+			lines = append(lines, styleError.Render(s.note))
 		} else {
-			lines = append(lines, styleFaint.Render(truncate("enter exports here"+sepDot+"esc goes back"+sepDot+"an existing file is never overwritten", width)))
+			lines = append(lines, styleFaint.Render("enter exports here"+sepDot+"esc goes back"+sepDot+"an existing file is never overwritten"))
 		}
-		return strings.Join(lines, "\n")
+		return joinLines(lines, width)
 	case exportConfirm:
 		body := append([]string{}, s.summary...)
 		for _, w := range s.warnings {
@@ -392,5 +392,5 @@ func (s *exportScreen) View(width, height int) string {
 	default:
 		lines = append(lines, "", styleFaint.Render("esc cancels"))
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }

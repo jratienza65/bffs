@@ -1,11 +1,11 @@
 bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
 ┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ export ──────────────────────────────────────────────────────────────────┐
-│   alpha                       ● active │ │ export the whole project /home/d/build/projects/bffs and its memory  fro… │
-│   beta                         partial │ │                                                                           │
-│   work                            full │ │ to: /home/d/build/projects/bffs/bffs-mac-a-20260824-1200.bffs             │
-│                                        │ │ enter exports here · esc goes back · an existing file is never overwritt… │
-├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
-│ 3 projects in /home/d/.claude/projects │ │                                                                           │
+│   alpha                       ● active │ │ export the whole project /home/d/build/projects/bffs and its memory       │
+│   beta                         partial │ │   from shared pool: alpha, beta                                           │
+│   work                            full │ │                                                                           │
+│                                        │ │ to: /home/d/build/projects/bffs/bffs-mac-a-20260824-1200.bffs             │
+├─ 2 projects ───────────────────── 1/3 ─┤ │ enter exports here · esc goes back · an existing file is never            │
+│ 3 projects in /home/d/.claude/projects │ │   overwritten                                                             │
 │ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
 │     /home/d/build/si…   4     1d ago   │ │                                                                           │
 │   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │

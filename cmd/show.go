@@ -57,6 +57,18 @@ var showCmd = &cobra.Command{
 		if r.PathRule != "" {
 			fmt.Fprintf(out, "rule:       %s\n", r.PathRule)
 		}
+		// Best-effort note when this account still has a trust dialog
+		// ahead of it here that another account answered. Reads
+		// .claude.json files only — never transcripts — and swallows
+		// errors: show must always succeed.
+		if isTTY() && trustHintEnabled(state) {
+			accs, err := store.LoadAccounts(dir)
+			if err == nil {
+				if hint := trustHintForCwd(dir, accs, r.Account.Name); hint != "" {
+					fmt.Fprint(out, hint)
+				}
+			}
+		}
 		return nil
 	},
 }

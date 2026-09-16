@@ -80,7 +80,13 @@ In-session subagents can never switch accounts (credentials are process-level, f
 
 ### Session/memory transfer (in progress on `feat/session-memory-transfer`)
 
-The plan and its task tracker live in `docs/plans/` (deliberately untracked via `.git/info/exclude`; never commit `docs/`). Foundations landed first: the account name `home` is reserved (it names `~/.claude.json` in trust sync and copy), `store.State` carries `trust_hint`/`trust_sync`, and `cmd/exit.go` maps `exitError{code}` to process exit codes (2 = retryable, 130 = interrupted).
+The plan and its task tracker live in `docs/plans/` (deliberately untracked via `.git/info/exclude`; never commit `docs/`).
+
+**Trust sync (`bffs trust`, `bffs trust sync`)** fixes the dialogs that re-appear after `bffs switch`: Claude records the folder-trust and external-CLAUDE.md-imports answers per project inside `.claude.json`, which bffs keeps per account by design. `bffs trust` prints the per-account matrix for the cwd's project key; `bffs trust sync --to <acct|home|all>` copies the three booleans (never `lastSessionId`, metrics, or permission grants unless `--include-permissions`). A running claude re-reads `.claude.json` within about a second, so there is no liveness refusal — only Claude's lock. `bffs switch`/`bffs show` print a hint when the active account lacks an answer another account has (`trust_hint = false` silences it); `bffs login` seeds `.claude.json` from home only when the file does not exist yet and carries trust answers over (`--no-trust-carry`). api_key accounts map to `home`. Verified in the 2.1.259 binary: auto-memory files are injected without an include parent, so `@`-references inside memory files never trigger the external-imports dialog.
+
+**Catalog (`bffs sessions`, `bffs memory`)** is the read model over Claude's tree: `transcripts.List` never opens a transcript on the fast path (`ReadDir` + `Info`); titles come from Claude's own 64 KiB head/tail windows with field-keyed last-wins semantics and the picker precedence custom > ai > last-prompt > summary > first-prompt > history. `usage.NewAttributor` answers root owner > `lastSessionId` > import record > launch-log (cwd, time); `usage.Collect` and `bffs list` are unchanged. `bffs show` now also reads `.claude.json` files for the trust hint; nothing outside `bffs usage`/`sessions`/`memory` parses transcripts.
+
+Foundations landed first: the account name `home` is reserved (it names `~/.claude.json` in trust sync and copy), `store.State` carries `trust_hint`/`trust_sync`, and `cmd/exit.go` maps `exitError{code}` to process exit codes (2 = retryable, 130 = interrupted).
 
 ### Finding the real `claude`
 
@@ -102,7 +108,7 @@ The store package is intentionally pluggable behind one package boundary — see
 ## Layout
 
 - `main.go` — dispatch on argv[0]
-- `cmd/` — Cobra commands (`add`, `login`, `switch`, `path`, `reisolate`, `show`, `list`, `rename`, `remove`, `init`, `exec`, `run`, `mcp`, `usage`)
+- `cmd/` — Cobra commands (`add`, `login`, `switch`, `path`, `reisolate`, `show`, `list`, `rename`, `remove`, `init`, `exec`, `run`, `mcp`, `usage`, `trust`, `sessions`, `memory`)
 - `internal/shim/` — shim-mode entry, `FindRealClaude`
 - `internal/shimcheck/` — probes whether the shim wins on PATH per shell mode; `DefaultInstallDir`
 - `internal/resolver/` — account precedence
@@ -116,6 +122,7 @@ The store package is intentionally pluggable behind one package boundary — see
 - `internal/runner/` — spawn-and-wait claude child on a named account (delegated runs); `Command` builds the `*exec.Cmd` (nil stdio stays nil so a TUI can hand over the terminal), `Run` = `Command` + wait
 - `internal/fsutil/` — atomic write, copy, rename-or-copy move, mkdir lock (Claude's proper-lockfile scheme), touch (leaf)
 - `internal/imports/` — import records under `<config>/imports/` (leaf)
+- `internal/trust/` — trust-flag engine between accounts' `.claude.json` files: `Files` (oauth accounts + `home`), `Report`/`EffectiveFolderTrust` (exact key, else the ancestor walk bounded by the git root, matching Claude's own check; external-imports is exact-key only), `BestSource` (exact Accepted first: active, accounts by name, home; then Inherited), `Plan`/`Apply` (never downgrade, never override an explicit decline, `--mirror` verbatim; `Apply` takes Claude's mkdir lock `<file>.lock` for well under a second)
 - `internal/bundle/` — the `.bffs` bundle format: envelope (`BFFS\x01` + compression byte), PAX tar namespace grammar (`ValidateEntryName`/`ClassifyName`), `Manifest.Validate`, `Build` (writer), `PeekManifest`, `Unpack` (reader into an `os.OpenRoot` staging dir with a manifest allow-list). Stdlib-only leaf; `reservedSlugs` is a private copy of `transcripts.ReservedProjectEntries` pinned equal by `TestReservedSlugsEqual` — update both together. The format description lives in `internal/bundle/doc.go`. `Unpack` never writes outside the staging dir, never deletes, drains reserved kinds into `Unpacked.Notes`, bounds the tar stream to what the manifest implies, and applies mtimes only inside [2020-01-01, now+24h]. Fuzz targets run via `make fuzz` and the CI `Fuzz smoke` step with `-fuzzminimizetime 0`
 - `internal/transcripts/` — catalog of Claude Code's on-disk sessions and memories: slug rule, project key (git root), roots (shared pool vs per-account), reserved names, `cleanupPeriodDays`, liveness from `sessions/<pid>.json`, `Sanitize` for rendered strings. Not to be confused with `internal/sessions` (per-account config dirs)
 

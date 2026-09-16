@@ -6,8 +6,15 @@ JOBS           ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || 
 GO_P           ?= $(JOBS)
 GO_BUILD_FLAGS ?=
 
+# Stamp the version the way a release does, so a local install reports
+# what it is: 0.3.0 at the tag, 0.3.0-5-gabc1234 after it, -dirty with
+# uncommitted changes. Outside a git checkout this is empty and the
+# binary falls back to what the build info knows (see cmd/root.go).
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+LDFLAGS  := $(if $(VERSION),-ldflags "-X github.com/jratienza65/bffs/cmd.Version=$(VERSION)")
+
 build:
-	go build -p $(GO_P) $(GO_BUILD_FLAGS) -o $(BINARY) .
+	go build -p $(GO_P) $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(BINARY) .
 
 # The rm before cp is load-bearing on macOS: cp onto an existing file rewrites
 # the same inode, which invalidates the kernel's cached code signature for the

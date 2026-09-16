@@ -10,6 +10,8 @@ Module path: `github.com/jratienza65/bffs`. Go 1.26.
 
 ## Commands
 
+The version `bffs --version` reports is never a literal in the source: a release stamps `cmd.Version` at link time (goreleaser, and `make build` from `git describe`), and an unstamped build resolves it in `cmd.versionString` from the build info — the module version for `go install <module>@<version>`, else the commit as `dev+<sha12>[.dirty]`, else `dev`. A hardcoded default is how a v0.3.0 download reported 0.1.0. Only a release-shaped version reaches the skill frontmatter (`cmd.releaseVersion`).
+
 ```bash
 make build              # builds the `bffs` binary in repo root
 make install            # builds, then sudo-installs to /opt/bffs/bffs

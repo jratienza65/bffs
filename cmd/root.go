@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -13,10 +15,56 @@ import (
 
 const cfgDirFlag = "config-dir"
 
-// Version is the bffs release version. Override at build time with
+// Version is the version bffs reports: `bffs --version`, the MCP
+// registration, the skill frontmatter and the browser's header. A
+// release stamps it at link time,
 //
 //	go build -ldflags "-X github.com/jratienza65/bffs/cmd.Version=<v>"
-var Version = "0.1.0"
+//
+// which goreleaser and the Makefile both do. Left unstamped — `go
+// install`, a plain `go build`, `go run` — init fills it in from the
+// build info, so a binary from `go install …@v0.3.0` says 0.3.0 rather
+// than whatever literal the source happens to carry. It is never a
+// hardcoded number: one that outlives its release is worse than none.
+var Version = ""
+
+// devVersion is what a build with nothing to go on calls itself.
+const devVersion = "dev"
+
+// versionString picks what to report: the link-time stamp, else the
+// module version a `go install <module>@<version>` build records, else
+// the commit a VCS-stamped build came from.
+func versionString(stamp string, bi *debug.BuildInfo, ok bool) string {
+	if stamp != "" {
+		return stamp
+	}
+	if !ok {
+		return devVersion
+	}
+	if v := bi.Main.Version; v != "" && v != "(devel)" {
+		return strings.TrimPrefix(v, "v")
+	}
+	var rev string
+	var dirty bool
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			dirty = s.Value == "true"
+		}
+	}
+	if rev == "" {
+		return devVersion
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if dirty {
+		rev += ".dirty"
+	}
+	return devVersion + "+" + rev
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "bffs",
@@ -24,7 +72,6 @@ var rootCmd = &cobra.Command{
 	Long: `bffs stores multiple Claude credentials under named accounts and
 selects one for the next ` + "`claude`" + ` invocation, either globally or per-project
 via a bffs.toml file in the project root.`,
-	Version: Version,
 	// Runtime errors print a clean message; cobra's usage block only appears
 	// for actual flag/argument parse errors.
 	SilenceUsage: true,
@@ -55,6 +102,9 @@ func Execute() {
 }
 
 func init() {
+	bi, ok := debug.ReadBuildInfo()
+	Version = versionString(Version, bi, ok)
+	rootCmd.Version = Version
 	rootCmd.PersistentFlags().String(cfgDirFlag, "", "config dir (default: $BFFS_HOME or OS user-config)")
 	_ = viper.BindPFlag(cfgDirFlag, rootCmd.PersistentFlags().Lookup(cfgDirFlag))
 	viper.SetEnvPrefix("BFFS")

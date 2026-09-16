@@ -71,7 +71,7 @@ warnings; they never fail the install.`,
 		if err != nil {
 			return err
 		}
-		written, err := skillpack.Install(homeClaude, dir, accs, state, Version, skillForce)
+		written, err := skillpack.Install(homeClaude, dir, accs, state, releaseVersion(), skillForce)
 		if err != nil {
 			return err
 		}
@@ -361,4 +361,15 @@ func firstLine(s string) string {
 		}
 	}
 	return ""
+}
+
+// releaseVersion is Version when it is a release number the skill
+// frontmatter can carry; a dev build hands skillpack an empty string,
+// which keeps the placeholder rather than writing "dev+<commit>" into a
+// field Claude Code parses as a version.
+func releaseVersion() string {
+	if Version == "" || Version[0] < '0' || Version[0] > '9' {
+		return ""
+	}
+	return Version
 }

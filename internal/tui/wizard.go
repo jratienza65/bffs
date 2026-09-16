@@ -23,12 +23,13 @@ import (
 type wizardStep int
 
 const (
-	wizStart    wizardStep = iota // send or receive
-	wizSendWhat                   // what to send: parts, memory, live sessions
-	wizSendHow                    // over the LAN, to a file, through ssh
-	wizSendSSH                    // the command to run in a terminal
-	wizRecvFrom                   // a machine on the LAN, or a file
-	wizRecvFile                   // typing the file's path
+	wizStart     wizardStep = iota // send or receive
+	wizSendScope                   // the whole pool, one project, or the marked sessions
+	wizSendWhat                    // what to send: the checklist, parts, live sessions
+	wizSendHow                     // over the LAN, to a file, through ssh
+	wizSendSSH                     // the command to run in a terminal
+	wizRecvFrom                    // a machine on the LAN, or a file
+	wizRecvFile                    // typing the file's path
 )
 
 // wizardScreen walks a transfer between machines step by step: send or
@@ -44,6 +45,8 @@ type wizardScreen struct {
 	root       transcripts.Root
 	account    string // the perspective an import runs as ("" = the resolver's pick)
 	hasProject bool
+	projects   []*projectRow // every project of the pool, for the pool-wide scope
+	scope      wizardScope
 	step       wizardStep
 	cursor     int
 	parts      porter.Parts
@@ -59,9 +62,19 @@ type wizardScreen struct {
 	// had marked a subset.
 	sessions []checkItem
 	memFiles []checkItem
-	rows     []checkRow // the rendered rows, rebuilt on each change
-	offset   int        // scroll offset of the checklist
+	projItem []checkItem // the pool-wide scope: one per project
+	rows     []checkRow  // the rendered rows, rebuilt on each change
+	offset   int         // scroll offset of the checklist
 }
+
+// wizardScope is what the send covers.
+type wizardScope int
+
+const (
+	scopeProject wizardScope = iota // the selected project: its sessions and memory
+	scopePool                       // every project of the pool
+	scopeMarked                     // the sessions marked in the panel
+)
 
 // checkItem is one checkable thing: a session or a memory file.
 type checkItem struct {
@@ -84,9 +97,26 @@ type checkRow struct {
 
 func (r checkRow) selectable() bool { return r.header == "" }
 
-func newWizardScreen(svc *services, tgt actionTarget, root transcripts.Root, account string, hasProject bool) *wizardScreen {
+func newWizardScreen(svc *services, tgt actionTarget, root transcripts.Root, account string, hasProject bool, projects []*projectRow) *wizardScreen {
 	in := newInput("file: ", "path of a .bffs file written by bffs export")
-	w := &wizardScreen{svc: svc, tgt: tgt, root: root, account: account, hasProject: hasProject, parts: porter.DefaultParts, live: true, input: in}
+	w := &wizardScreen{svc: svc, tgt: tgt, root: root, account: account, hasProject: hasProject, projects: projects, parts: porter.DefaultParts, live: true, input: in}
+	if len(tgt.ids) > 0 {
+		w.scope = scopeMarked
+	}
+	for _, pr := range projects {
+		meta := countNoun(pr.sessions, "session")
+		if pr.hasMemory {
+			meta += " · memory"
+		}
+		if !pr.newest.IsZero() {
+			meta += " · " + humanizeAgo(pr.newest, svc.now())
+		}
+		label := pr.label()
+		if pr.cwd == "" {
+			meta += " · no cwd recorded: only with every project"
+		}
+		w.projItem = append(w.projItem, checkItem{id: pr.cwd, label: label, meta: meta, on: true})
+	}
 	marked := map[string]bool{}
 	for _, id := range tgt.ids {
 		marked[id] = true
@@ -169,19 +199,37 @@ func listMemoryFiles(dir string) []memoryListing {
 // rebuild lays the checklist out from its items and toggles.
 func (s *wizardScreen) rebuild() {
 	var rows []checkRow
-	if len(s.tgt.ids) == 0 && s.tgt.project != "" || len(s.sessions) > 0 {
-		rows = append(rows, checkRow{header: "SESSIONS"})
-	}
-	for i := range s.sessions {
-		rows = append(rows, checkRow{item: &s.sessions[i]})
-	}
-	if len(s.sessions) == 0 && s.tgt.project != "" {
-		rows = append(rows, checkRow{header: "", label: "(sessions still loading, or none; the export takes what the project has)"})
-	}
-	if len(s.memFiles) > 0 {
-		rows = append(rows, checkRow{header: "MEMORY"})
-		for i := range s.memFiles {
-			rows = append(rows, checkRow{item: &s.memFiles[i]})
+	switch s.scope {
+	case scopePool:
+		rows = append(rows, checkRow{header: "PROJECTS"})
+		for i := range s.projItem {
+			rows = append(rows, checkRow{item: &s.projItem[i]})
+		}
+		if len(s.projItem) == 0 {
+			rows = append(rows, checkRow{label: "(no projects listed yet)"})
+		}
+	case scopeMarked:
+		rows = append(rows, checkRow{header: "MARKED SESSIONS"})
+		for i := range s.sessions {
+			if s.sessions[i].on {
+				rows = append(rows, checkRow{item: &s.sessions[i]})
+			}
+		}
+	default:
+		if len(s.sessions) > 0 || s.tgt.project != "" {
+			rows = append(rows, checkRow{header: "SESSIONS"})
+		}
+		for i := range s.sessions {
+			rows = append(rows, checkRow{item: &s.sessions[i]})
+		}
+		if len(s.sessions) == 0 && s.tgt.project != "" {
+			rows = append(rows, checkRow{label: "(sessions still loading, or none; the export takes what the project has)"})
+		}
+		if len(s.memFiles) > 0 {
+			rows = append(rows, checkRow{header: "MEMORY"})
+			for i := range s.memFiles {
+				rows = append(rows, checkRow{item: &s.memFiles[i]})
+			}
 		}
 	}
 	rows = append(rows, checkRow{header: "PARTS OF EVERY SELECTED SESSION"},
@@ -220,6 +268,20 @@ func (s *wizardScreen) move(d, n int) {
 
 // counts summarises the checklist.
 func (s *wizardScreen) counts() string {
+	if s.scope == scopePool {
+		on, n := 0, 0
+		for _, it := range s.projItem {
+			if it.on {
+				on++
+				for _, pr := range s.projects {
+					if pr.cwd == it.id && pr.label() == it.label {
+						n += pr.sessions
+					}
+				}
+			}
+		}
+		return fmt.Sprintf("%d of %d projects · %s", on, len(s.projItem), countNoun(n, "session"))
+	}
 	on, total := 0, len(s.sessions)
 	for _, it := range s.sessions {
 		if it.on {
@@ -243,10 +305,12 @@ func (s *wizardScreen) counts() string {
 func (s *wizardScreen) sectionOf(i int) []checkItem {
 	for j := i; j >= 0; j-- {
 		switch s.rows[j].header {
-		case "SESSIONS":
+		case "SESSIONS", "MARKED SESSIONS":
 			return s.sessions
 		case "MEMORY":
 			return s.memFiles
+		case "PROJECTS":
+			return s.projItem
 		case "":
 			continue
 		default:
@@ -308,6 +372,24 @@ func (s *wizardScreen) options() []wizardOption {
 			{label: "Send sessions from this machine", desc: "serve them over the local network with a pairing code, write a .bffs file, or pipe them through ssh"},
 			{label: "Receive sessions from another machine", desc: "from a machine running the serve, or from a .bffs file that reached this one"},
 		}
+	case wizSendScope:
+		opts := []wizardOption{}
+		if len(s.tgt.ids) > 0 {
+			opts = append(opts, wizardOption{label: "The " + countNoun(len(s.tgt.ids), "marked session"), desc: "only what you marked in the sessions panel; its project's memory stays home"})
+		}
+		if s.tgt.project != "" || s.tgt.slug != "" {
+			meta := countNoun(len(s.tgt.rows), "session")
+			if memoryDirFor(s.root, s.tgt.slug, s.tgt.project) != "" {
+				meta += " and its memory"
+			}
+			opts = append(opts, wizardOption{label: "This project: " + s.tgt.label(), desc: meta + "; the next step lets you pick sessions and memory files one by one"})
+		}
+		total := 0
+		for _, pr := range s.projects {
+			total += pr.sessions
+		}
+		opts = append(opts, wizardOption{label: "Every project of " + shortRootLabel(s.root), desc: fmt.Sprintf("%s, %s and every memory directory; the next step lets you leave projects out", countNoun(len(s.projects), "project"), countNoun(total, "session"))})
+		return opts
 	case wizSendHow:
 		return []wizardOption{
 			{label: "Over the local network", desc: "this machine shows an address and a pairing code; the other one runs bffs import --from <address> (or w → receive) and types the code. Needs an inbound port; macOS asks once whether bffs may accept connections"},
@@ -323,6 +405,18 @@ func (s *wizardScreen) options() []wizardOption {
 	return nil
 }
 
+// scopeChoices lists the scopes the scope step offers, in its order.
+func (s *wizardScreen) scopeChoices() []wizardScope {
+	var out []wizardScope
+	if len(s.tgt.ids) > 0 {
+		out = append(out, scopeMarked)
+	}
+	if s.tgt.project != "" || s.tgt.slug != "" {
+		out = append(out, scopeProject)
+	}
+	return append(out, scopePool)
+}
+
 // target is the export target with the choices of the "what" step:
 // the parts, the live toggle, and the checklist when it narrows the
 // project (a subset of sessions or of memory files).
@@ -331,6 +425,28 @@ func (s *wizardScreen) target() actionTarget {
 	parts := s.parts
 	t.parts = &parts
 	t.noLive = !s.live
+	if s.scope == scopePool {
+		t.project, t.slug, t.ids, t.rows = "", "", nil, nil
+		all := true
+		var dirs []string
+		for _, it := range s.projItem {
+			if !it.on {
+				all = false
+			} else if it.id != "" {
+				dirs = append(dirs, it.id)
+			}
+		}
+		if all {
+			t.allProjects = true
+		} else {
+			t.projects = dirs
+		}
+		return t
+	}
+	if s.scope == scopeMarked {
+		t.rows = nil // the marked ids alone
+		return t
+	}
 	if len(s.sessions) > 0 {
 		keep := map[string]bool{}
 		all := true
@@ -368,6 +484,20 @@ func (s *wizardScreen) target() actionTarget {
 
 // nothingChecked reports whether the checklist sends nothing.
 func (s *wizardScreen) nothingChecked() bool {
+	if s.scope == scopePool {
+		allOn := len(s.projItem) > 0
+		for _, it := range s.projItem {
+			if it.on && it.id != "" {
+				return false // at least one project can be named
+			}
+			if !it.on {
+				allOn = false
+			}
+		}
+		// Every project checked: --all-projects covers even the ones
+		// whose cwd could not be decoded.
+		return !allOn
+	}
 	for _, it := range s.sessions {
 		if it.on {
 			return false
@@ -387,6 +517,12 @@ func (s *wizardScreen) sshCommand() string {
 	var b strings.Builder
 	b.WriteString("bffs export")
 	switch {
+	case t.allProjects:
+		b.WriteString(" --all-projects")
+	case len(t.projects) > 0:
+		for _, dir := range t.projects {
+			b.WriteString(" --project " + shellWord(dir))
+		}
 	case t.keepSessions != nil:
 		ids := make([]string, 0, len(t.keepSessions))
 		for id := range t.keepSessions {
@@ -428,7 +564,7 @@ func (s *wizardScreen) sshCommand() string {
 	return b.String()
 }
 
-// canSend says whether there is anything to send.
+// canSend says whether there is anything to send from the selection.
 func (s *wizardScreen) canSend() bool {
 	return len(s.tgt.ids) > 0 || s.tgt.project != "" || (s.hasProject && len(s.tgt.rows) > 0)
 }
@@ -534,8 +670,10 @@ func (s *wizardScreen) back() (Screen, tea.Cmd) {
 	switch s.step {
 	case wizStart:
 		return s, popScreen()
-	case wizSendWhat, wizRecvFrom:
+	case wizSendScope, wizRecvFrom:
 		s.step, s.cursor = wizStart, 0
+	case wizSendWhat:
+		s.step, s.cursor = wizSendScope, 0
 	case wizSendHow:
 		s.step = wizSendWhat
 		s.cursor = max(0, s.firstSelectable(0, 1))
@@ -551,16 +689,20 @@ func (s *wizardScreen) choose() (Screen, tea.Cmd) {
 	switch s.step {
 	case wizStart:
 		if s.cursor == 0 {
-			if !s.canSend() {
-				s.note = "nothing to send: select a project (2) or mark sessions (space) first"
+			if !s.canSend() && len(s.projects) == 0 {
+				s.note = "nothing to send: this pool has no projects"
 				return s, nil
 			}
-			s.step = wizSendWhat
-			s.rebuild()
-			s.cursor = max(0, s.firstSelectable(0, 1))
+			s.step, s.cursor = wizSendScope, 0
 		} else {
 			s.step, s.cursor = wizRecvFrom, 0
 		}
+	case wizSendScope:
+		choices := s.scopeChoices()
+		s.scope = choices[min(s.cursor, len(choices)-1)]
+		s.step = wizSendWhat
+		s.rebuild()
+		s.cursor = max(0, s.firstSelectable(0, 1))
 	case wizSendWhat:
 		if s.nothingChecked() {
 			s.note = "nothing selected: check at least one session or memory file (space)"
@@ -685,13 +827,19 @@ func (s *wizardScreen) View(width, height int) string {
 	}
 	switch s.step {
 	case wizStart:
-		head("step 1 of 3", "What do you want to do?")
+		head("step 1 of 4", "What do you want to do?")
+	case wizSendScope:
+		head("step 2 of 4", "How much to send")
 	case wizSendWhat:
-		head("step 2 of 3", "What to send from "+s.tgt.label())
+		what := "What to send from " + s.tgt.label()
+		if s.scope == scopePool {
+			what = "Which projects of " + shortRootLabel(s.root)
+		}
+		head("step 3 of 4", what)
 		lines = append(lines, styleFaint.Render(truncate(s.counts()+" · space toggles · a checks or clears a section · enter continues · nothing is read yet", width)), "")
 		return s.checklistView(lines, width, height)
 	case wizSendHow:
-		head("step 3 of 3", "How to send it")
+		head("step 4 of 4", "How to send it")
 	case wizSendSSH:
 		head("send through ssh", "Run this in a terminal on this machine")
 		lines = append(lines, "", "  "+s.sshCommand(), "",

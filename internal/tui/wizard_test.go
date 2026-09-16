@@ -26,10 +26,12 @@ func TestWizardSendToFile(t *testing.T) {
 		t.Fatalf("w should open the wizard, got %T", h.a.top())
 	}
 	out := h.view()
-	wantAll(t, out, "step 1 of 3", "What do you want to do?", "Send sessions from this machine", "Receive sessions from another machine", "pairing code")
+	wantAll(t, out, "step 1 of 4", "What do you want to do?", "Send sessions from this machine", "Receive sessions from another machine", "pairing code")
 	h.keys("enter")
+	wantAll(t, h.view(), "step 2 of 4", "How much to send", "This project: "+shortPath(f.project), "Every project of shared pool: work", "1 project", "2 sessions")
+	h.keys("enter") // this project
 	out = h.view()
-	wantAll(t, out, "step 2 of 3", "What to send from "+shortPath(f.project), "2 of 2 sessions · 2 of 2 memory files",
+	wantAll(t, out, "step 3 of 4", "What to send from "+shortPath(f.project), "2 of 2 sessions · 2 of 2 memory files",
 		"SESSIONS", "[x]   first prompt of one", "[x]   first prompt of two", "1h ago", "2h ago",
 		"MEMORY", "[x] MEMORY.md", "[x] notes.md", "pinned",
 		"PARTS OF EVERY SELECTED SESSION", "tool results    include", "may contain pasted secrets", "file history    include", "prompt history  include", "live sessions   include", "continue →")
@@ -56,14 +58,14 @@ func TestWizardSendToFile(t *testing.T) {
 	// Continue: the how step, then the ssh line names the session.
 	h.keys("pgdown", "enter")
 	out = h.view()
-	wantAll(t, out, "step 3 of 3", "How to send it", "Over the local network", "To a .bffs file", "Through ssh", "no inbound port needed")
+	wantAll(t, out, "step 4 of 4", "How to send it", "Over the local network", "To a .bffs file", "Through ssh", "no inbound port needed")
 	h.keys("down", "down", "enter")
 	out = h.view()
 	wantAll(t, out, "Run this in a terminal", "bffs export --session "+sid1+" --project "+shellWord(f.project)+" --no-tool-results --out - | ssh <other-machine> 'bffs import --from - -y --as-is'", "c copies it")
 	h.keys("c")
 	wantAll(t, h.view(), "copied to the clipboard")
 	h.keys("esc")
-	wantAll(t, h.view(), "step 3 of 3")
+	wantAll(t, h.view(), "step 4 of 4")
 	// The file route hands off to the export screen with the choices.
 	h.keys("up", "enter")
 	ex, ok := h.a.top().(*exportScreen)
@@ -111,7 +113,7 @@ func TestWizardSendChoices(t *testing.T) {
 	f.transcript(f.slug, sid2, f.project, "first prompt of two", fixedNow.Add(-2*time.Hour))
 	f.memory()
 	h := f.start("sessions")
-	h.keys("w", "enter", "down", "down", "a") // clear the memory section
+	h.keys("w", "enter", "enter", "down", "down", "a") // this project; clear the memory section
 	sc := h.a.top().(*wizardScreen)
 	if sc.target().only != "sessions" || sc.target().keepMemory != nil {
 		t.Errorf("no memory files should narrow to sessions: %+v", sc.target())
@@ -126,21 +128,26 @@ func TestWizardSendChoices(t *testing.T) {
 	wantAll(t, h.view(), "0 of 2 sessions")
 	h.keys("pgdown", "enter")
 	wantAll(t, h.view(), "nothing selected: check at least one session or memory file")
+	h.keys("esc") // back to the scope step
+	wantAll(t, h.view(), "step 2 of 4", "How much to send")
 	h.keys("esc", "esc")
 	if h.a.top() != nil {
-		t.Fatalf("esc twice should close the wizard, got %T", h.a.top())
+		t.Fatalf("esc out of every step should close the wizard, got %T", h.a.top())
 	}
 
-	// Marked sessions arrive pre-checked, the rest unchecked.
+	// With sessions marked the scope step offers them first, and the
+	// checklist then lists only those.
 	h.keys("3", "space", "w", "enter")
+	wantAll(t, h.view(), "step 2 of 4", "The 1 marked session", "This project:", "Every project of")
+	h.keys("down", "enter") // this project: marked ones pre-checked
 	wantAll(t, h.view(), "1 of 2 sessions", "[x]   first prompt of one", "[ ]   first prompt of two")
-	h.keys("esc", "esc")
+	h.keys("esc", "esc", "esc")
 
 	// A project without sessions or cwd cannot be sent.
 	g := newFixture(t)
 	hg := g.start("sessions")
 	hg.keys("w", "enter")
-	wantAll(t, hg.view(), "nothing to send: select a project (2) or mark sessions (space) first")
+	wantAll(t, hg.view(), "nothing to send: this pool has no projects")
 	if _, ok := hg.a.top().(*wizardScreen); !ok {
 		t.Fatalf("the wizard should stay open, got %T", hg.a.top())
 	}
@@ -153,7 +160,7 @@ func TestWizardLANHandoffs(t *testing.T) {
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	loopbackTransfer(t, mustParseCode(t, "7K3Q-M9XD"))
 	h := f.start("sessions")
-	h.keys("w", "enter", "pgdown", "pgdown", "enter", "enter")
+	h.keys("w", "enter", "enter", "pgdown", "pgdown", "enter", "enter")
 	if _, ok := h.a.top().(*serveScreen); !ok {
 		t.Fatalf("the LAN route should open the serve screen, got %T:\n%s", h.a.top(), h.view())
 	}
@@ -238,4 +245,84 @@ func TestWizardReceiveFromFile(t *testing.T) {
 	if _, err := transcripts.ProjectKey(b.project); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The pool scope exports every project of the root, and unchecking one
+// narrows it to the rest by directory.
+func TestWizardSendWholePool(t *testing.T) {
+	f := newFixture(t)
+	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
+	f.memory()
+	other := filepath.Join(f.home, "src", "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	otherSlug, err := transcripts.Slug(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.transcript(otherSlug, sid2, other, "prompt from the other project", fixedNow.Add(-2*time.Hour))
+	h := f.start("sessions")
+	h.keys("w", "enter")
+	wantAll(t, h.view(), "step 2 of 4", "Every project of shared pool: work", "2 projects", "2 sessions")
+	h.keys("down", "enter") // every project
+	sc := h.a.top().(*wizardScreen)
+	out := h.view()
+	wantAll(t, out, "step 3 of 4", "Which projects of shared pool: work", "2 of 2 projects · 2 sessions",
+		"PROJECTS", "[x] "+shortPath(f.project), "1 session · memory", "[x] "+shortPath(other), "PARTS OF EVERY SELECTED SESSION")
+	if tgt := sc.target(); !tgt.allProjects || tgt.projects != nil {
+		t.Fatalf("everything checked should be --all-projects: %+v", tgt)
+	}
+	if !strings.Contains(sc.sshCommand(), "bffs export --all-projects --out -") {
+		t.Errorf("command = %q", sc.sshCommand())
+	}
+	// Uncheck the second project: the target names the first by directory.
+	h.keys("down", "space")
+	wantAll(t, h.view(), "1 of 2 projects · 1 session", "[ ] "+shortPath(other))
+	tgt := sc.target()
+	if tgt.allProjects || len(tgt.projects) != 1 || tgt.projects[0] != f.project {
+		t.Fatalf("target = %+v", tgt)
+	}
+	// Export it: the bundle carries the first project only, with memory.
+	h.keys("pgdown", "enter", "down", "enter", "enter")
+	ex, ok := h.a.top().(*exportScreen)
+	if !ok {
+		t.Fatalf("the file route should open export, got %T:\n%s", h.a.top(), h.view())
+	}
+	wantAll(t, h.view(), "1 session", "memory        2 files")
+	wantNone(t, h.view(), "prompt from the other project")
+	h.keys("y")
+	if _, ok := h.a.top().(*resultScreen); !ok {
+		t.Fatalf("y should end on the result, got %T:\n%s", h.a.top(), h.view())
+	}
+	bf, err := os.Open(ex.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bf.Close()
+	m, _, _, err := bundle.PeekManifest(bf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, mem := manifestCounts(m); n != 1 || mem != 2 {
+		t.Errorf("bundle carries %d sessions and %d memory files, want 1 and 2", n, mem)
+	}
+}
+
+// e on the accounts panel exports the whole pool without going through
+// the wizard.
+func TestExportWholePoolFromAccounts(t *testing.T) {
+	f := newFixture(t)
+	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
+	f.memory()
+	h := f.start("sessions")
+	h.keys("1", "e")
+	ex, ok := h.a.top().(*exportScreen)
+	if !ok || !ex.tgt.allProjects {
+		t.Fatalf("e on the accounts panel should export every project, got %T", h.a.top())
+	}
+	wantAll(t, h.view(), "export every project of shared pool: work with its memory")
+	h.keys("esc")
+	h.keys("x")
+	wantAll(t, h.view(), "export every project of shared pool: work with its memory to a file", "send every project", "copy every project")
 }

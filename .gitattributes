@@ -1,0 +1,5 @@
+# Git for Windows checks text out with CRLF by default, and a golden
+# frame then differs from the frame the code renders — by one invisible
+# byte per line. Everything in this repository is LF in the working
+# tree, on every platform, so a fixture compares equal wherever it runs.
+* text=auto eol=lf

@@ -466,12 +466,13 @@ func goldenStates() map[string]func(*app) {
 // Every state at the standard size, pinned. When one of these changes, the
 // diff of the golden is the review.
 func TestGoldenFrames(t *testing.T) {
-	// A golden holds one rendering of a path, and paths are not
+	// A frame golden holds one rendering of a path, and paths are not
 	// rendered the same everywhere: Windows's filepath cleans
 	// separators to backslashes and treats a rooted POSIX path as
-	// relative (so it carries no file:// link), which is correct there
-	// and a different frame. The sweeps that matter on every OS — the
-	// fit sweep, the paint scans, the ASCII sweep — run everywhere.
+	// relative, so it carries no file:// link. Both are correct there
+	// and make a different frame. Everything that holds on every OS
+	// keeps running — the fit sweep, the paint scans, the ASCII sweep,
+	// the rung table (which has no paths in it) and every model test.
 	if runtime.GOOS == "windows" {
 		t.Skip("goldens pin a Unix rendering of paths; the fit and paint sweeps still run here")
 	}

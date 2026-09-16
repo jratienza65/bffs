@@ -56,6 +56,12 @@ type Selection struct {
 	Sessions []transcripts.Session
 	Memories []transcripts.Memory
 	Parts    Parts
+	// MemoryFiles narrows a memory directory to the listed files
+	// (slash-relative names, as transcripts.MemoryFile.Name), keyed by
+	// the directory: a directory absent from the map exports whole; one
+	// mapped to an empty list exports nothing. Nil = every directory
+	// whole. The browser's export checklist fills it.
+	MemoryFiles map[string][]string
 }
 
 // Selector values for SelectOptions.Only.

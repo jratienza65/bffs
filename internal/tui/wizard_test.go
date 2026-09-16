@@ -7,13 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jratienza65/bffs/internal/bundle"
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
 
-// The wizard sends to a file with the parts chosen in its second step.
+// The wizard's second step is a checklist: every session and memory
+// file of the project, the parts, the live toggle. What is left
+// unchecked stays out of the bundle.
 func TestWizardSendToFile(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
+	f.transcript(f.slug, sid2, f.project, "first prompt of two", fixedNow.Add(-2*time.Hour))
 	f.memory()
 	h := f.start("sessions")
 	h.keys("w")
@@ -25,72 +29,111 @@ func TestWizardSendToFile(t *testing.T) {
 	wantAll(t, out, "step 1 of 3", "What do you want to do?", "Send sessions from this machine", "Receive sessions from another machine", "pairing code")
 	h.keys("enter")
 	out = h.view()
-	wantAll(t, out, "step 2 of 3", "What to send: the whole project "+shortPath(f.project)+" and its memory",
-		"memory          include", "tool results    include", "may contain pasted secrets", "file history    include", "prompt history  include", "live sessions   include", "continue →")
-	// Leave the tool results out, then continue.
-	h.keys("down", "space")
+	wantAll(t, out, "step 2 of 3", "What to send from "+shortPath(f.project), "2 of 2 sessions · 2 of 2 memory files",
+		"SESSIONS", "[x]   first prompt of one", "[x]   first prompt of two", "1h ago", "2h ago",
+		"MEMORY", "[x] MEMORY.md", "[x] notes.md", "pinned",
+		"PARTS OF EVERY SELECTED SESSION", "tool results    include", "may contain pasted secrets", "file history    include", "prompt history  include", "live sessions   include", "continue →")
+	// Uncheck the first session, MEMORY.md and the tool results.
+	h.keys("space")
+	wantAll(t, h.view(), "[ ]   first prompt of one", "1 of 2 sessions")
+	h.keys("down", "down", "space") // the MEMORY header is skipped
+	wantAll(t, h.view(), "[ ] MEMORY.md", "1 of 2 memory files")
+	h.keys("down", "down", "space")
 	wantAll(t, h.view(), "tool results    leave out")
 	if sc.parts.ToolResults {
 		t.Fatal("space should toggle the part")
 	}
-	h.keys("down", "down", "down", "down", "enter")
+	// a checks a whole section when any of it is unchecked, then clears it.
+	h.keys("up", "up", "up", "a")
+	wantAll(t, h.view(), "2 of 2 sessions")
+	h.keys("a")
+	wantAll(t, h.view(), "0 of 2 sessions")
+	h.keys("up", "space") // the first session alone
+	tgt := sc.target()
+	if len(tgt.keepSessions) != 1 || !tgt.keepSessions[sid1] || len(tgt.keepMemory) != 1 || !tgt.keepMemory["notes.md"] {
+		t.Fatalf("target = sessions %v memory %v", tgt.keepSessions, tgt.keepMemory)
+	}
+	// Continue: the how step, then the ssh line names the session.
+	h.keys("pgdown", "enter")
 	out = h.view()
 	wantAll(t, out, "step 3 of 3", "How to send it", "Over the local network", "To a .bffs file", "Through ssh", "no inbound port needed")
-	// The ssh step shows the command with the choices made.
 	h.keys("down", "down", "enter")
 	out = h.view()
-	wantAll(t, out, "Run this in a terminal", "bffs export --project "+shellWord(f.project)+" --no-tool-results --out - | ssh <other-machine> 'bffs import --from - -y --as-is'", "c copies it")
+	wantAll(t, out, "Run this in a terminal", "bffs export --session "+sid1+" --project "+shellWord(f.project)+" --no-tool-results --out - | ssh <other-machine> 'bffs import --from - -y --as-is'", "c copies it")
 	h.keys("c")
 	wantAll(t, h.view(), "copied to the clipboard")
 	h.keys("esc")
 	wantAll(t, h.view(), "step 3 of 3")
-	// The file route hands off to the export screen with the parts (esc
-	// left the cursor on the ssh row).
+	// The file route hands off to the export screen with the choices.
 	h.keys("up", "enter")
 	ex, ok := h.a.top().(*exportScreen)
-	if !ok || ex.tgt.parts == nil || ex.tgt.parts.ToolResults || !ex.tgt.parts.FileHistory {
-		t.Fatalf("file route should open export with the chosen parts, got %T %+v", h.a.top(), ex)
+	if !ok || ex.tgt.parts == nil || ex.tgt.parts.ToolResults || len(ex.tgt.keepSessions) != 1 {
+		t.Fatalf("file route should open export with the choices, got %T", h.a.top())
 	}
-	if _, isWizard := h.a.top().(*wizardScreen); isWizard || len(h.a.stack) != 1 {
+	if len(h.a.stack) != 1 {
 		t.Fatalf("the wizard should be replaced by the export screen, stack = %d", len(h.a.stack))
 	}
 	h.keys("enter") // accept the default path
-	wantAll(t, h.view(), "tool-results excluded", "file-history", "[y/N]")
+	wantAll(t, h.view(), "1 session", "tool-results excluded", "memory        1 files", "[y/N]")
 	h.keys("y")
 	if _, ok := h.a.top().(*resultScreen); !ok {
 		t.Fatalf("y should end on the result, got %T:\n%s", h.a.top(), h.view())
 	}
-	if _, err := os.Stat(ex.path); err != nil {
-		t.Errorf("bundle not written: %v", err)
+	bf, err := os.Open(ex.path)
+	if err != nil {
+		t.Fatalf("bundle not written: %v", err)
+	}
+	defer bf.Close()
+	m, _, _, err := bundle.PeekManifest(bf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nSessions, nMemory := manifestCounts(m)
+	if nSessions != 1 || nMemory != 1 {
+		t.Errorf("bundle carries %d sessions and %d memory files, want 1 and 1", nSessions, nMemory)
+	}
+	for _, e := range m.Entries {
+		if e.Kind == bundle.EntrySession && e.SessionID != sid1 {
+			t.Errorf("unexpected session %s in the bundle", e.SessionID)
+		}
+		if e.Kind == bundle.EntryMemory && !strings.HasSuffix(e.Files[0].Path, "/notes.md") {
+			t.Errorf("unexpected memory file %s", e.Files[0].Path)
+		}
 	}
 }
 
-// Without memory the target is sessions-only; without a project the
-// wizard says what to select first.
+// Unchecking every memory file narrows the target to sessions; marked
+// sessions arrive pre-checked; nothing checked and no project are
+// refused with a hint.
 func TestWizardSendChoices(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
+	f.transcript(f.slug, sid2, f.project, "first prompt of two", fixedNow.Add(-2*time.Hour))
 	f.memory()
 	h := f.start("sessions")
-	h.keys("w", "enter", "space") // memory: leave out
+	h.keys("w", "enter", "down", "down", "a") // clear the memory section
 	sc := h.a.top().(*wizardScreen)
-	if sc.memory || sc.target().only != "sessions" {
-		t.Errorf("memory off should narrow to sessions: memory=%v only=%q", sc.memory, sc.target().only)
+	if sc.target().only != "sessions" || sc.target().keepMemory != nil {
+		t.Errorf("no memory files should narrow to sessions: %+v", sc.target())
 	}
-	wantAll(t, h.view(), "memory          leave out")
-	h.keys("down", "down", "down", "down", "space") // live sessions: leave out
+	wantAll(t, h.view(), "0 of 2 memory files")
+	h.keys("pgdown", "up", "space") // live sessions: leave out
 	if !sc.target().noLive || !strings.Contains(sc.sshCommand(), "--only sessions --no-live") {
 		t.Errorf("command = %q", sc.sshCommand())
 	}
+	// Nothing at all checked is refused.
+	h.keys("pgup", "a")
+	wantAll(t, h.view(), "0 of 2 sessions")
+	h.keys("pgdown", "enter")
+	wantAll(t, h.view(), "nothing selected: check at least one session or memory file")
 	h.keys("esc", "esc")
 	if h.a.top() != nil {
 		t.Fatalf("esc twice should close the wizard, got %T", h.a.top())
 	}
 
-	// Marked sessions make the target the selection.
+	// Marked sessions arrive pre-checked, the rest unchecked.
 	h.keys("3", "space", "w", "enter")
-	wantAll(t, h.view(), "What to send: 1 selected session")
-	wantNone(t, h.view(), "memory          include")
+	wantAll(t, h.view(), "1 of 2 sessions", "[x]   first prompt of one", "[ ]   first prompt of two")
 	h.keys("esc", "esc")
 
 	// A project without sessions or cwd cannot be sent.
@@ -110,7 +153,7 @@ func TestWizardLANHandoffs(t *testing.T) {
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	loopbackTransfer(t, mustParseCode(t, "7K3Q-M9XD"))
 	h := f.start("sessions")
-	h.keys("w", "enter", "down", "down", "down", "down", "down", "down", "enter", "enter")
+	h.keys("w", "enter", "pgdown", "pgdown", "enter", "enter")
 	if _, ok := h.a.top().(*serveScreen); !ok {
 		t.Fatalf("the LAN route should open the serve screen, got %T:\n%s", h.a.top(), h.view())
 	}

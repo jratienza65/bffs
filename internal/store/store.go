@@ -26,13 +26,13 @@ func (t AccountType) Valid() bool {
 // is isolated from the user's shared ~/.claude/.
 //
 //   - "partial" (default): every entry in ~/.claude/ except .claude.json and
-//                          .credentials.json is symlinked into the per-account
-//                          dir, so settings, skills, plugins, history,
-//                          projects, todos, etc. all carry across accounts.
-//                          Drop-in feel — only auth/identity is per-account.
+//     .credentials.json is symlinked into the per-account
+//     dir, so settings, skills, plugins, history,
+//     projects, todos, etc. all carry across accounts.
+//     Drop-in feel — only auth/identity is per-account.
 //   - "full":              nothing symlinked. Each account is a fresh Claude
-//                          Code world (no shared settings, skills, history,
-//                          plugins, etc.). Max isolation.
+//     Code world (no shared settings, skills, history,
+//     plugins, etc.). Max isolation.
 type IsolationPreset string
 
 const (

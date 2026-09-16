@@ -18,8 +18,12 @@ import (
 // `/opt/$EVIL/bin` would expand $EVIL inside the running script, executing
 // the wrong binary (or nothing at all).
 //
-// Fix is to single-quote escape (with the standard '\'' trick for embedded
-// single quotes), or shell-escape via a dedicated helper.
+// Fix is to single-quote escape, closing and reopening the quote around each
+// embedded single quote:
+//
+//	'\''
+//
+// or to shell-escape via a dedicated helper.
 func TestWrapperScriptHandlesShellMetachars(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("wrapper script is /bin/sh; windows uses a copy of the .exe instead")

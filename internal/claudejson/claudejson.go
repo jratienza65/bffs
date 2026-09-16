@@ -159,7 +159,7 @@ func Patch(s Snapshot) error {
 	}
 
 	var (
-		doc  = map[string]json.RawMessage{}
+		doc              = map[string]json.RawMessage{}
 		perm os.FileMode = 0o600
 	)
 	if raw, err := os.ReadFile(p); err == nil {

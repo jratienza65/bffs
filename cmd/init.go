@@ -198,9 +198,13 @@ func wrapperScript(self string) string {
 	return fmt.Sprintf("#!/bin/sh\nexec %s exec -- \"$@\"\n", shellSingleQuote(self))
 }
 
-// shellSingleQuote wraps s in '...' and escapes any embedded single quote
-// using the standard '\'' trick. The result is a single shell word that
-// undergoes no expansion of any kind.
+// shellSingleQuote wraps s in '...' and escapes any embedded single quote by
+// closing the quote, emitting an escaped quote, and reopening — the standard
+// shell trick:
+//
+//	'\''
+//
+// The result is a single shell word that undergoes no expansion of any kind.
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

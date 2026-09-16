@@ -7,11 +7,14 @@
 //
 // The rules the package enforces are those of the plan's §6 (what a
 // bundle carries and never carries), §9 (placement, collisions, liveness,
-// mtimes, memory, records) and §12 (tests). In this milestone placement
-// knows two modes: identity (the entry's cwd exists here as a directory)
+// mtimes, memory, records) and §12 (tests). Placement knows three modes:
+// identity (the entry's cwd exists here as a directory — no relocated
+// record), mapped (a --map prefix rule, --into or an interactive answer
+// through the Placer moved the entry to a directory here; the transcript
+// is stamped with a relocated record and memory is merged as confirmed),
 // and as-is (everything else, landing under the original slug and flagged
-// pending); mappings, --into, interactive placement, trust carry and
-// lastSessionId arrive with M6.
+// pending for `bffs rehome`). Trust carry and lastSessionId are written
+// after the sessions have landed.
 //
 // Every string taken from a manifest, a transcript or a peer that reaches
 // a warning or report passes transcripts.Sanitize before it is stored.

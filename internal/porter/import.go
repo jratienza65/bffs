@@ -25,18 +25,31 @@ import (
 
 // ImportOptions drives Import. Dest is the destination root (from
 // transcripts.Roots/RootFor; orphans are refused); Account the account
-// chosen for the import (recorded, and the BFFS_ACCOUNT prefix of the
-// verify line when the root has no owner); OnConflict, Memory (skip or
-// overwrite; merge arrives with M6), TrustMemory, AsIs, PreserveMtimes,
-// Force, DryRun, Limits (zero = bundle.DefaultLimits), StagingDir
-// (default <cfgDir>/staging/<bundle-id>), ExpectManifestSHA256 (the LAN
-// path), Now (zero = time.Now()), Progress, Live (transcripts.Live of the
-// destination config dirs) and LaunchEnv (the environment claude is
-// launched with here, for transcripts.ProjectDirFor) are honoured now.
-// Map, Into, Place, CarryTrust and SetLastSession are accepted but yield
-// a "not available yet" error until M6 wires them; ForceStamp and
-// ExcludeRoot are accepted and ignored. StreamMode says the reader stays
-// open after the archive (a LAN body), so its end is not required.
+// chosen for the import (recorded, the BFFS_ACCOUNT prefix of the verify
+// line when the root has no owner, and the owner of the .claude.json
+// --carry-trust and --set-last-session write); OnConflict, Memory (skip,
+// overwrite or merge; empty = merge for a confirmed placement, skip
+// otherwise), TrustMemory, AsIs, PreserveMtimes, Force, DryRun, Limits
+// (zero = bundle.DefaultLimits), StagingDir (default
+// <cfgDir>/staging/<bundle-id>), ExpectManifestSHA256 (the LAN path), Now
+// (zero = time.Now()), Progress, Live (transcripts.Live of the destination
+// config dirs) and LaunchEnv (the environment claude is launched with
+// here, for transcripts.ProjectDirFor) are honoured.
+//
+// Placement (plan §9.3): Map holds prefix rules (rehome.ApplyMappings) —
+// a derived directory that does not exist here falls back to as-is with
+// a warning; Into is the single-project shorthand (an error when the
+// bundle holds more than one project, or when both are given); Place is
+// asked about every entry no rule or identity decided. CarryTrust copies
+// the source's three trust answers into the account's .claude.json for
+// confirmed mapped placements only (an error with AsIs); SetLastSession
+// points lastSessionId at the newest landed session of every directory;
+// NoRewriteMemory keeps old-machine paths in merged memory as they are;
+// ForceStamp stamps a mapped transcript whose last line is torn (a live
+// session exported mid-write); without it such a session lands as-is,
+// pending, with a warning (plan §9.8). ExcludeRoot is accepted and
+// ignored. StreamMode says the reader stays open after the
+// archive (a LAN body), so its end is not required.
 type ImportOptions struct {
 	Dest                 transcripts.Root
 	Account              string
@@ -52,6 +65,7 @@ type ImportOptions struct {
 	PreserveMtimes       bool
 	Force                bool
 	ForceStamp           bool
+	NoRewriteMemory      bool
 	DryRun               bool
 	Limits               bundle.Limits
 	StagingDir           string
@@ -65,22 +79,28 @@ type ImportOptions struct {
 }
 
 // Report is what Import did (or, with DryRun, would do). Session lists
-// hold session ids: Imported landed by identity, Pending as-is,
-// Overwritten (a subset of those two) displaced an existing session,
-// Skipped were not written, Held were refused because a running claude
-// owns them; Reasons explains every Skipped and Held id. MemoryDirs are
-// the memory directories written and MemoryReview, keyed the same way,
-// how many lines of each still mention absolute paths from the source
-// machine (`bffs memory scan-paths`); a directory with none is absent.
-// MtimeRaised lists the sessions whose transcript mtime was raised to the
-// retention floor; SweepDate is when Claude will sweep them unless resumed
-// and SweptCount how many. Verify holds one rehome.VerifyCommand line per
+// hold session ids: Imported landed under a directory of this machine —
+// by identity, or mapped with a relocated record (Rehomed, a subset of
+// Imported, lists the mapped ones) — Pending as-is, Overwritten (a subset
+// of Imported and Pending) displaced an existing session, Skipped were not
+// written, Held were refused because a running claude owns them; Reasons
+// explains every Skipped and Held id. MemoryDirs are the memory
+// directories written and MemoryReview, keyed the same way, how many
+// lines of each still mention absolute paths from the source machine
+// (`bffs memory scan-paths`); a directory with none is absent. MtimeRaised
+// lists the sessions whose transcript mtime was raised to the retention
+// floor; SweepDate is when Claude will sweep them unless resumed and
+// SweptCount how many. TrustCarried lists the project keys whose trust
+// answers were carried (--carry-trust) and LastSession maps each
+// directory to the session lastSessionId now points at
+// (--set-last-session). Verify holds one rehome.VerifyCommand line per
 // distinct destination directory. Bytes is the size of the bundle's
 // payload. StagingDir is set only when the staging directory was kept
 // after a failure.
 type Report struct {
 	BundleID     string
 	Imported     []string
+	Rehomed      []string
 	Skipped      []string
 	Overwritten  []string
 	Pending      []string
@@ -92,6 +112,8 @@ type Report struct {
 	SweepDate    time.Time
 	SweptCount   int
 	HistoryLines int
+	TrustCarried []string
+	LastSession  map[string]string
 	Warnings     []string
 	Verify       []string
 	Bytes        int64
@@ -108,13 +130,16 @@ var commitSession = rehome.CommitSession
 //	1–2 envelope + manifest (bundle.PeekManifest, Validate, the expected
 //	    manifest sha256, the bundle_id collision check against the import
 //	    records — refused without Force)
-//	3 preflight: destination sanity by identity, placement (identity or
-//	    as-is), collision scan scoped to the destination root, liveness,
-//	    memory-dir override; DryRun returns the plan here
+//	3 preflight: destination sanity by identity, placement (identity,
+//	    mapped or as-is — plan §9.3), collision scan scoped to the
+//	    destination root, liveness, memory-dir override; DryRun returns
+//	    the plan here
 //	4 staging under <cfgDir>/staging/<bundle-id>/ (bundle.Unpack)
 //	5 completeness: every staged transcript's head sessionId equals its name
-//	6 commit: memories (rehome.MergeMemory), then sessions one by one
-//	    (rehome.CommitSession, journalled), then the import record
+//	6 commit: memories (rehome.MergeMemory, old paths rewritten for
+//	    mapped placements), then sessions one by one (rehome.CommitSession,
+//	    journalled; a mapped session is stamped with a relocated record),
+//	    then the import record, trust carry and lastSessionId
 //	7 report and cleanup
 //
 // A failure in steps 0–5 removes the staging directory Import created and
@@ -235,8 +260,9 @@ func Import(ctx context.Context, cfgDir string, r io.Reader, o ImportOptions) (R
 	}
 	staged := func(p string) string { return filepath.Join(stagingDir, filepath.FromSlash(p)) }
 
-	// 5 — completeness beyond the allow-list.
-	for _, sp := range plan.sessions {
+	// 5 — completeness beyond the allow-list, and the stamp check.
+	for i := range plan.sessions {
+		sp := &plan.sessions[i]
 		if sp.status != planImport {
 			continue
 		}
@@ -250,6 +276,25 @@ func Import(ctx context.Context, cfgDir string, r io.Reader, o ImportOptions) (R
 		if head.SessionID != sid {
 			discard()
 			return rep, fmt.Errorf("bundle: transcript projects/%s/%s.jsonl records sessionId %q, not its file name; refusing the bundle", sanitize(sp.entry.Slug), sid, sanitize(head.SessionID))
+		}
+		// A mapped session gets a relocated record appended. A torn last
+		// line — a live session exported mid-write — is not stamped over
+		// unless ForceStamp (plan §9.8): the session lands as-is instead,
+		// pending, and `bffs rehome --force-stamp` can move it later.
+		if sp.place.Mode != PlaceMapped || o.ForceStamp {
+			continue
+		}
+		if ok, err := rehome.CheckLastLine(tr); err != nil || !ok {
+			reason := "incomplete last line (exported from a running claude?)"
+			if err != nil {
+				reason = err.Error()
+			}
+			if sp.demoteToAsIs(dest) {
+				warn("session %s: %s; imported as-is under projects/%s, pending — export it again once it is closed, or move it with bffs rehome --bundle %s --force-stamp", short8(sid), reason, sanitize(sp.slug), short8(m.BundleID))
+				continue
+			}
+			sp.status, sp.reason = planSkip, reason+"; pass --force-stamp to stamp it anyway"
+			rep.note(*sp)
 		}
 	}
 
@@ -273,10 +318,7 @@ func Import(ctx context.Context, cfgDir string, r io.Reader, o ImportOptions) (R
 		return rep, fmt.Errorf("%w; staging kept at %s", err, stagingDir)
 	}
 
-	memMode := o.Memory
-	if memMode == "" {
-		memMode = rehome.MemorySkip
-	}
+	localHome, _ := os.UserHomeDir()
 	for i, mp := range plan.memories {
 		if mp.status != planImport {
 			rec.Memories[i].Status = imports.StatusSkipped
@@ -286,20 +328,28 @@ func Import(ctx context.Context, cfgDir string, r io.Reader, o ImportOptions) (R
 			return fail(err)
 		}
 		srcDir := staged(joinSlash("memory", mp.entry.Slug))
-		mv, err := rehome.MergeMemory(mp.dir, srcDir, memMode, id8, false, o.TrustMemory, now)
+		mv, err := rehome.MergeMemory(mp.dir, srcDir, memoryMode(o, mp.place), id8, mp.place.Confirmed, o.TrustMemory, now)
 		if err != nil {
 			return fail(fmt.Errorf("memory for %s: %w", memoryLabel(mp), err))
+		}
+		for _, w := range mv.Warnings {
+			warn("memory for %s: %s", memoryLabel(mp), w)
 		}
 		if len(mv.Added)+len(mv.Renamed) == 0 {
 			rec.Memories[i].Status = imports.StatusSkipped
 			warn("memory for %s: nothing to write", memoryLabel(mp))
 			continue
 		}
-		rec.Memories[i].Status = imports.StatusPending
-		if mp.place.Mode == PlaceIdentity {
-			rec.Memories[i].Status = imports.StatusPlaced
-		}
+		rec.Memories[i].Status = placedStatus(mp.place)
 		rep.MemoryDirs = append(rep.MemoryDirs, mp.dir)
+		if mp.place.Mode == PlaceMapped && mp.place.Confirmed && !o.NoRewriteMemory {
+			pairs := rewritePairs(o.Map, mp.entry.Cwd, mp.place.NewCwd, m.Source.Home, localHome)
+			if _, remaining, err := rehome.RewriteMemoryPaths(mp.dir, pairs); err != nil {
+				warn("memory for %s: old paths not rewritten: %v", memoryLabel(mp), err)
+			} else {
+				mv.Remaining = remaining
+			}
+		}
 		if n := len(mv.Remaining); n > 0 {
 			if rep.MemoryReview == nil {
 				rep.MemoryReview = map[string]int{}
@@ -352,14 +402,28 @@ func Import(ctx context.Context, cfgDir string, r io.Reader, o ImportOptions) (R
 			rep.MtimeRaised = append(rep.MtimeRaised, sid)
 		}
 		rep.HistoryLines += res.HistoryAdded
-		rec.Sessions[i].Status = imports.StatusPending
-		if sp.place.Mode == PlaceIdentity {
-			rec.Sessions[i].Status = imports.StatusPlaced
-		}
+		rec.Sessions[i].Status = placedStatus(sp.place)
 	}
 	rep.SweptCount = len(rep.MtimeRaised)
 	if err := imports.Save(cfgDir, rec); err != nil {
 		return fail(fmt.Errorf("import record: %w", err))
+	}
+	landed := map[string]bool{}
+	for _, sid := range rep.Imported {
+		landed[sid] = true
+	}
+	if carry := len(trustTargets(plan.sessions, landed)) > 0; carry || o.SetLastSession {
+		jsonPath, err := accountJSON(cfgDir, o, dest)
+		if err != nil {
+			warn("trust and lastSessionId not written: %v", err)
+		} else {
+			if carry {
+				rep.TrustCarried = carryTrust(jsonPath, stagingDir, plan.sessions, landed, warn)
+			}
+			if o.SetLastSession {
+				rep.LastSession = setLastSessions(jsonPath, plan.sessions, landed, warn)
+			}
+		}
 	}
 
 	// 7 — report.
@@ -389,9 +453,13 @@ func (rep *Report) note(sp sessionPlan) {
 // record lists a committed (or, dry-run, planned) session.
 func (rep *Report) record(sp sessionPlan) {
 	sid := sp.entry.SessionID
-	if sp.place.Mode == PlaceIdentity {
+	switch sp.place.Mode {
+	case PlaceIdentity:
 		rep.Imported = append(rep.Imported, sid)
-	} else {
+	case PlaceMapped:
+		rep.Imported = append(rep.Imported, sid)
+		rep.Rehomed = append(rep.Rehomed, sid)
+	default:
 		rep.Pending = append(rep.Pending, sid)
 	}
 	if sp.overwrite {
@@ -406,30 +474,15 @@ func validateImportOptions(o ImportOptions) error {
 		return fmt.Errorf("invalid --on-conflict %q: must be %q or %q", string(o.OnConflict), ConflictSkip, ConflictOverwrite)
 	}
 	switch o.Memory {
-	case "", rehome.MemorySkip, rehome.MemoryOverwrite:
-	case rehome.MemoryMerge:
-		return fmt.Errorf("--memory merge is not available yet: use %q or %q", rehome.MemorySkip, rehome.MemoryOverwrite)
+	case "", rehome.MemorySkip, rehome.MemoryOverwrite, rehome.MemoryMerge:
 	default:
-		return fmt.Errorf("invalid --memory %q: must be %q or %q", string(o.Memory), rehome.MemorySkip, rehome.MemoryOverwrite)
+		return fmt.Errorf("invalid --memory %q: must be %q, %q or %q", string(o.Memory), rehome.MemorySkip, rehome.MemoryOverwrite, rehome.MemoryMerge)
 	}
-	var later []string
-	if len(o.Map) > 0 {
-		later = append(later, "--map")
+	if o.Into != "" && len(o.Map) > 0 {
+		return errors.New("--into and --map are mutually exclusive")
 	}
-	if o.Into != "" {
-		later = append(later, "--into")
-	}
-	if o.Place != nil {
-		later = append(later, "interactive placement")
-	}
-	if o.CarryTrust {
-		later = append(later, "--carry-trust")
-	}
-	if o.SetLastSession {
-		later = append(later, "--set-last-session")
-	}
-	if len(later) > 0 {
-		return fmt.Errorf("%s not available yet: import lands sessions by identity or --as-is for now", strings.Join(later, ", "))
+	if o.CarryTrust && o.AsIs {
+		return errors.New("--carry-trust needs a mapped placement (--map, --into or an interactive answer); it does nothing with --as-is")
 	}
 	return nil
 }
@@ -524,6 +577,10 @@ func commitRequest(sp sessionPlan, staged func(string) string, id8 string) (reho
 		Slug:       sp.slug,
 		Transcript: staged(joinSlash("projects", e.Slug, sid+transcripts.TranscriptExt)),
 		ID8:        id8,
+	}
+	if sp.place.Mode == PlaceMapped {
+		req.Stamp = rehome.RelocatedRecord(sid, sp.place.NewCwd)
+		req.HistoryProject = sp.place.NewCwd
 	}
 	var history string
 	for _, f := range e.Files {
@@ -680,7 +737,68 @@ func newRecord(m *bundle.Manifest, o ImportOptions, dest transcripts.Root, plan 
 	for _, mp := range plan.memories {
 		rec.Memories = append(rec.Memories, imports.Memory{OldCwd: mp.entry.Cwd, Dir: mp.dir, Status: imports.StatusSkipped})
 	}
+	rec.Mapping = effectiveMappings(o, plan)
 	return rec
+}
+
+// effectiveMappings lists the prefix rules the placement used: every
+// --map rule, plus one old→new pair per confirmed mapped directory the
+// rules did not produce (--into, an interactive answer).
+func effectiveMappings(o ImportOptions, plan importPlan) []imports.Mapping {
+	out := append([]imports.Mapping(nil), o.Map...)
+	seen := map[string]bool{}
+	for _, m := range out {
+		seen[m.Old+"\x00"+m.New] = true
+	}
+	add := func(p Placement) {
+		if p.Mode != PlaceMapped || !p.Confirmed || p.Entry == nil || p.Entry.Cwd == "" {
+			return
+		}
+		if newCwd, _, ok := rehome.ApplyMappings(o.Map, p.Entry.Cwd, p.Entry.ProjectKey); ok && newCwd == p.NewCwd {
+			return
+		}
+		key := p.Entry.Cwd + "\x00" + p.NewCwd
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, imports.Mapping{Old: p.Entry.Cwd, New: p.NewCwd})
+	}
+	for _, sp := range plan.sessions {
+		add(sp.place)
+	}
+	for _, mp := range plan.memories {
+		add(mp.place)
+	}
+	return out
+}
+
+// placedStatus is the import-record status of a landed entry.
+func placedStatus(p Placement) string {
+	switch p.Mode {
+	case PlaceIdentity:
+		return imports.StatusPlaced
+	case PlaceMapped:
+		return imports.StatusRehomed
+	}
+	return imports.StatusPending
+}
+
+// rewritePairs builds the [old, new] prefix pairs a mapped memory
+// directory is rewritten with: every --map rule, the entry's own old→new
+// directory, and the source home → this home.
+func rewritePairs(maps []rehome.Mapping, oldCwd, newCwd, oldHome, newHome string) [][2]string {
+	var pairs [][2]string
+	for _, m := range maps {
+		pairs = append(pairs, [2]string{m.Old, m.New})
+	}
+	if oldCwd != "" && newCwd != "" {
+		pairs = append(pairs, [2]string{oldCwd, newCwd})
+	}
+	if oldHome != "" && newHome != "" {
+		pairs = append(pairs, [2]string{oldHome, newHome})
+	}
+	return pairs
 }
 
 // verifyLines renders one rehome.VerifyCommand per distinct destination

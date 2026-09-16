@@ -216,3 +216,121 @@ func TestClassifyTmp(t *testing.T) {
 		}
 	}
 }
+
+// An interrupted in-place rehome journals the transcript's old path as
+// Origin. While that file is still there the session has not moved, so
+// the sidecar the run had already taken goes back beside it — from its
+// tmp name or from the target entry — and is never removed; once the
+// transcript has moved on, a tmp transcript is restored under the target
+// entry like any other and the sidecar stays with it.
+func TestRecoverInPlaceRehomeSidecar(t *testing.T) {
+	root, dir := projectsRoot(t)
+	origin := filepath.Join(dir, "-old", testSID+".jsonl")
+	target := filepath.Join(dir, "-new", testSID+".jsonl")
+	journal := t.TempDir()
+	j := Journal{SessionID: testSID, Origin: origin, Target: target, Step: StepSidecar}
+	if err := WriteJournal(journal, j); err != nil {
+		t.Fatal(err)
+	}
+	oldSide := filepath.Join(dir, "-old", testSID)
+	newSide := filepath.Join(dir, "-new", testSID)
+
+	// Crash after the sidecar reached its tmp name under the target entry.
+	write(t, origin, "{}\n")
+	write(t, filepath.Join(newSide+tmpSuffix, "tool-results", "x.txt"), "out\n")
+	restored, kept, err := Recover(root, journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 1 || restored[0] != oldSide || len(kept) != 0 {
+		t.Errorf("tmp case: restored = %v kept = %v", restored, kept)
+	}
+	if !exists(filepath.Join(oldSide, "tool-results", "x.txt")) || exists(newSide+tmpSuffix) {
+		t.Error("sidecar tmp not moved back beside its transcript")
+	}
+
+	// Crash after the sidecar reached the target entry itself.
+	if err := os.Rename(oldSide, newSide); err != nil {
+		t.Fatal(err)
+	}
+	restored, kept, err = Recover(root, journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 1 || restored[0] != oldSide || len(kept) != 0 {
+		t.Errorf("target case: restored = %v kept = %v", restored, kept)
+	}
+	if !exists(filepath.Join(oldSide, "tool-results", "x.txt")) || exists(newSide) {
+		t.Error("sidecar not moved back from the target entry")
+	}
+
+	// Something already at the old place: the tmp is kept, never removed.
+	write(t, filepath.Join(newSide+tmpSuffix, "tool-results", "y.txt"), "out\n")
+	restored, kept, err = Recover(root, journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 0 || len(kept) != 1 || kept[0] != newSide+tmpSuffix {
+		t.Errorf("occupied case: restored = %v kept = %v", restored, kept)
+	}
+	if !exists(filepath.Join(newSide+tmpSuffix, "tool-results", "y.txt")) {
+		t.Error("sidecar tmp removed although the old entry was occupied")
+	}
+	if err := os.RemoveAll(newSide + tmpSuffix); err != nil {
+		t.Fatal(err)
+	}
+
+	// The transcript has moved on (Origin gone, a tmp transcript under the
+	// target): restored there; the sidecar already under the target stays.
+	if err := os.Rename(oldSide, newSide); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(origin, target+tmpSuffix); err != nil {
+		t.Fatal(err)
+	}
+	j.Step = StepTranscript
+	if err := WriteJournal(journal, j); err != nil {
+		t.Fatal(err)
+	}
+	restored, kept, err = Recover(root, journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 1 || restored[0] != target || len(kept) != 0 {
+		t.Errorf("moved-on case: restored = %v kept = %v", restored, kept)
+	}
+	if !exists(target) || !exists(filepath.Join(newSide, "tool-results", "x.txt")) {
+		t.Error("transcript not restored under the target entry, or sidecar disturbed")
+	}
+
+	// A finished journal asks for nothing, whatever is on disk.
+	write(t, origin, "{}\n")
+	j.Step = StepDone
+	if err := WriteJournal(journal, j); err != nil {
+		t.Fatal(err)
+	}
+	if restored, kept, err := Recover(root, journal); err != nil || len(restored) != 0 || len(kept) != 0 {
+		t.Errorf("done case: restored = %v kept = %v err = %v", restored, kept, err)
+	}
+	if !exists(newSide) {
+		t.Error("finished journal moved the sidecar")
+	}
+}
+
+func TestInsideDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "projects")
+	cases := map[string]bool{
+		filepath.Join(dir, "-x", "a.jsonl"): true,
+		filepath.Join(dir, "a"):             true,
+		dir:                                 false,
+		filepath.Dir(dir):                   false,
+		filepath.Join(dir, "..", "other"):   false,
+		filepath.Join(dir+"-more", "a"):     false,
+		"":                                  false,
+	}
+	for p, want := range cases {
+		if got := insideDir(p, dir); got != want {
+			t.Errorf("insideDir(%q, %q) = %v, want %v", p, dir, got, want)
+		}
+	}
+}

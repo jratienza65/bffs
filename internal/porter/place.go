@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jratienza65/bffs/internal/bundle"
+	"github.com/jratienza65/bffs/internal/imports"
 	"github.com/jratienza65/bffs/internal/rehome"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
@@ -34,7 +35,8 @@ const (
 	// relocated record.
 	PlaceIdentity = "identity"
 	// PlaceMapped: a prefix rule, --into or an interactive answer moved
-	// the entry to a new directory (M6).
+	// the entry to a new directory; the session lands under that
+	// directory's projects/ entry with a relocated record.
 	PlaceMapped = "mapped"
 	// PlaceAsIs: the entry keeps its original slug and is flagged pending.
 	PlaceAsIs = "as-is"
@@ -43,8 +45,9 @@ const (
 // Placement is where one manifest entry lands: NewCwd is the directory it
 // belongs to on this machine ("" for as-is), Mode one of the Place*
 // constants, Confirmed whether the user chose the directory (a mapping,
-// --into or an interactive answer — never identity or as-is), CarryTrust
-// whether the source trust answers may be applied (M6).
+// --into or an interactive answer — never a bare identity or as-is),
+// CarryTrust whether the source trust answers are applied (only for a
+// confirmed mapped placement).
 type Placement struct {
 	Entry      *bundle.Entry
 	NewCwd     string
@@ -53,8 +56,12 @@ type Placement struct {
 	CarryTrust bool
 }
 
-// Placer decides placements interactively (M6: cmd supplies it). Nil
-// means the M4 rule: identity when the cwd exists here, else as-is.
+// Placer decides placements interactively (cmd supplies it): it is called
+// once, with the manifest and rehome.Suggest's candidates for every entry
+// no rule, --into or identity decided, and returns one Placement per
+// project (matched to entries by Entry pointer, else by the entry's cwd).
+// An entry it does not mention lands as-is. Nil means the rule without a
+// prompt: identity when the cwd exists here, else as-is.
 type Placer func(ctx context.Context, m *bundle.Manifest, suggestions []rehome.Suggestion) ([]Placement, error)
 
 // Plan statuses.
@@ -121,6 +128,11 @@ func planEntries(ctx context.Context, m *bundle.Manifest, o ImportOptions, dest 
 		p.warnings = append(p.warnings, sanitize(fmt.Sprintf(format, args...)))
 	}
 
+	placements, err := decidePlacements(ctx, m, o, warn)
+	if err != nil {
+		return importPlan{}, err
+	}
+
 	// One listing of the destination root, restricted to the incoming
 	// ids, gives every existing transcript (any slug) and its liveness.
 	var sids []string
@@ -146,28 +158,208 @@ func planEntries(ctx context.Context, m *bundle.Manifest, o ImportOptions, dest 
 
 	memoryOverride := checkMemoryOverride(dest)
 
+	// transcripts.ProjectDirFor scans every entry of the destination root
+	// when the target entry does not exist yet; one answer per directory
+	// serves every session placed there.
+	type projDir struct {
+		dir string
+		err error
+	}
+	projDirs := map[string]projDir{}
+	projectDirFor := func(cwd string) (string, error) {
+		if d, ok := projDirs[cwd]; ok {
+			return d.dir, d.err
+		}
+		dir, err := transcripts.ProjectDirFor(dest, cwd, o.LaunchEnv)
+		projDirs[cwd] = projDir{dir, err}
+		return dir, err
+	}
+
 	for i := range m.Entries {
 		e := &m.Entries[i]
 		switch e.Kind {
 		case bundle.EntrySession:
-			p.sessions = append(p.sessions, planSession(e, o, dest, existing[e.SessionID], policy, warn))
+			p.sessions = append(p.sessions, planSession(e, dest, existing[e.SessionID], policy, placements[e], projectDirFor, warn))
 		case bundle.EntryMemory:
-			p.memories = append(p.memories, planMemory(e, o, dest, memoryOverride))
+			p.memories = append(p.memories, planMemory(e, o, dest, memoryOverride, placements[e]))
 		}
 	}
 	return p, nil
 }
 
-func planSession(e *bundle.Entry, o ImportOptions, dest transcripts.Root, existing []transcripts.Session, policy ConflictPolicy, warn func(string, ...any)) sessionPlan {
+// decidePlacements applies plan §9.3 to every entry: --as-is; --into
+// (the single-project shorthand); the prefix rules (a derived directory
+// that does not exist here falls back to as-is with a warning); identity
+// when the cwd exists here; the Placer for what is left; as-is otherwise.
+// CarryTrust is kept only on confirmed mapped placements.
+func decidePlacements(ctx context.Context, m *bundle.Manifest, o ImportOptions, warn func(string, ...any)) (map[*bundle.Entry]Placement, error) {
+	out := map[*bundle.Entry]Placement{}
+	asIs := func(e *bundle.Entry) Placement { return Placement{Entry: e, Mode: PlaceAsIs} }
+	if o.AsIs {
+		for i := range m.Entries {
+			e := &m.Entries[i]
+			out[e] = asIs(e)
+		}
+		return out, nil
+	}
+	into := ""
+	if o.Into != "" {
+		norm, err := store.NormalizePath(o.Into)
+		if err != nil {
+			return nil, fmt.Errorf("--into %q: %w", o.Into, err)
+		}
+		if !dirExists(norm) {
+			return nil, fmt.Errorf("--into %q is not a directory", o.Into)
+		}
+		if n := projectCount(m); n > 1 {
+			return nil, fmt.Errorf("bundle holds %d projects; --into needs a single-project bundle, use --map", n)
+		}
+		into = norm
+	}
+
+	var undecided []*bundle.Entry
+	for i := range m.Entries {
+		e := &m.Entries[i]
+		switch {
+		case into != "":
+			out[e] = chosenPlacement(e, into)
+		case len(o.Map) > 0:
+			newCwd, _, ok := rehome.ApplyMappings(o.Map, e.Cwd, e.ProjectKey)
+			if !ok {
+				break
+			}
+			if !dirExists(newCwd) {
+				warn("%s: mapped directory %q does not exist; importing as-is under projects/%s", entryLabel(e), newCwd, e.Slug)
+				out[e] = asIs(e)
+				continue
+			}
+			out[e] = chosenPlacement(e, newCwd)
+		}
+		if _, done := out[e]; done {
+			continue
+		}
+		if identityPlacement(e.Cwd, e.Cwd) {
+			out[e] = Placement{Entry: e, Mode: PlaceIdentity, NewCwd: e.Cwd}
+			continue
+		}
+		undecided = append(undecided, e)
+	}
+
+	if len(undecided) > 0 && o.Place != nil {
+		home, _ := os.UserHomeDir()
+		answers, err := o.Place(ctx, m, rehome.Suggest(recordForSuggest(m, undecided), home, nil))
+		if err != nil {
+			return nil, err
+		}
+		byEntry := map[*bundle.Entry]Placement{}
+		byCwd := map[string]Placement{}
+		for _, a := range answers {
+			if a.Entry != nil {
+				byEntry[a.Entry] = a
+				if a.Entry.Cwd != "" {
+					if _, ok := byCwd[a.Entry.Cwd]; !ok {
+						byCwd[a.Entry.Cwd] = a
+					}
+				}
+			}
+		}
+		for _, e := range undecided {
+			a, ok := byEntry[e]
+			if !ok {
+				a, ok = byCwd[e.Cwd]
+			}
+			if !ok || a.Mode == PlaceAsIs || a.NewCwd == "" {
+				out[e] = asIs(e)
+				continue
+			}
+			norm, err := store.NormalizePath(a.NewCwd)
+			if err != nil {
+				return nil, fmt.Errorf("%s: chosen directory %q: %w", entryLabel(e), a.NewCwd, err)
+			}
+			if !dirExists(norm) {
+				return nil, fmt.Errorf("%s: chosen directory %q does not exist", entryLabel(e), a.NewCwd)
+			}
+			p := chosenPlacement(e, norm)
+			p.CarryTrust = a.CarryTrust
+			out[e] = p
+		}
+	}
+	for _, e := range undecided {
+		if _, ok := out[e]; !ok {
+			out[e] = asIs(e)
+		}
+	}
+	for e, p := range out {
+		p.CarryTrust = (o.CarryTrust || p.CarryTrust) && p.Mode == PlaceMapped && p.Confirmed
+		out[e] = p
+	}
+	return out, nil
+}
+
+// chosenPlacement is the placement of an entry the user pointed at dir:
+// identity when dir is the entry's own directory (no relocated record),
+// mapped otherwise — confirmed either way.
+func chosenPlacement(e *bundle.Entry, dir string) Placement {
+	if identityPlacement(dir, e.Cwd) {
+		return Placement{Entry: e, Mode: PlaceIdentity, NewCwd: dir, Confirmed: true}
+	}
+	return Placement{Entry: e, Mode: PlaceMapped, NewCwd: dir, Confirmed: true}
+}
+
+// projectCount counts the distinct projects of a manifest (by cwd, else
+// by slug).
+func projectCount(m *bundle.Manifest) int {
+	seen := map[string]bool{}
+	for i := range m.Entries {
+		e := &m.Entries[i]
+		key := e.Cwd
+		if key == "" {
+			key = "projects/" + e.Slug
+		}
+		seen[key] = true
+	}
+	return len(seen)
+}
+
+// recordForSuggest shapes the undecided entries as the import record
+// rehome.Suggest reads: one session per entry with its old cwd and git
+// remote, the source home for the relative-path candidate.
+func recordForSuggest(m *bundle.Manifest, entries []*bundle.Entry) imports.Record {
+	rec := imports.Record{BundleID: m.BundleID, Source: imports.Source{Home: m.Source.Home}}
+	for _, e := range entries {
+		switch e.Kind {
+		case bundle.EntrySession:
+			rec.Sessions = append(rec.Sessions, imports.Session{ID: e.SessionID, OldCwd: e.Cwd, OldSlug: e.Slug, GitRemote: e.GitRemote})
+		case bundle.EntryMemory:
+			rec.Memories = append(rec.Memories, imports.Memory{OldCwd: e.Cwd})
+		}
+	}
+	return rec
+}
+
+// entryLabel names an entry in messages.
+func entryLabel(e *bundle.Entry) string {
+	if e.Kind == bundle.EntrySession {
+		return "session " + short8(e.SessionID)
+	}
+	if e.Cwd != "" {
+		return "memory for " + sanitize(e.Cwd)
+	}
+	return "memory/" + sanitize(e.Slug)
+}
+
+func planSession(e *bundle.Entry, dest transcripts.Root, existing []transcripts.Session, policy ConflictPolicy, place Placement, projectDirFor func(string) (string, error), warn func(string, ...any)) sessionPlan {
 	sid := e.SessionID
-	sp := sessionPlan{entry: e, status: planImport, slug: e.Slug}
-	sp.place = Placement{Entry: e, Mode: PlaceAsIs}
-	if !o.AsIs && identityPlacement(e.Cwd, e.Cwd) {
-		dir, err := transcripts.ProjectDirFor(dest, e.Cwd, o.LaunchEnv)
+	sp := sessionPlan{entry: e, status: planImport, slug: e.Slug, place: place}
+	if place.Mode == "" {
+		sp.place = Placement{Entry: e, Mode: PlaceAsIs}
+	}
+	if sp.place.Mode != PlaceAsIs {
+		dir, err := projectDirFor(sp.place.NewCwd)
 		if err != nil {
 			warn("session %s: %v; importing as-is under projects/%s", short8(sid), err, e.Slug)
+			sp.place = Placement{Entry: e, Mode: PlaceAsIs}
 		} else {
-			sp.place = Placement{Entry: e, Mode: PlaceIdentity, NewCwd: e.Cwd}
 			sp.slug = filepath.Base(dir)
 		}
 	}
@@ -218,15 +410,42 @@ func planSession(e *bundle.Entry, o ImportOptions, dest transcripts.Root, existi
 	return sp
 }
 
-func planMemory(e *bundle.Entry, o ImportOptions, dest transcripts.Root, override error) memoryPlan {
-	mp := memoryPlan{entry: e, status: planImport}
-	mp.place = Placement{Entry: e, Mode: PlaceAsIs}
+// demoteToAsIs turns a mapped session plan into an as-is one when that
+// is safe: nothing may already stand under the original slug, and a
+// session that was going to displace an existing one under the mapped
+// slug (an overwrite) cannot land elsewhere without leaving two copies.
+// Reports whether the plan changed.
+func (sp *sessionPlan) demoteToAsIs(dest transcripts.Root) bool {
+	e := sp.entry
+	if sp.slug != e.Slug {
+		if sp.overwrite {
+			return false
+		}
+		slugDir := filepath.Join(dest.Dir, e.Slug)
+		if _, err := os.Lstat(filepath.Join(slugDir, e.SessionID+transcripts.TranscriptExt)); err == nil {
+			return false
+		}
+		if hasSidecar(e) {
+			if _, err := os.Lstat(filepath.Join(slugDir, e.SessionID)); err == nil {
+				return false
+			}
+		}
+	}
+	sp.place = Placement{Entry: e, Mode: PlaceAsIs}
+	sp.slug = e.Slug
+	return true
+}
+
+func planMemory(e *bundle.Entry, o ImportOptions, dest transcripts.Root, override error, place Placement) memoryPlan {
+	mp := memoryPlan{entry: e, status: planImport, place: place}
+	if place.Mode == "" {
+		mp.place = Placement{Entry: e, Mode: PlaceAsIs}
+	}
 	mp.dir = filepath.Join(dest.Dir, e.Slug, transcripts.MemorySubdir)
-	if !o.AsIs && identityPlacement(e.Cwd, e.Cwd) {
-		dir, err := transcripts.MemoryDirFor(dest, e.Cwd)
+	if mp.place.Mode != PlaceAsIs {
+		dir, err := transcripts.MemoryDirFor(dest, mp.place.NewCwd)
 		switch {
 		case err == nil:
-			mp.place = Placement{Entry: e, Mode: PlaceIdentity, NewCwd: e.Cwd}
 			mp.dir = dir
 		case errors.Is(err, transcripts.ErrMemoryDirOverridden):
 			mp.status, mp.reason = planSkip, err.Error()+"; bffs cannot place memory there yet"
@@ -244,17 +463,26 @@ func planMemory(e *bundle.Entry, o ImportOptions, dest transcripts.Root, overrid
 		mp.status, mp.reason = planSkip, fmt.Sprintf("target %s is not a usable memory directory", mp.dir)
 		return mp
 	}
-	mode := o.Memory
-	if mode == "" {
-		mode = rehome.MemorySkip
-	}
-	if mode == rehome.MemorySkip {
+	if memoryMode(o, mp.place) == rehome.MemorySkip {
 		if info, err := os.Lstat(mp.dir); err == nil && info != nil {
-			mp.status, mp.reason = planSkip, "memory directory exists (--memory overwrite replaces it)"
+			mp.status, mp.reason = planSkip, "memory directory exists (--memory merge adds to it, --memory overwrite replaces it)"
 			return mp
 		}
 	}
 	return mp
+}
+
+// memoryMode is the mode a memory entry is written with: o.Memory, else
+// merge for a confirmed placement (a mapping is a confirmation) and skip
+// otherwise.
+func memoryMode(o ImportOptions, place Placement) rehome.MemoryMode {
+	if o.Memory != "" {
+		return o.Memory
+	}
+	if place.Confirmed {
+		return rehome.MemoryMerge
+	}
+	return rehome.MemorySkip
 }
 
 // checkMemoryOverride reports the ErrMemoryDirOverridden error that

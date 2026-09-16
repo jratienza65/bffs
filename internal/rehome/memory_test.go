@@ -1,7 +1,6 @@
 package rehome
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -212,12 +211,9 @@ func TestMergeMemoryTrusted(t *testing.T) {
 	}
 }
 
-func TestMergeMemoryMergeAndBadMode(t *testing.T) {
+func TestMergeMemoryBadMode(t *testing.T) {
 	src, _ := stageMemory(t)
 	dst := memDst(t)
-	if _, err := MergeMemory(dst, src, MemoryMerge, testID8, true, false, fixedNow); !errors.Is(err, ErrMemoryMergeLater) {
-		t.Errorf("merge err = %v", err)
-	}
 	if _, err := MergeMemory(dst, src, MemoryMode("fork"), testID8, true, false, fixedNow); err == nil || !strings.Contains(err.Error(), `"fork"`) {
 		t.Errorf("bad mode err = %v", err)
 	}
@@ -369,4 +365,164 @@ func TestMergeMemoryRefusesPlantedSymlink(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// merge mode, plan §9.9: absent → added, equal → unchanged, different →
+// side file, one index section per merge, logs file by file.
+func TestMergeMemoryMergeMatrix(t *testing.T) {
+	src, old := stageMemory(t)
+	write(t, filepath.Join(src, "extra.md"), "---\nname: Extra notes\ndescription: what extra is\n---\nbody\n")
+	write(t, filepath.Join(src, "heading.md"), "# Heading title\nbody\n")
+	chtimes(t, filepath.Join(src, "extra.md"), old)
+	dst := memDst(t)
+	// notes.md equal (already neutralised), the log differs, MEMORY.md
+	// present with its own lines.
+	write(t, filepath.Join(dst, "notes.md"), strings.Replace(notesSrc, "pinned: true", "pinned-imported: true", 1))
+	write(t, filepath.Join(dst, "logs", "2026", "09", "05", "abcd1234-title.md"), "mine\n")
+	write(t, filepath.Join(dst, "MEMORY.md"), "# Index\n- [mine](mine.md) - mine")
+	chtimes(t, filepath.Join(dst, "MEMORY.md"), old)
+
+	mv, err := MergeMemory(dst, src, MemoryMerge, testID8, true, false, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"extra.md", "heading.md"}; strings.Join(mv.Added, ",") != strings.Join(want, ",") {
+		t.Errorf("Added = %v, want %v", mv.Added, want)
+	}
+	if want := []string{"logs/2026/09/05/abcd1234-title.imported-" + testID8 + ".md"}; strings.Join(mv.Renamed, ",") != strings.Join(want, ",") {
+		t.Errorf("Renamed = %v, want %v", mv.Renamed, want)
+	}
+	if want := []string{"notes.md"}; strings.Join(mv.Unchanged, ",") != strings.Join(want, ",") {
+		t.Errorf("Unchanged = %v, want %v", mv.Unchanged, want)
+	}
+	if !mv.IndexAppended || len(mv.Warnings) != 0 {
+		t.Errorf("IndexAppended=%v Warnings=%v", mv.IndexAppended, mv.Warnings)
+	}
+	index := readFile(t, filepath.Join(dst, "MEMORY.md"))
+	wantIndex := "# Index\n- [mine](mine.md) - mine\n\n## Imported (bundle " + testID8 + ", 2026-08-24)\n- [Extra notes](extra.md) - what extra is\n- [Heading title](heading.md)\n"
+	if index != wantIndex {
+		t.Errorf("MEMORY.md =\n%s\nwant\n%s", index, wantIndex)
+	}
+	if mt := mtimeOf(t, filepath.Join(dst, "MEMORY.md")); !near(mt, fixedNow) {
+		t.Errorf("MEMORY.md mtime = %v, want now", mt)
+	}
+	if mt := mtimeOf(t, filepath.Join(dst, "extra.md")); !near(mt, old) {
+		t.Errorf("extra.md mtime = %v, want source %v", mt, old)
+	}
+	if readFile(t, filepath.Join(dst, "logs", "2026", "09", "05", "abcd1234-title.md")) != "mine\n" {
+		t.Error("existing log replaced")
+	}
+	if got := readFile(t, filepath.Join(dst, "logs", "2026", "09", "05", "abcd1234-title.imported-"+testID8+".md")); !strings.HasPrefix(got, "---\npinned-imported:") {
+		t.Errorf("side log = %q", got)
+	}
+	if len(mv.Remaining) == 0 {
+		t.Error("Remaining not scanned")
+	}
+	for _, name := range []string{"MEMORY.md" + tmpSuffix, "notes.md" + tmpSuffix} {
+		if exists(filepath.Join(dst, name)) {
+			t.Errorf("%s left behind", name)
+		}
+	}
+
+	// Same bundle again: nothing new, no second section.
+	mv, err = MergeMemory(dst, src, MemoryMerge, testID8, true, false, fixedNow.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mv.Added)+len(mv.Renamed) != 0 || mv.IndexAppended || len(mv.Unchanged) != 5 {
+		t.Errorf("second merge = %+v", mv)
+	}
+	if got := readFile(t, filepath.Join(dst, "MEMORY.md")); strings.Count(got, "## Imported") != 1 {
+		t.Errorf("index section doubled:\n%s", got)
+	}
+
+	// A changed source file whose side name is taken by other content is
+	// kept out, with a warning.
+	write(t, filepath.Join(src, "extra.md"), "changed\n")
+	write(t, filepath.Join(dst, "extra.imported-"+testID8+".md"), "someone else\n")
+	mv, err = MergeMemory(dst, src, MemoryMerge, testID8, true, false, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mv.Warnings) != 1 || !strings.Contains(mv.Warnings[0], "both exist and differ") {
+		t.Errorf("warnings = %v", mv.Warnings)
+	}
+	if readFile(t, filepath.Join(dst, "extra.imported-"+testID8+".md")) != "someone else\n" {
+		t.Error("side file overwritten")
+	}
+}
+
+func TestMergeMemoryMergeAbsentAndUnconfirmed(t *testing.T) {
+	src, _ := stageMemory(t)
+	// Absent destination: a fresh directory, index copied.
+	dst := memDst(t)
+	mv, err := MergeMemory(dst, src, MemoryMerge, testID8, true, false, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"logs/2026/09/05/abcd1234-title.md", "notes.md", "MEMORY.md"}; strings.Join(mv.Added, ",") != strings.Join(want, ",") {
+		t.Errorf("Added = %v", mv.Added)
+	}
+	// Unconfirmed into an existing directory: side files only, index
+	// untouched.
+	dst2 := memDst(t)
+	write(t, filepath.Join(dst2, "MEMORY.md"), "mine\n")
+	mv, err = MergeMemory(dst2, src, MemoryMerge, testID8, false, false, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"logs/2026/09/05/abcd1234-title.imported-" + testID8 + ".md", "notes.imported-" + testID8 + ".md"}; strings.Join(mv.Renamed, ",") != strings.Join(want, ",") {
+		t.Errorf("Renamed = %v", mv.Renamed)
+	}
+	if strings.Join(mv.Unchanged, ",") != "MEMORY.md" || mv.IndexAppended || readFile(t, filepath.Join(dst2, "MEMORY.md")) != "mine\n" {
+		t.Errorf("index touched: %+v", mv)
+	}
+	// Merge with a trusted source keeps pins.
+	dst3 := memDst(t)
+	write(t, filepath.Join(dst3, "MEMORY.md"), "mine\n")
+	if _, err := MergeMemory(dst3, src, MemoryMerge, testID8, true, true, fixedNow); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(dst3, "notes.md")); got != notesSrc {
+		t.Errorf("trusted merge changed the file: %q", got)
+	}
+}
+
+func TestMergeMemoryIndexSizeWarning(t *testing.T) {
+	src, _ := stageMemory(t)
+	dst := memDst(t)
+	write(t, filepath.Join(dst, "MEMORY.md"), strings.Repeat("- line\n", 199))
+	mv, err := MergeMemory(dst, src, MemoryMerge, testID8, true, false, fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mv.Warnings) != 1 || !strings.Contains(mv.Warnings[0], "MEMORY.md is 202 lines") || !strings.Contains(mv.Warnings[0], "first 200 lines") {
+		t.Errorf("warnings = %v", mv.Warnings)
+	}
+	// Under the limit: quiet.
+	dst2 := memDst(t)
+	write(t, filepath.Join(dst2, "MEMORY.md"), strings.Repeat("- line\n", 10))
+	mv, err = MergeMemory(dst2, src, MemoryMerge, testID8, true, false, fixedNow)
+	if err != nil || len(mv.Warnings) != 0 {
+		t.Errorf("warnings = %v, err = %v", mv.Warnings, err)
+	}
+}
+
+func TestTopicTitle(t *testing.T) {
+	cases := []struct {
+		data, rel, title, desc string
+	}{
+		{"---\nname: Shim probe\ndescription: how the shim is found\n---\n# other\n", "x.md", "Shim probe", "how the shim is found"},
+		{"---\nname: \"quoted\"\n---\n", "x.md", "quoted", ""},
+		{"# First heading\n\ntext\n", "x.md", "First heading", ""},
+		{"no heading\n", "topic-name.md", "topic-name", ""},
+		{"---\ntype: feedback\n---\n# Late heading\n", "x.md", "Late heading", ""},
+		{"---\nname: a\x1b[2Jb\n---\n", "x.md", "ab", ""},
+	}
+	for _, c := range cases {
+		title, desc := topicTitle([]byte(c.data), c.rel)
+		if title != c.title || desc != c.desc {
+			t.Errorf("topicTitle(%q) = %q, %q; want %q, %q", c.data, title, desc, c.title, c.desc)
+		}
+	}
 }

@@ -93,11 +93,17 @@ type tmpEntry struct {
 // Sidecars are handled before transcripts, so a session becomes visible
 // last, the way the commit works. Nothing else is ever deleted.
 //
-// stagingDir (may be "") is consulted only for its journal.json: when the
-// journal names the session and its Origin still exists, the transcript
-// tmp is a copy of a source that is still intact — possibly a truncated
-// one — so it is kept and listed rather than restored; the re-run of the
-// import writes it again. Staging itself is never cleaned here.
+// stagingDir (may be "") is consulted only for its journal.json. For an
+// import, whose Origin is a path inside staging: when the journal names
+// the session and its Origin still exists, the transcript tmp is a copy of
+// a source that is still intact — possibly a truncated one — so it is kept
+// and listed rather than restored; the re-run of the import writes it
+// again. For an in-place rehome (Apply), whose Origin is the transcript's
+// old path inside root: while that file still exists the session has not
+// moved, so a sidecar the interrupted run had already renamed — the
+// original, not a copy — goes back beside it, whether it sits at
+// "<new>/<sid>.bffs-tmp/" or already at "<new>/<sid>/"; it is never
+// removed. Staging itself is never cleaned here.
 //
 // restored lists the final path of every entry renamed into place and the
 // path of every redundant sidecar tmp removed; kept lists every tmp entry
@@ -111,6 +117,14 @@ func Recover(root transcripts.Root, stagingDir string) (restored, kept []string,
 		return nil, nil, fmt.Errorf("recover: read %q: %w", root.Dir, err)
 	}
 	journal, hasJournal := readJournal(stagingDir)
+	// homeSlug is set for an interrupted in-place rehome whose transcript
+	// is still at its old path: the entry the session's sidecar returns to.
+	homeSlug := ""
+	if hasJournal && journal.Step != StepDone && isUUID(journal.SessionID) && insideDir(journal.Origin, root.Dir) {
+		if _, err := os.Lstat(journal.Origin); err == nil {
+			homeSlug = filepath.Base(filepath.Dir(journal.Origin))
+		}
+	}
 
 	// Pass 1: index every <sid>.jsonl in the root and collect tmp entries.
 	present := map[string]bool{}
@@ -135,7 +149,15 @@ func Recover(root transcripts.Root, stagingDir string) (restored, kept []string,
 			}
 		}
 	}
-	if len(tmps) == 0 {
+	// A rehome interrupted after its sidecar had reached the target
+	// entry, before the transcript followed: the sidecar goes back.
+	var back [2]string // target-entry path → old-entry path, relative
+	if homeSlug != "" && journal.Target != "" {
+		if tSlug := filepath.Base(filepath.Dir(journal.Target)); tSlug != homeSlug && !transcripts.IsReserved(tSlug) {
+			back = [2]string{filepath.Join(tSlug, journal.SessionID), filepath.Join(homeSlug, journal.SessionID)}
+		}
+	}
+	if len(tmps) == 0 && back[0] == "" {
 		return nil, nil, nil
 	}
 
@@ -144,6 +166,19 @@ func Recover(root transcripts.Root, stagingDir string) (restored, kept []string,
 		return nil, nil, fmt.Errorf("recover: open %q: %w", root.Dir, err)
 	}
 	defer dest.Close()
+
+	if back[0] != "" {
+		if info, err := dest.Lstat(back[0]); err == nil && info.IsDir() {
+			if _, err := dest.Lstat(back[1]); errors.Is(err, fs.ErrNotExist) {
+				if err := dest.Rename(back[0], back[1]); err != nil {
+					return nil, nil, fmt.Errorf("recover: restore %q: %w", filepath.Join(root.Dir, back[0]), err)
+				}
+				restored = append(restored, filepath.Join(root.Dir, back[1]))
+			} else {
+				kept = append(kept, filepath.Join(root.Dir, back[0]))
+			}
+		}
+	}
 
 	// Pass 2: sidecars first, then transcripts.
 	sort.SliceStable(tmps, func(i, j int) bool {
@@ -158,6 +193,20 @@ func Recover(root transcripts.Root, stagingDir string) (restored, kept []string,
 		finalRel := filepath.Join(t.slug, t.target)
 		finalAbs := filepath.Join(root.Dir, finalRel)
 		if t.isDir {
+			if homeSlug != "" && t.sid == journal.SessionID {
+				// The in-place rehome renamed the original here; it goes
+				// back beside its transcript and is never removed.
+				backRel := filepath.Join(homeSlug, t.target)
+				if _, err := dest.Lstat(backRel); err == nil {
+					kept = append(kept, tmpAbs)
+					continue
+				}
+				if err := dest.Rename(tmpRel, backRel); err != nil {
+					return restored, kept, fmt.Errorf("recover: restore %q: %w", tmpAbs, err)
+				}
+				restored = append(restored, filepath.Join(root.Dir, backRel))
+				continue
+			}
 			if _, err := dest.Lstat(finalRel); err == nil {
 				if err := dest.RemoveAll(tmpRel); err != nil {
 					return restored, kept, fmt.Errorf("recover: remove %q: %w", tmpAbs, err)
@@ -194,6 +243,16 @@ func Recover(root transcripts.Root, stagingDir string) (restored, kept []string,
 	sort.Strings(restored)
 	sort.Strings(kept)
 	return restored, kept, nil
+}
+
+// insideDir reports whether p lies strictly below dir (both cleaned; no
+// symlink resolution — a journal spells Origin the way the root did).
+func insideDir(p, dir string) bool {
+	if p == "" || dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(p))
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // classifyTmp recognises "<sid>.jsonl.bffs-tmp[-<rand>]" (a regular file)

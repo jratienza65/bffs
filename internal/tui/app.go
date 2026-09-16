@@ -179,6 +179,9 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return a, a.handleKey(msg)
+
+	case tea.MouseMsg:
+		return a, a.handleMouse(msg)
 	}
 	// Data messages: the workspace's and the overlay's are disjoint
 	// types, so both see everything else.
@@ -235,6 +238,26 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	// clears it (an action that has something to say sets a new one).
 	a.status, a.statusErr = "", false
 	return a.ws.handleKey(msg)
+}
+
+// handleMouse routes a mouse event: to the overlay when one is open
+// (in its own content coordinates), else to the workspace. The mouse
+// only ever accelerates what the keyboard can already do.
+func (a *app) handleMouse(msg tea.MouseMsg) tea.Cmd {
+	m := msg.Mouse()
+	y := m.Y - 1 // the header line
+	if s := a.top(); s != nil {
+		h, ok := s.(mouser)
+		if !ok {
+			return nil
+		}
+		x := m.X - (1 + padX)
+		if side := a.ws.sideWidth(); side > 0 && a.ws.mainWidth() > 0 {
+			x = m.X - (side + 2 + paneGap + 1 + padX)
+		}
+		return h.mouse(msg, x, y-1) // the pane's top border
+	}
+	return a.ws.mouse(msg, y)
 }
 
 // overlayHelpGroups lists an overlay's keys and the globals.
@@ -314,6 +337,10 @@ func (a *app) View() tea.View {
 
 	v := tea.NewView(strings.Join([]string{header, body, statusLine, truncate(a.helpView(), a.width)}, "\n"))
 	v.AltScreen = true
+	// Clicking focuses a panel and picks a row, the wheel scrolls what
+	// is under the pointer; hold shift for the terminal's own text
+	// selection while this is on.
+	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = "bffs"
 	return v
 }

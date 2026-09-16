@@ -933,6 +933,15 @@ func (s *receiveScreen) summaryLines() []string {
 	return lines
 }
 
+// mouse scrolls the confirmation summary; every other state is
+// read-only or driven by a prompt.
+func (s *receiveScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
+	if s.state == recvConfirm {
+		s.box.mouse(msg)
+	}
+	return nil
+}
+
 func (s *receiveScreen) View(width, height int) string {
 	head := styleFaint.Render(truncate("receive into "+shortRootLabel(s.root)+"  ("+shortPath(s.root.Dir)+")", width))
 	if s.file != "" {

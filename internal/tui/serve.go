@@ -433,6 +433,15 @@ func (s *serveScreen) banner(width int) []string {
 	return lines
 }
 
+// mouse scrolls the confirmation summary; every other state is
+// read-only or driven by a prompt.
+func (s *serveScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
+	if s.state == serveConfirm {
+		s.box.mouse(msg)
+	}
+	return nil
+}
+
 func (s *serveScreen) View(width, height int) string {
 	head := styleFaint.Render(truncate("send "+s.tgt.what()+"  from "+shortRootLabel(s.tgt.root)+" over the LAN", width))
 	switch s.state {

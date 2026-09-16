@@ -29,6 +29,13 @@ type loader interface {
 	loading() bool
 }
 
+// mouser is implemented by an overlay that answers mouse events. x and
+// y are relative to its own content area (the inside of the main pane),
+// so a screen never needs to know where the frame drew it.
+type mouser interface {
+	mouse(msg tea.MouseMsg, x, y int) tea.Cmd
+}
+
 // running is implemented by an action screen while its long operation
 // runs: the app then blocks navigation and hands it every key, ctrl+c
 // included, so esc cancels the operation and q asks before quitting.

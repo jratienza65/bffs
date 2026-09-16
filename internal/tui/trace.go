@@ -9,10 +9,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// BFFS_DEBUG names a file the browser appends one line to per key and
-// per mouse event, holding the state the event left behind: the mode,
-// the focused panel, the tab, each panel's cursor and view offset, the
-// overlay on top and what the preview is showing. The browser owns the
+// BFFS_DEBUG names a file the browser appends one line to per key, per
+// mouse event and per overlay change, holding the state that event left
+// behind: the mode, the focused panel, the tab, each panel's cursor and
+// view offset, the overlay on top and what the preview is showing. An
+// overlay is pushed by a command rather than by the key itself, which
+// is why the push is a line of its own — the key's line still shows the
+// stack as the key found it. The browser owns the
 // terminal, so a log line is the only way to see what a key did; this
 // turns "the wheel does nothing in the wizard" into a sequence anyone
 // can replay.

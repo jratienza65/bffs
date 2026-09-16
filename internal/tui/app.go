@@ -135,13 +135,17 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case pushScreenMsg:
-		return a, a.push(msg.screen)
+		cmd := a.push(msg.screen)
+		a.trace("push")
+		return a, cmd
 
 	case replaceScreenMsg:
 		if len(a.stack) > 0 {
 			a.stack = a.stack[:len(a.stack)-1]
 		}
-		return a, a.push(msg.screen)
+		cmd := a.push(msg.screen)
+		a.trace("replace")
+		return a, cmd
 
 	case popScreenMsg:
 		if len(a.stack) == 0 {
@@ -153,6 +157,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.refresh {
 			cmd = tea.Batch(cmd, a.ws.Update(refreshMsg{}))
 		}
+		a.trace("pop")
 		return a, cmd
 
 	case menuChoiceMsg:

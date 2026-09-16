@@ -44,6 +44,7 @@ var (
 	exportWithTasks     bool
 	exportOut           string
 	exportServe         bool
+	exportLongCode      bool
 	exportPort          int
 	exportTTL           time.Duration
 	exportIface         string
@@ -89,7 +90,8 @@ this side shows an address and a pairing code, the other side runs
 over TLS once both sides have proven they know it. Only on-link peers are
 accepted (no VPN or Tailscale addresses; --allow-routed relaxes the on-link
 test), the code is valid for --ttl (10m, at most 30m) and three wrong codes
-end the serve. Everything is printed on stderr.
+end the serve; --long-code shows a 12-symbol code (60 bits) instead of 8.
+Everything is printed on stderr.
 
 Firewall notes: macOS asks once per binary whether bffs may accept
 connections (an ad-hoc-signed build asks again after every rebuild:
@@ -107,6 +109,9 @@ When no inbound port can be opened, use the ssh pipe above instead.`,
 		}
 		if !exportServe && !cmd.Flags().Changed("out") {
 			return errors.New(`--out is required: a .bffs file, "-" for stdout, or "auto" for bffs-<host>-<date>.bffs in the current directory (or --serve for another machine on the LAN)`)
+		}
+		if exportLongCode && !exportServe {
+			return errors.New("--long-code only applies with --serve")
 		}
 		since, err := parseSince(exportSince)
 		if err != nil {
@@ -134,6 +139,7 @@ When no inbound port can be opened, use the ssh pipe above instead.`,
 			},
 			Out:           exportOut,
 			Serve:         exportServe,
+			LongCode:      exportLongCode,
 			Port:          exportPort,
 			TTL:           exportTTL,
 			Iface:         exportIface,
@@ -170,6 +176,7 @@ func init() {
 	f.BoolVar(&exportWithTasks, "with-tasks", false, "include task lists (tasks/<sid>/)")
 	f.StringVar(&exportOut, "out", "", `output file, "-" for stdout, or "auto" for bffs-<host>-<date>.bffs in the current directory`)
 	f.BoolVar(&exportServe, "serve", false, "offer the bundle to one other machine on the local network (shows an address and a pairing code)")
+	f.BoolVar(&exportLongCode, "long-code", false, "with --serve, show a 12-symbol pairing code (60 bits) instead of the 8-symbol default")
 	f.IntVar(&exportPort, "port", servePortDefault, "port to listen on with --serve (0 = kernel-chosen)")
 	f.DurationVar(&exportTTL, "ttl", serveTTLDefault, "how long the pairing code stays valid with --serve (at most 30m)")
 	f.StringVar(&exportIface, "iface", "", "listen on this interface only with --serve (e.g. en0)")
@@ -206,6 +213,7 @@ type exportRequest struct {
 	// --serve (plan §8): the listeners, the pairing window, what counts
 	// as the local network, and how this machine names itself in auth-ok.
 	Serve         bool
+	LongCode      bool // a 12-symbol (60-bit) pairing code instead of 8
 	Port          int
 	TTL           time.Duration
 	Iface         string
@@ -647,6 +655,13 @@ func writeBundleFile(ctx context.Context, path string, m *bundle.Manifest, src b
 	if err := tmp.Close(); err != nil {
 		return 0, err
 	}
+	// The path was free when the flags were checked; the hashing pre-pass
+	// and the confirmation may have taken minutes, and a rename would
+	// replace whatever appeared meanwhile — an existing file is never
+	// overwritten.
+	if _, err := os.Lstat(path); err == nil {
+		return 0, fmt.Errorf("%s appeared while the bundle was being written; choose another name", short(path))
+	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		done = true
@@ -710,12 +725,13 @@ const (
 )
 
 // Injection seams for the loopback end-to-end test: how a serve binds,
-// which local addresses it sees and which code it shows. Production uses
-// the real ones (a nil Listen is net.Listen inside transfer).
+// which local addresses it sees and which code it shows (given the symbol
+// count --long-code asks for). Production uses the real ones (a nil Listen
+// is net.Listen inside transfer).
 var (
 	serveListen   transfer.Listener
 	serveLocal    = transfer.LANAddrs
-	serveGenerate = transfer.GenerateCode
+	serveGenerate = transfer.GenerateCodeN
 )
 
 // serveSetup is what --serve needs before any selection work: the
@@ -774,7 +790,11 @@ func serveExport(ctx context.Context, cmd *cobra.Command, req exportRequest, set
 	if err != nil {
 		return fmt.Errorf("marshal manifest: %w", err)
 	}
-	code, err := serveGenerate()
+	symbols := transfer.ShortCodeSymbols
+	if req.LongCode {
+		symbols = transfer.LongCodeSymbols
+	}
+	code, err := serveGenerate(symbols)
 	if err != nil {
 		return fmt.Errorf("pairing code: %w", err)
 	}

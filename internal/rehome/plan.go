@@ -27,8 +27,13 @@ import (
 // of every mapped directory; ForceStamp stamps a transcript whose last
 // line is incomplete. Mtime is the retention policy Apply restores
 // transcript mtimes under (max(original, TranscriptFloor)); OldHome and
-// NewHome are an extra rewrite pair for memory. Now is the clock (zero =
-// time.Now()); DryRun makes Apply write nothing.
+// NewHome are an extra rewrite pair for memory and file-history paths.
+// RewriteCwd and RewriteFileHistory (both off by default; they change
+// historical records, plan §9.8) make Apply run RewriteTranscript over
+// every moved transcript: the top-level cwd of records that equal the old
+// directory becomes the new one, and the absolute paths in file-history
+// records are re-prefixed with the plan's mappings plus OldHome→NewHome.
+// Now is the clock (zero = time.Now()); DryRun makes Apply write nothing.
 //
 // CfgDir is the bffs home (import records for BundleID, and the parent of
 // the default StagingDir); StagingDir is where Apply journals under
@@ -49,6 +54,9 @@ type Options struct {
 	NewHome        string
 	Now            time.Time
 	DryRun         bool
+
+	RewriteCwd         bool
+	RewriteFileHistory bool
 
 	CfgDir     string
 	StagingDir string

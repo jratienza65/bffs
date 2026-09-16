@@ -561,3 +561,61 @@ func TestRunRehomeRefusesWithoutLiveness(t *testing.T) {
 		t.Error("moved without a liveness answer")
 	}
 }
+
+func TestRunRehomeRewriteFlags(t *testing.T) {
+	for _, name := range []string{"rewrite-cwd", "rewrite-file-history"} {
+		fl := rehomeCmd.Flags().Lookup(name)
+		if fl == nil || fl.DefValue != "false" || !strings.Contains(fl.Usage, "historical records") {
+			t.Errorf("--%s: %+v", name, fl)
+		}
+	}
+	cfgDir, claudeDir, old, nw := rehomePool(t)
+	oldSlug, _ := transcripts.Slug(old)
+	newSlug, _ := transcripts.Slug(nw)
+	tr := filepath.Join(claudeDir, "projects", oldSlug, rehomeSidOld+".jsonl")
+	data, err := os.ReadFile(tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta, _ := json.Marshal(map[string]any{"type": "file-history-delta", "messageId": "m", "trackingPath": old + "/x.txt", "backup": map[string]any{"backupFileName": "x@v1", "version": 1, "realParentDir": old}})
+	nested, _ := json.Marshal(map[string]any{"type": "assistant", "cwd": old + "/sub", "message": map[string]any{"content": []any{map[string]any{"input": map[string]any{"cwd": old}}}}})
+	writeTestFile(t, tr, string(data)+string(delta)+"\n"+string(nested)+"\n")
+	if err := os.Chtimes(tr, rehomeMtime, rehomeMtime); err != nil {
+		t.Fatal(err)
+	}
+
+	req := rehomeRequest{Bundle: "6f1e2c0a", Maps: []string{old + "=" + nw}, ClaudeDir: claudeDir, Cwd: t.TempDir(), Now: time.Now(), Yes: true, RewriteCwd: true, RewriteFileHistory: true}
+	c, pr, out := newTestCmd("")
+	if err := runRehome(c, cfgDir, pr, req, false); err != nil {
+		t.Fatalf("run: %v\n%s", err, out.String())
+	}
+	moved := filepath.Join(claudeDir, "projects", newSlug, rehomeSidOld+".jsonl")
+	got, err := os.ReadFile(moved)
+	if err != nil {
+		t.Fatalf("transcript not moved: %v\n%s", err, out.String())
+	}
+	lines := strings.Split(strings.TrimSuffix(string(got), "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("lines = %d:\n%s", len(lines), got)
+	}
+	newQ, _ := json.Marshal(nw)
+	oldQ, _ := json.Marshal(old)
+	if !strings.Contains(lines[0], `"cwd":`+string(newQ)) || strings.Contains(lines[0], string(oldQ)) {
+		t.Errorf("top-level cwd not rewritten: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"trackingPath":`+strings.TrimSuffix(string(newQ), `"`)+`/x.txt"`) || !strings.Contains(lines[1], `"realParentDir":`+string(newQ)) {
+		t.Errorf("file-history paths not rewritten: %s", lines[1])
+	}
+	if lines[2] != string(nested) {
+		t.Errorf("record with another cwd and a nested cwd changed:\n got %s\nwant %s", lines[2], nested)
+	}
+	if lines[3] != strings.TrimSuffix(string(rehome.RelocatedRecord(rehomeSidOld, nw)), "\n") {
+		t.Errorf("stamp = %s", lines[3])
+	}
+	if st, err := os.Stat(moved); err != nil || !st.ModTime().Truncate(time.Second).Equal(rehomeMtime) {
+		t.Errorf("mtime = %v, %v; want %v", st.ModTime(), err, rehomeMtime)
+	}
+	if want := "rewrote cwd in 1 record and 2 file-history paths across 1 transcript"; !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out.String())
+	}
+}

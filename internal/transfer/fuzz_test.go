@@ -19,7 +19,7 @@ func FuzzParseCode(f *testing.F) {
 			return
 		}
 		d := c.Display()
-		if len(d) != 9 || d[4] != '-' {
+		if (len(d) != 9 && len(d) != 14) || d[4] != '-' || (len(d) == 14 && d[9] != '-') {
 			t.Fatalf("ParseCode(%q).Display() = %q", s, d)
 		}
 		for i := 0; i < len(c.s); i++ {

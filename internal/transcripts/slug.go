@@ -47,9 +47,11 @@ var (
 	// than one session.
 	ErrAmbiguousSession = errors.New("ambiguous session id")
 
-	// ErrMemoryDirOverridden is returned by MemoryDirFor when the environment
-	// or a settings file redirects Claude's auto-memory directory somewhere
-	// bffs does not model.
+	// ErrMemoryDirOverridden is wrapped by MemoryDirFor when
+	// EnvRemoteMemoryDir redirects Claude's auto-memory tree to a layout
+	// whose slug bffs has not verified. Since M10 a settings
+	// autoMemoryDirectory and EnvCoworkMemoryPathOverride are resolved
+	// instead of refused.
 	ErrMemoryDirOverridden = errors.New("auto-memory directory is overridden")
 )
 

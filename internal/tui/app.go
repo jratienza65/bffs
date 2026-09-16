@@ -28,6 +28,7 @@ type app struct {
 
 	status     string
 	statusKind noteKind
+	keyAt      time.Time // when the last key arrived (momentum, below)
 	statusAt   time.Time
 	toast      toast
 	toastSeq   int
@@ -219,6 +220,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 
 	case tea.KeyPressMsg:
+		a.keyAt = time.Now()
 		cmd := a.handleKey(msg)
 		a.trace("key:" + msg.String())
 		return a, cmd
@@ -357,8 +359,24 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // handleMouse routes a mouse event: to the overlay when one is open
 // (in its own content coordinates), else to the workspace. The mouse
 // only ever accelerates what the keyboard can already do.
+// momentumWindow is how long after a key press a wheel event is taken
+// for inertia rather than intent. It is a variable because the model
+// tests drive a key and a wheel event in the same microsecond, which no
+// hand can do; they set it to zero and the test that is about the
+// window sets it back.
+var momentumWindow = 350 * time.Millisecond
+
 func (a *app) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	m := msg.Mouse()
+	// A touchpad keeps sending wheel events after the fingers lift —
+	// macOS momentum runs for about a second — and they are already on
+	// their way when a key is pressed. Without this, esc could not
+	// interrupt a scroll: the keystroke was handled and then the tail
+	// of the flick carried on scrolling. A key stops the inertia, the
+	// way it does in every other scrolling program.
+	if _, ok := msg.(tea.MouseWheelMsg); ok && time.Since(a.keyAt) < momentumWindow {
+		return nil
+	}
 	y := m.Y - 1 // the header line
 	if s := a.top(); s != nil {
 		h, ok := s.(mouser)

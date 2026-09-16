@@ -127,6 +127,9 @@ func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("BFFS_THEME", "")
 	goldenTZ(t)
+	prevWindow := momentumWindow
+	momentumWindow = 0
+	t.Cleanup(func() { momentumWindow = prevWindow })
 	prevHost := osHostname
 	osHostname = func() (string, error) { return "mac-a", nil }
 	t.Cleanup(func() { osHostname = prevHost })

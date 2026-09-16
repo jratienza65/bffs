@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -162,5 +163,43 @@ func TestCopiedNote(t *testing.T) {
 	}
 	if got := copiedNote("a\nb\nc"); got != "copied 3 lines" {
 		t.Errorf("copiedNote = %q", got)
+	}
+}
+
+// A touchpad keeps sending wheel events after the fingers lift, and
+// they are already on their way when a key is pressed — so a key has to
+// stop the inertia, or esc cannot interrupt a scroll.
+func TestAKeyStopsScrollMomentum(t *testing.T) {
+	a := goldenApp(t, 120, 32, func(a *app) { _ = a.ws.setFocus(panelItems) })
+	prev := momentumWindow
+	momentumWindow = 350 * time.Millisecond
+	t.Cleanup(func() { momentumWindow = prev })
+
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i)
+	}
+	a.ws.vp.SetContentLines(lines)
+	x, y, _ := previewSpan(a)
+	wheel := tea.MouseWheelMsg{X: x + 1, Y: y + 2, Button: tea.MouseWheelDown}
+
+	a.Update(wheel)
+	if a.ws.vp.YOffset() == 0 {
+		t.Fatal("the wheel did not scroll to begin with")
+	}
+	// esc, then the tail of the same flick: it must not move anything.
+	a.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	at := a.ws.vp.YOffset()
+	for range 5 {
+		a.Update(wheel)
+	}
+	if a.ws.vp.YOffset() != at {
+		t.Errorf("momentum kept scrolling after a key: %d → %d", at, a.ws.vp.YOffset())
+	}
+	// Once the window has passed, the wheel is intent again.
+	a.keyAt = time.Now().Add(-2 * momentumWindow)
+	a.Update(wheel)
+	if a.ws.vp.YOffset() == at {
+		t.Errorf("the wheel stayed dead after the momentum window: %d", a.ws.vp.YOffset())
 	}
 }

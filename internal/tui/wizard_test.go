@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/jratienza65/bffs/internal/bundle"
 	"github.com/jratienza65/bffs/internal/transcripts"
@@ -325,4 +328,56 @@ func TestExportWholePoolFromAccounts(t *testing.T) {
 	h.keys("esc")
 	h.keys("x")
 	wantAll(t, h.view(), "export every project of shared pool: work with its memory to a file", "send every project", "copy every project")
+}
+
+// The wheel scrolls the text of the overlays drawn in the preview pane
+// — the wizard's checklist and the action menu — and never moves what
+// is selected there.
+func TestOverlayWheelScrollsTextOnly(t *testing.T) {
+	f := newFixture(t)
+	f.memory()
+	for i := 0; i < 12; i++ {
+		f.transcript(f.slug, fmt.Sprintf("%08d-1111-4222-8333-444455556666", i+1), f.project, fmt.Sprintf("prompt %d", i), fixedNow.Add(-time.Duration(i+1)*time.Hour))
+	}
+	h := f.start("sessions")
+	h.send(tea.WindowSizeMsg{Width: 400, Height: 20}) // the checklist overflows
+	h.keys("w", "enter", "enter")
+	sc, ok := h.a.top().(*wizardScreen)
+	if !ok {
+		t.Fatalf("w should reach the checklist, got %T", h.a.top())
+	}
+	cursor, offset := sc.cursor, sc.offset
+	h.send(tea.MouseWheelMsg{X: 200, Y: 8, Button: tea.MouseWheelDown})
+	if sc.offset <= offset {
+		t.Errorf("the wheel should scroll the checklist: %d → %d", offset, sc.offset)
+	}
+	if sc.cursor != cursor {
+		t.Errorf("the wheel must not move the selection: %d → %d", cursor, sc.cursor)
+	}
+	// The keyboard still drags the view along with the cursor.
+	h.keys("down", "down")
+	if sc.cursor != cursor+2 {
+		t.Errorf("down should move the cursor, got %d", sc.cursor)
+	}
+	// Scrolling up past the top stops there, selection intact.
+	for i := 0; i < 20; i++ {
+		h.send(tea.MouseWheelMsg{X: 200, Y: 8, Button: tea.MouseWheelUp})
+	}
+	if sc.offset != 0 || sc.cursor != cursor+2 {
+		t.Errorf("offset=%d cursor=%d, want 0 and %d", sc.offset, sc.cursor, cursor+2)
+	}
+	h.keys("esc", "esc", "esc")
+
+	// The menu behaves the same way.
+	h.keys("x")
+	m, ok := h.a.top().(*menuScreen)
+	if !ok {
+		t.Fatalf("x should open the menu, got %T", h.a.top())
+	}
+	h.view() // one render, so the menu knows how many rows it has
+	before := m.cursor
+	h.send(tea.MouseWheelMsg{X: 200, Y: 6, Button: tea.MouseWheelDown})
+	if m.cursor != before {
+		t.Errorf("the wheel must not move the menu's selection: %d → %d", before, m.cursor)
+	}
 }

@@ -267,6 +267,7 @@ type transcriptScreen struct {
 	svc       *services
 	session   transcripts.Session
 	vp        viewport.Model
+	drag      dragSelect
 	busy      bool
 	records   int
 	hidden    int
@@ -314,8 +315,18 @@ func (s *transcriptScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		s.vp.SetContentLines(msg.lines)
 		return s, nil
+	case dragScrollMsg:
+		return s, s.drag.step(&s.vp, msg)
 	case tea.KeyPressMsg:
-		if key.Matches(msg, keys.Done) {
+		switch {
+		case key.Matches(msg, keys.Yank) && !s.drag.sel.empty():
+			return s, s.drag.copy(&s.vp)
+		case key.Matches(msg, keys.Done):
+			// esc lets go of a selection before it closes the reader.
+			if !s.drag.sel.empty() && msg.String() == "esc" {
+				s.drag.clear()
+				return s, nil
+			}
 			return s, popScreen()
 		}
 	}
@@ -324,7 +335,9 @@ func (s *transcriptScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, cmd
 }
 
-func (s *transcriptScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd { return vpMouse(&s.vp, msg) }
+func (s *transcriptScreen) mouse(msg tea.MouseMsg, x, y int) tea.Cmd {
+	return vpSelectMouse(&s.vp, &s.drag, msg, x, y-1) // the head line
+}
 
 func (s *transcriptScreen) View(width, height int) string {
 	if s.busy {
@@ -340,5 +353,5 @@ func (s *transcriptScreen) View(width, height int) string {
 	if s.err != nil {
 		head += "  read error: " + transcripts.Sanitize(s.err.Error())
 	}
-	return styleFaint.Render(truncate(head, width)) + "\n" + s.vp.View()
+	return styleFaint.Render(truncate(head, width)) + "\n" + paintSelection(s.vp.View(), &s.vp, s.drag.sel)
 }

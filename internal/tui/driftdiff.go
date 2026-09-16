@@ -34,6 +34,7 @@ type driftScreen struct {
 	key   string
 	load  func() ([]string, error)
 	vp    viewport.Model
+	drag  dragSelect
 	busy  bool
 	err   error
 }
@@ -78,8 +79,17 @@ func (s *driftScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.busy, s.err = false, msg.err
 		s.vp.SetContentLines(msg.lines)
 		return s, nil
+	case dragScrollMsg:
+		return s, s.drag.step(&s.vp, msg)
 	case tea.KeyPressMsg:
-		if key.Matches(msg, keys.Done) {
+		switch {
+		case key.Matches(msg, keys.Yank) && !s.drag.sel.empty():
+			return s, s.drag.copy(&s.vp)
+		case key.Matches(msg, keys.Done):
+			if !s.drag.sel.empty() && msg.String() == "esc" {
+				s.drag.clear()
+				return s, nil
+			}
 			return s, popScreen()
 		}
 	}
@@ -88,7 +98,9 @@ func (s *driftScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, cmd
 }
 
-func (s *driftScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd { return vpMouse(&s.vp, msg) }
+func (s *driftScreen) mouse(msg tea.MouseMsg, x, y int) tea.Cmd {
+	return vpSelectMouse(&s.vp, &s.drag, msg, x, y)
+}
 
 func (s *driftScreen) View(width, height int) string {
 	if s.busy {
@@ -96,7 +108,7 @@ func (s *driftScreen) View(width, height int) string {
 	}
 	s.vp.SetWidth(width)
 	s.vp.SetHeight(max(0, height-1))
-	body := s.vp.View()
+	body := paintSelection(s.vp.View(), &s.vp, s.drag.sel)
 	if s.err != nil {
 		body = styleError.Render(truncate(transcripts.Sanitize(s.err.Error()), width))
 	}

@@ -97,6 +97,7 @@ type workspace struct {
 	memDirFor    string
 
 	vp          viewport.Model
+	drag        dragSelect // the preview's own text selection (selection.go)
 	previewKey  string
 	previewGen  int
 	previewBusy bool
@@ -753,6 +754,9 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 	case refreshMsg:
 		return ws.refresh()
 
+	case dragScrollMsg:
+		return ws.drag.step(&ws.vp, msg)
+
 	case resumeDoneMsg:
 		note := status("claude exited; listing again")
 		if msg.err != nil {
@@ -892,9 +896,20 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if ws.mainFocus {
 		switch {
 		case key.Matches(msg, keys.Back):
+			// esc lets go of a selection first: leaving the preview
+			// with text still painted reads as a stuck highlight.
+			if !ws.drag.sel.empty() {
+				ws.drag.clear()
+				return nil
+			}
 			ws.mainFocus = false
 			ws.layout()
 			return nil
+		case key.Matches(msg, keys.Yank):
+			if !ws.drag.sel.empty() {
+				return ws.drag.copy(&ws.vp)
+			}
+			return ws.yank()
 		case key.Matches(msg, keys.Open):
 			if r := ws.selectedSession(); r != nil {
 				return pushScreen(newTranscriptScreen(ws.svc, r.s))
@@ -946,6 +961,9 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, keys.Theme):
 		return ws.cycleTheme()
 	case key.Matches(msg, keys.Yank):
+		if !ws.drag.sel.empty() {
+			return ws.drag.copy(&ws.vp)
+		}
 		return ws.yank()
 	case key.Matches(msg, keys.Wizard):
 		return ws.openWizard()
@@ -1489,14 +1507,14 @@ func padded(l string, inner int) string {
 // preview.
 func (ws *workspace) View(width, height int, main []string, mainTitle string, mainFocused bool) string {
 	if width != ws.width || height != ws.height {
-		ws.setSize(width, height)
+		_ = ws.setSize(width, height)
 	}
 	if ws.tooSmall() {
 		return strings.Join(tooSmallLines(width, height), "\n")
 	}
 	side, mi, h := ws.sideWidth(), ws.mainWidth(), ws.bodyHeight()
 	if main == nil {
-		main = strings.Split(ws.vp.View(), "\n")
+		main = strings.Split(paintSelection(ws.vp.View(), &ws.vp, ws.drag.sel), "\n")
 		mainTitle, mainFocused = ws.previewTitle(), ws.mainFocus
 	} else if mi == 0 {
 		// An overlay always needs the main pane: draw it alone.
@@ -1609,6 +1627,17 @@ func (ws *workspace) hitTest(x, y int) hit {
 	return hit{none: true}
 }
 
+// previewPoint maps a frame position to the preview's content
+// coordinates — the same arithmetic the frame is drawn with, which is
+// what makes the selection land on the cells the reader pointed at.
+func (ws *workspace) previewPoint(x, y int) (int, int) {
+	left := 1 + padX
+	if side := ws.sideWidth(); side > 0 && ws.mainWidth() > 0 {
+		left = side + 2 + paneGap + 1 + padX
+	}
+	return x - left, y - 1 // the pane's top border
+}
+
 // rowIndex is the list index a body line of a panel shows, or -1: the
 // focused panel draws its status row first, an unfocused one starts at
 // its own cursor.
@@ -1636,6 +1665,20 @@ const wheelLines = 3
 // Every action stays reachable from the keyboard.
 func (ws *workspace) mouse(msg tea.MouseMsg, y int) tea.Cmd {
 	m := msg.Mouse()
+	// A held drag owns every event until the button lifts, including
+	// the ones outside the frame: that is how a selection runs past the
+	// edge of the pane it started in.
+	if ws.drag.sel.dragging {
+		switch e := msg.(type) {
+		case tea.MouseMotionMsg:
+			if e.Button == tea.MouseLeft {
+				x, py := ws.previewPoint(m.X, y)
+				return ws.drag.motion(&ws.vp, x, py)
+			}
+		case tea.MouseReleaseMsg:
+			return ws.drag.release(&ws.vp)
+		}
+	}
 	h := ws.hitTest(m.X, y)
 	if h.none {
 		return nil
@@ -1663,6 +1706,9 @@ func (ws *workspace) mouse(msg tea.MouseMsg, y int) tea.Cmd {
 		ws.panels[h.panel].scroll(n)
 		return ws.requestTitles()
 
+	case tea.MouseReleaseMsg:
+		return nil
+
 	case tea.MouseClickMsg:
 		if e.Button != tea.MouseLeft {
 			return nil
@@ -1671,10 +1717,16 @@ func (ws *workspace) mouse(msg tea.MouseMsg, y int) tea.Cmd {
 			if ws.previewKey == "" {
 				return nil
 			}
+			// A press on the preview hands it the keys and starts a
+			// selection; a click that never moves selects nothing and
+			// lets go of what was selected before.
+			px, py := ws.previewPoint(m.X, y)
+			ws.drag.press(&ws.vp, px, py)
 			ws.mainFocus = true
 			ws.layout()
 			return nil
 		}
+		ws.drag.clear()
 		// The row is read before the focus moves: the focused panel
 		// draws a status row above its rows and an unfocused one does
 		// not, so the line means different things either side of it.

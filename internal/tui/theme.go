@@ -127,6 +127,7 @@ func applyTheme(p palette, isDark bool) {
 		stylePrompt = lipgloss.NewStyle().Bold(true)
 		styleStrong, styleEmph = lipgloss.NewStyle().Bold(true), lipgloss.NewStyle().Italic(true)
 		styleCodeSpan, styleLink = lipgloss.NewStyle(), lipgloss.NewStyle().Underline(true)
+		styleSelection = lipgloss.NewStyle().Reverse(true)
 		return
 	}
 	ld := lipgloss.LightDark(isDark)
@@ -163,6 +164,10 @@ func applyTheme(p palette, isDark bool) {
 	styleEmph = lipgloss.NewStyle().Italic(true)
 	styleCodeSpan = fg(p.accent2)
 	styleLink = fg(p.info).Underline(true)
+	// Reverse video rather than a background token: a selection has to
+	// read as selected on every palette and on a terminal with sixteen
+	// colours, and swapping the cell's own colours always does.
+	styleSelection = lipgloss.NewStyle().Reverse(true)
 }
 
 // osEnv is the environment lookup resolveThemeName uses at runtime.

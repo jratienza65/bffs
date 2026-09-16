@@ -41,4 +41,7 @@ var (
 	styleEmph     = lipgloss.NewStyle().Italic(true)
 	styleCodeSpan = lipgloss.NewStyle()
 	styleLink     = lipgloss.NewStyle().Underline(true)
+
+	// The browser's own text selection (selection.go).
+	styleSelection = lipgloss.NewStyle().Reverse(true)
 )

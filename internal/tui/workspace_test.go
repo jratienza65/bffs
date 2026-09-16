@@ -363,3 +363,43 @@ func TestMemoryDirResolvesOncePerProject(t *testing.T) {
 		t.Errorf("after clearMemory, memoryDir() = %q, want the directory to be resolved again (it is gone now)", got)
 	}
 }
+
+// The drift tables say a memory file differs; D says how. The diff is
+// computed here (internal/textdiff), never shelled out, and reads
+// "there → here": what the other root's copy would have to change to
+// become this one.
+func TestDriftDiffScreen(t *testing.T) {
+	f := newFixture(t)
+	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
+	f.memory()
+	fullProjects := f.fullRoot("full")
+	otherMem := filepath.Join(fullProjects, f.slug, transcripts.MemorySubdir)
+	if err := os.MkdirAll(otherMem, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The same file, one line changed and one line gone.
+	if err := os.WriteFile(filepath.Join(otherMem, "notes.md"), []byte("---\npinned: true\n---\nPaths: /elsewhere/x\nan extra line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := f.start("memories")
+	ws := h.a.ws
+	if r := ws.selectedMemFile(); r == nil || r.f.Name != transcripts.MemoryIndexFile {
+		t.Fatalf("the memory tab should open on %s, got %+v", transcripts.MemoryIndexFile, r)
+	}
+	h.keys("down") // notes.md, the file that differs
+	h.keys("D")
+	if _, ok := h.a.top().(*driftScreen); !ok {
+		t.Fatalf("D should open the diff, got %T", h.a.top())
+	}
+	out := h.view()
+	wantAll(t, out, "diff notes.md", "ACCOUNT: FULL", "notes.md", "differs",
+		"1 added, 2 removed (there → here)", "@@", "- Paths: /elsewhere/x", "- an extra line", "+ Paths: /Users/dev/x and /Users/dev/y")
+	// Only the focused file is compared: MEMORY.md exists here and not
+	// there, and that verdict is not part of this reading.
+	wantNone(t, out, "only here")
+	h.keys("esc")
+	if h.a.top() != nil {
+		t.Errorf("esc should close the diff, top is %T", h.a.top())
+	}
+}

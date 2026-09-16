@@ -16,6 +16,7 @@ import (
 
 	"github.com/jratienza65/bffs/internal/imports"
 	"github.com/jratienza65/bffs/internal/store"
+	"github.com/jratienza65/bffs/internal/textdiff"
 	"github.com/jratienza65/bffs/internal/transcripts"
 	"github.com/jratienza65/bffs/internal/trust"
 )
@@ -380,6 +381,18 @@ func goldenStates() map[string]func(*app) {
 		"copy":   func(a *app) { a.stack = append(a.stack, newCopyScreen(a.svc, a.ws.target())) },
 		"rehome": func(a *app) {
 			a.stack = append(a.stack, newRehomeScreen(a.svc, a.ws.target(), []transcripts.Session{a.ws.sessRows[0].s}))
+		},
+		"diff": func(a *app) {
+			sc := newDriftScreen(a.svc, goldenRoot(), "-home-d-build-projects-bffs", goldenProject, "notes.md")
+			a.stack = append(a.stack, sc)
+			there := "---\npinned: true\n---\n\n- the other machine's copy of this note\n- with a line that only it has\n"
+			here := "---\npinned: true\n---\n\n- the copy on this root\n- with a line that only it has\n- and one more\n"
+			lines := []string{section(shortRootLabel(goldenFullRoot()), stateStyled("differs")),
+				"  notes.md  " + stateStyled("differs (newer there)")}
+			hunks := textdiff.Diff(there, here)
+			stat := textdiff.Count(hunks)
+			lines = append(lines, styleFaint.Render(fmt.Sprintf("    %d added, %d removed (there → here)", stat.Added, stat.Removed)))
+			_ = a.forward(diffLoadedMsg{key: sc.key, lines: append(lines, hunkLines(hunks)...)})
 		},
 		"trust": func(a *app) {
 			cwd := a.ws.projectCwd()

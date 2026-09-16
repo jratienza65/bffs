@@ -1235,6 +1235,16 @@ func (ws *workspace) actions() []menuItem {
 	if dir := ws.memoryDir(); dir != "" {
 		mt := tgt.memoryOnly()
 		add("S", "sync the memory of "+label+" to a full-isolation account", func() tea.Cmd { return pushScreen(newCopyScreen(svc, mt)) })
+		// The drift tables say a file differs; D says how. A focused
+		// memory row narrows the comparison to that file.
+		what, file := "the memory of "+label, ""
+		if r := ws.selectedMemFile(); r != nil {
+			what, file = transcripts.Sanitize(r.f.Name), r.f.Name
+		}
+		root, slug, cwd := ws.root, ws.projectSlug(), ws.projectCwd()
+		add("D", "diff "+what+" against the other roots", func() tea.Cmd {
+			return pushScreen(newDriftScreen(svc, root, slug, cwd, file))
+		})
 		add("p", "scan the memory of "+label+" for paths", func() tea.Cmd { return pushScreen(newScanPathsScreen(svc, dir)) })
 	}
 	return items
@@ -1288,7 +1298,7 @@ func (ws *workspace) keys() []key.Binding {
 			}
 			ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", open)), keys.Select, keys.Resume, keys.Export, keys.NextTab}
 		} else {
-			ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")), keys.SyncMemory, keys.ScanPaths, keys.PrevTab}
+			ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")), keys.Diff, keys.SyncMemory, keys.ScanPaths, keys.PrevTab}
 		}
 	}
 	if ws.panels[ws.focus].list.FilterState() == list.FilterApplied {
@@ -1303,7 +1313,7 @@ func (ws *workspace) helpGroups() [][]key.Binding {
 		{keys.Panel1, keys.Panel2, keys.Panel3, keys.NextPanel, keys.PrevPanel, keys.NextTab, keys.PrevTab, keys.Back},
 		{keys.Up, keys.Down, keys.PageUp, keys.PageDn, keys.Open, keys.Select, keys.SelectAll, keys.Activate, keys.Filter},
 		{keys.Wizard, keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
-		{keys.Trust, keys.SyncMemory, keys.Pointer, keys.ScanPaths},
+		{keys.Trust, keys.SyncMemory, keys.Diff, keys.Pointer, keys.ScanPaths},
 		{keys.ScreenMode, keys.ScreenModePrev, keys.Theme, keys.Menu, keys.Help, keys.Quit, reservedKeys},
 		{key.NewBinding(key.WithKeys("mouse"), key.WithHelp("click", "focus a panel and pick a row")), key.NewBinding(key.WithKeys("wheel"), key.WithHelp("wheel", "scroll what is under the pointer")), key.NewBinding(key.WithKeys("shift"), key.WithHelp("shift+drag", "select text (the terminal's own selection)"))},
 	}

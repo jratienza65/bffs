@@ -1,0 +1,32 @@
+bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ diff notes.md ───────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ ACCOUNT: WORK  differs                                                    │
+│   beta                         partial │ │   notes.md  differs (newer there)                                         │
+│   work                            full │ │     2 added, 1 removed (there → here)                                     │
+│                                        │ │     @@ -2,5 +2,6 @@                                                       │
+├─ 2 projects ───────────────────── 1/3 ─┤ │       pinned: true                                                        │
+│ 3 projects in /home/d/.claude/projects │ │       ---                                                                 │
+│ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
+│     /home/d/build/si…   4     1d ago   │ │     - - the other machine's copy of this note                             │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │     + - the copy on this root                                             │
+│                                        │ │       - with a line that only it has                                      │
+│                                        │ │     + - and one more                                                      │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+├─ 3 SESSIONS | memory ──────────── 1/3 ─┤ │                                                                           │
+│    ● Session and memory impo… 1h ago   │ │                                                                           │
+│      Plan: session export     4h ago   │ │                                                                           │
+│    ↓ prompt from the other m… 9d ago   │ │                                                                           │
+│                                        │ │ esc back · ↑/↓ scroll · S syncs the memory of this project to a full-iso… │
+└────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
+
+↑/k up · ↓/j down · pgup page up · pgdown page down · esc done · x more · ? keys · q quit

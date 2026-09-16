@@ -40,6 +40,7 @@ type keyMap struct {
 	Trust      key.Binding
 	SyncMemory key.Binding
 	Pointer    key.Binding
+	Diff       key.Binding
 
 	// Inside an overlay: the [y/N] answer, cancelling a running
 	// operation, closing a result.
@@ -87,6 +88,7 @@ var keys = keyMap{
 	Trust:      key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trust")),
 	SyncMemory: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "sync memory")),
 	Pointer:    key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "last session")),
+	Diff:       key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "diff memory")),
 
 	Yes:    key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("y", "yes")),
 	No:     key.NewBinding(key.WithKeys("n", "N", "esc"), key.WithHelp("n", "no")),

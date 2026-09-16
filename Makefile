@@ -36,7 +36,7 @@ install: build
 # prefix if you have goreleaser on PATH.
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@latest
 
-.PHONY: build install release-check snapshot clean-dist hooks fmt lint
+.PHONY: build install release-check snapshot clean-dist hooks fmt lint fuzz
 
 release-check:
 	$(GORELEASER) check
@@ -58,6 +58,18 @@ hooks:
 
 fmt:
 	gofmt -w .
+
+# Fuzz the bundle reader and the entry-name grammar (CI runs the same two
+# targets for 20 s each as a smoke test). Override: make FUZZTIME=5m fuzz
+# Minimization is off (-fuzzminimizetime 0): with the default 60 s per new
+# interesting input the workers stop mutating within seconds (FuzzUnpack
+# stages files on disk per exec); inputs are a few KiB, so an unminimized
+# crasher reproduces just as well.
+FUZZTIME ?= 30s
+
+fuzz:
+	go test ./internal/bundle -run '^$$' -fuzz FuzzUnpack -fuzztime $(FUZZTIME) -fuzzminimizetime 0
+	go test ./internal/bundle -run '^$$' -fuzz FuzzValidateEntryName -fuzztime $(FUZZTIME) -fuzzminimizetime 0
 
 # Same checks the pre-commit hook and ci.yml run.
 lint:

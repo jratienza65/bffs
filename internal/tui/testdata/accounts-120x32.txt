@@ -5,8 +5,8 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │   beta                         partial │ │                                                                           │
 │   work                            full │ │ POOL                                                                      │
 │                                        │ │   root         shared pool: alpha, beta                                   │
-│                                        │ │   projects dir /home/d/.claude/projects                                   │
-│                                        │ │   config dir   /home/d/.claude                                            │
+│                                        │ │   projects dir /home/d/.claude/projects ↗                                 │
+│                                        │ │   config dir   /home/d/.claude ↗                                          │
 │                                        │ │   retention    30 days (settings.json)                                    │
 │                                        │ │   live sessio… 1                                                          │
 │                                        │ │                                                                           │

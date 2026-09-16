@@ -10,6 +10,7 @@ type glyphSet struct {
 	ok, bad, unknown        string // verdicts
 	sep, ellipsis, arrow    string // separators and pointers
 	bullet, quote, fold     string // markdown: list bullet, quote bar, a folded code line
+	open                    string // the mark after a hyperlink
 	ruleH                   string // markdown: a horizontal rule
 	tl, tr, bl, br, h, v    string // box borders
 }
@@ -19,7 +20,7 @@ var unicodeGlyphs = glyphSet{
 	mark: "*", pin: "pin", here: "←",
 	ok: "✓", bad: "✗", unknown: "–",
 	sep: "·", ellipsis: "…", arrow: "→",
-	bullet: "•", quote: "│", fold: "↪",
+	bullet: "•", quote: "│", fold: "↪", open: " ↗",
 	ruleH: "─",
 	tl:    "┌", tr: "┐", bl: "└", br: "┘", h: "─", v: "│",
 }
@@ -29,7 +30,7 @@ var asciiGlyphs = glyphSet{
 	mark: "*", pin: "pin", here: "<-",
 	ok: "y", bad: "n", unknown: "-",
 	sep: "-", ellipsis: "...", arrow: "->",
-	bullet: "-", quote: "|", fold: ">",
+	bullet: "-", quote: "|", fold: ">", open: "",
 	ruleH: "-",
 	tl:    "+", tr: "+", bl: "+", br: "+", h: "-", v: "|",
 }

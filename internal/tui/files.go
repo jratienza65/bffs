@@ -17,7 +17,9 @@ func artifactLines(root transcripts.Root, s transcripts.Session) []string {
 	a := transcripts.ArtifactsFor(root, s)
 	var lines []string
 	add := func(label, detail, path string) {
-		lines = append(lines, "  "+pad(label, 12)+" "+pad(detail, 22)+" "+styleFaint.Render(shortPath(path)))
+		// The path is a link the terminal opens: the browser lists
+		// where Claude keeps a thing, and opening it is the next step.
+		lines = append(lines, "  "+pad(label, 12)+" "+pad(detail, 22)+" "+linkPath(styleLink, path))
 	}
 	if info, err := os.Stat(a.Transcript); err == nil {
 		add("transcript", formatSize(info.Size()), a.Transcript)

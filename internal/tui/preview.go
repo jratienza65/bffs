@@ -27,6 +27,11 @@ func kvLine(label, value string) string {
 	return "  " + styleFaint.Render(pad(label, 12)) + " " + transcripts.Sanitize(value)
 }
 
+// kvLink is kvLine whose value is a local path the terminal can open.
+func kvLink(label, path string) string {
+	return "  " + styleFaint.Render(pad(label, 12)) + " " + linkPath(styleLink, path)
+}
+
 // accountPreview describes one perspective: the account, the pool it
 // browses, and what its .claude.json records.
 func accountPreview(svc *services, r *accountRow) func() ([]string, error) {
@@ -51,7 +56,7 @@ func accountPreview(svc *services, r *accountRow) func() ([]string, error) {
 		}
 		lines = append(lines, summary, "")
 		root := r.root
-		lines = append(lines, section("pool", ""), kvLine("root", shortRootLabel(root)), kvLine("projects dir", shortPath(root.Dir)), kvLine("config dir", shortPath(root.ConfigDir)))
+		lines = append(lines, section("pool", ""), kvLine("root", shortRootLabel(root)), kvLink("projects dir", root.Dir), kvLink("config dir", root.ConfigDir))
 		days, src := transcripts.CleanupPeriodDays(root.ConfigDir)
 		if days == 0 {
 			lines = append(lines, kvLine("retention", "never swept ("+src+")"))
@@ -254,7 +259,7 @@ func excerptLines(head transcripts.Head, tail transcripts.Tail) []string {
 func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, name string, width int) func() ([]string, error) {
 	path := joinName(dir, name)
 	return func() ([]string, error) {
-		lines := []string{styleHeader.Render(transcripts.Sanitize(name)) + "  " + styleFaint.Render(shortPath(path)), kvLine("read by", memoryVisibility(root))}
+		lines := []string{styleHeader.Render(transcripts.Sanitize(name)) + "  " + linkPath(styleLink, path), kvLine("read by", memoryVisibility(root))}
 		if here, err := memoryHashes(dir); err == nil {
 			var drift []string
 			for _, other := range svc.roots {

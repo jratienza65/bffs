@@ -945,6 +945,8 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return pushScreen(newMenuScreen(ws.menuTitle(), ws.actions()))
 	case key.Matches(msg, keys.Theme):
 		return ws.cycleTheme()
+	case key.Matches(msg, keys.Yank):
+		return ws.yank()
 	case key.Matches(msg, keys.Wizard):
 		return ws.openWizard()
 	case key.Matches(msg, keys.Open):
@@ -1250,6 +1252,34 @@ func (ws *workspace) actions() []menuItem {
 	return items
 }
 
+// yank copies the path behind the focused row to the clipboard — the
+// same path its preview links to. A terminal that cannot take a
+// clipboard write says nothing, so the status line reports what was
+// copied rather than that it was.
+func (ws *workspace) yank() tea.Cmd {
+	var path, what string
+	switch ws.focus {
+	case panelAccounts:
+		if a := ws.selectedAccount(); a != nil {
+			path, what = a.root.Dir, "projects dir"
+		}
+	case panelProjects:
+		if ws.project != nil {
+			path, what = ws.project.cwd, "project"
+		}
+	case panelItems:
+		if r := ws.selectedSession(); r != nil {
+			path, what = r.s.Path, "transcript"
+		} else if r := ws.selectedMemFile(); r != nil {
+			path, what = joinName(r.dir, r.f.Name), "memory file"
+		}
+	}
+	if path == "" {
+		return status("nothing here to copy")
+	}
+	return tea.Batch(tea.SetClipboard(path), status("copied the "+what+" path: "+shortPath(path)))
+}
+
 // actionHints explain a refused action key.
 var actionHints = map[string]string{
 	"e": "select a project (2), or 1 accounts for the whole pool", "s": "select a project (2), or 1 accounts for the whole pool", "c": "select a project (2), or 1 accounts for the whole pool",
@@ -1313,7 +1343,7 @@ func (ws *workspace) helpGroups() [][]key.Binding {
 		{keys.Panel1, keys.Panel2, keys.Panel3, keys.NextPanel, keys.PrevPanel, keys.NextTab, keys.PrevTab, keys.Back},
 		{keys.Up, keys.Down, keys.PageUp, keys.PageDn, keys.Open, keys.Select, keys.SelectAll, keys.Activate, keys.Filter},
 		{keys.Wizard, keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
-		{keys.Trust, keys.SyncMemory, keys.Diff, keys.Pointer, keys.ScanPaths},
+		{keys.Trust, keys.SyncMemory, keys.Diff, keys.Pointer, keys.ScanPaths, keys.Yank},
 		{keys.ScreenMode, keys.ScreenModePrev, keys.Theme, keys.Menu, keys.Help, keys.Quit, reservedKeys},
 		{key.NewBinding(key.WithKeys("mouse"), key.WithHelp("click", "focus a panel and pick a row")), key.NewBinding(key.WithKeys("wheel"), key.WithHelp("wheel", "scroll what is under the pointer")), key.NewBinding(key.WithKeys("shift"), key.WithHelp("shift+drag", "select text (the terminal's own selection)"))},
 	}

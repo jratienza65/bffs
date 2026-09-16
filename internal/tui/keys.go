@@ -41,6 +41,7 @@ type keyMap struct {
 	SyncMemory key.Binding
 	Pointer    key.Binding
 	Diff       key.Binding
+	Yank       key.Binding
 
 	// Inside an overlay: the [y/N] answer, cancelling a running
 	// operation, closing a result.
@@ -89,6 +90,7 @@ var keys = keyMap{
 	SyncMemory: key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "sync memory")),
 	Pointer:    key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "last session")),
 	Diff:       key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "diff memory")),
+	Yank:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy the path")),
 
 	Yes:    key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("y", "yes")),
 	No:     key.NewBinding(key.WithKeys("n", "N", "esc"), key.WithHelp("n", "no")),

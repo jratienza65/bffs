@@ -1,7 +1,7 @@
 bffs test  alpha › /home/d/build/projects/bffs › memory                                                                 
 ┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ memory MEMORY.md ────────────────────────────────────────────────────────┐
 │   alpha                       ● active │ │ MEMORY.md  /home/d/.claude/projects/-home-d-build-projects-bffs/memory/ME │
-│   beta                         partial │ │ MORY.md                                                                   │
+│   beta                         partial │ │ MORY.md ↗                                                                 │
 │   work                            full │ │   read by      shared pool — visible to: alpha, beta                      │
 │                                        │ │   drift        account: work: differs                                     │
 ├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │

@@ -251,7 +251,7 @@ func goldenDetail(r *sessionRow) sessionDetail {
 // file, how it compares elsewhere, its references and its content.
 func goldenMemoryLines(r *memoryFileRow) []string {
 	lines := []string{
-		styleHeader.Render(r.f.Name) + "  " + styleFaint.Render(shortPath(joinName(r.dir, r.f.Name))),
+		styleHeader.Render(r.f.Name) + "  " + linkPath(styleLink, joinName(r.dir, r.f.Name)),
 		kvLine("read by", memoryVisibility(goldenRoot())),
 		kvLine("drift", shortRootLabel(goldenFullRoot())+": "+stateStyled("differs")),
 	}
@@ -283,8 +283,8 @@ func goldenAccountLines(r *accountRow) []string {
 		styleHeader.Render(r.name), summary, "",
 		section("pool", ""),
 		kvLine("root", shortRootLabel(r.root)),
-		kvLine("projects dir", shortPath(r.root.Dir)),
-		kvLine("config dir", shortPath(r.root.ConfigDir)),
+		kvLink("projects dir", r.root.Dir),
+		kvLink("config dir", r.root.ConfigDir),
 		kvLine("retention", "30 days (settings.json)"),
 		kvLine("live sessions", "1"),
 		"", section("recorded in its .claude.json", shortPath(r.root.ConfigDir+"/.claude.json")),

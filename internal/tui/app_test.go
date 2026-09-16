@@ -473,6 +473,25 @@ func TestAccountsPanel(t *testing.T) {
 	}
 }
 
+// wantOnlyLinkOSC fails when the frame carries an OSC sequence that is
+// not one of bffs's own hyperlinks.
+func wantOnlyLinkOSC(t *testing.T, out string) {
+	t.Helper()
+	for i, part := range strings.Split(out, "\x1b]")[1:] {
+		if !strings.HasPrefix(part, "8;;") {
+			t.Errorf("OSC sequence %d is not a hyperlink: %q", i, clipFor(part, 60))
+		}
+	}
+}
+
+// clipFor shortens a string for a failure message.
+func clipFor(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
 func TestSessionsPanel(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour),
@@ -499,7 +518,11 @@ func TestSessionsPanel(t *testing.T) {
 		"resume  cd "+shellWord(f.project)+" && claude --resume "+sid1,
 		"EXCERPT", "first prompt   first prompt of one",
 		"PER ACCOUNT", "work        ← –", "FILES", "transcript   0 KB", "DETAILS", "id           "+sid1, "attribution  unknown")
-	wantNone(t, out, "\x1b]", "52;c;", "(1e005053)", "(absent)", "sidecar")
+	// The frame carries OSC 8 hyperlinks of its own (link.go); no other
+	// operating-system command may reach the terminal — least of all
+	// OSC 52, which writes the clipboard, out of a transcript's text.
+	wantOnlyLinkOSC(t, out)
+	wantNone(t, out, "52;c;", "(1e005053)", "(absent)", "sidecar")
 	if r, ok := wsCursor(h, panelItems).(*sessionRow); !ok || r.s.ID != sid1 {
 		t.Errorf("cursor should start on the newest session: %+v", wsCursor(h, panelItems))
 	}

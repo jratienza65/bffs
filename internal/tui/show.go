@@ -94,6 +94,11 @@ func detailLines(d sessionDetail, now time.Time) []string {
 	kv := func(label, value string) {
 		lines = append(lines, fmt.Sprintf("%-14s%s", label+":", transcripts.Sanitize(value)))
 	}
+	// A path Claude keeps on this machine is a link the terminal opens
+	// (link.go); the note after it stays plain text.
+	kvPath := func(label, path, note string) {
+		lines = append(lines, fmt.Sprintf("%-14s%s", label+":", linkPath(styleLink, path)+note))
+	}
 	kv("session", s.ID)
 	title := "-"
 	if t := transcripts.Sanitize(s.Title); t != "" {
@@ -106,7 +111,8 @@ func detailLines(d sessionDetail, now time.Time) []string {
 	case s.Cwd == "":
 		kv("cwd", "-  (no cwd recorded)")
 	case s.CwdExists:
-		kv("cwd", shortPath(s.Cwd)+"  (exists)")
+		// A directory that exists here is one the terminal can open.
+		lines = append(lines, fmt.Sprintf("%-14s%s", "cwd:", linkPath(styleLink, s.Cwd)+"  (exists)"))
 	default:
 		kv("cwd", shortPath(s.Cwd)+"  (missing on this machine)")
 	}
@@ -136,19 +142,19 @@ func detailLines(d sessionDetail, now time.Time) []string {
 	kv("size", formatSize(s.Size))
 	kv("branch", dashIfEmpty(transcripts.Sanitize(s.GitBranch)))
 	kv("version", dashIfEmpty(transcripts.Sanitize(s.Version)))
-	kv("transcript", shortPath(d.Artifacts.Transcript))
-	sidecar := shortPath(d.Artifacts.SidecarDir) + "  (absent)"
+	kvPath("transcript", d.Artifacts.Transcript, "")
+	note := "  (absent)"
 	if d.SidecarExists {
-		sidecar = fmt.Sprintf("%s  (%s, %s)", shortPath(d.Artifacts.SidecarDir), formatSize(d.SidecarSize), countNoun(s.Subagents, "subagent"))
+		note = fmt.Sprintf("  (%s, %s)", formatSize(d.SidecarSize), countNoun(s.Subagents, "subagent"))
 	}
-	kv("sidecar", sidecar)
-	kv("file-history", shortPath(d.Artifacts.FileHistoryDir)+presence(d.FileHistoryExist))
-	kv("tasks", shortPath(d.Artifacts.TasksDir)+presence(d.TasksExist))
+	kvPath("sidecar", d.Artifacts.SidecarDir, note)
+	kvPath("file-history", d.Artifacts.FileHistoryDir, presence(d.FileHistoryExist))
+	kvPath("tasks", d.Artifacts.TasksDir, presence(d.TasksExist))
 	if len(d.Artifacts.PlanFiles) == 0 {
 		kv("plan", "-")
 	}
 	for _, p := range d.Artifacts.PlanFiles {
-		kv("plan", shortPath(p))
+		kvPath("plan", p, "")
 	}
 	if s.Import != nil && s.Import.Record != nil {
 		r := s.Import.Record

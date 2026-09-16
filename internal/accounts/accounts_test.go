@@ -3,6 +3,7 @@ package accounts
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -39,13 +40,16 @@ func TestAddAPIKey(t *testing.T) {
 	if acc.Type != store.TypeAPIKey || acc.Secret != "sk-ant-secret" || acc.Email != "team@example.com" {
 		t.Fatalf("saved = %+v", acc)
 	}
-	// The file holds a secret, so it is not world-readable.
-	info, err := os.Stat(filepath.Join(dir, "accounts.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("accounts.toml is %o, want 600", perm)
+	// The file holds a secret, so it is not world-readable — where the
+	// filesystem has a say. Windows reports 0666 whatever Go asked for.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(dir, "accounts.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("accounts.toml is %o, want 600", perm)
+		}
 	}
 	// A second add of the same name is refused unless forced.
 	if err := AddAPIKey(dir, "work", "sk-ant-other", "", false); err == nil || !strings.Contains(err.Error(), "already exists") {

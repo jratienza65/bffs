@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -348,8 +349,28 @@ func checkGolden(t *testing.T, name, got string) {
 		t.Fatalf("%v (run: make golden)", err)
 	}
 	if got != string(want) {
-		t.Fatalf("frame %s differs (make golden rewrites it; read the diff first)\n--- want ---\n%s\n--- got ---\n%s", name, want, got)
+		t.Fatalf("frame %s differs (make golden rewrites it; read the diff first)\n%s", name, firstDiff(string(want), got))
 	}
+}
+
+// firstDiff names the first line that differs and shows both, then the
+// whole of each frame. A CI log is read in one pass, so the line that
+// matters comes first.
+func firstDiff(want, got string) string {
+	w, g := strings.Split(want, "\n"), strings.Split(got, "\n")
+	for i := 0; i < max(len(w), len(g)); i++ {
+		a, b := "", ""
+		if i < len(w) {
+			a = w[i]
+		}
+		if i < len(g) {
+			b = g[i]
+		}
+		if a != b {
+			return fmt.Sprintf("first difference on line %d:\nwant %q\n got %q\n\n--- want ---\n%s\n--- got ---\n%s", i+1, a, b, want, got)
+		}
+	}
+	return fmt.Sprintf("--- want ---\n%s\n--- got ---\n%s", want, got)
 }
 
 // states are the frames worth pinning: every panel focused, both tabs,
@@ -445,6 +466,15 @@ func goldenStates() map[string]func(*app) {
 // Every state at the standard size, pinned. When one of these changes, the
 // diff of the golden is the review.
 func TestGoldenFrames(t *testing.T) {
+	// A golden holds one rendering of a path, and paths are not
+	// rendered the same everywhere: Windows's filepath cleans
+	// separators to backslashes and treats a rooted POSIX path as
+	// relative (so it carries no file:// link), which is correct there
+	// and a different frame. The sweeps that matter on every OS — the
+	// fit sweep, the paint scans, the ASCII sweep — run everywhere.
+	if runtime.GOOS == "windows" {
+		t.Skip("goldens pin a Unix rendering of paths; the fit and paint sweeps still run here")
+	}
 	for name, tweak := range goldenStates() {
 		t.Run(name, func(t *testing.T) {
 			checkGolden(t, name+"-120x32", frameAt(t, 120, 32, tweak))

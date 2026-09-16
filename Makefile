@@ -23,3 +23,20 @@ install: build
 	@echo "  >  $(BINARY) installed successfully!"
 	@echo "  >  IMPORTANT: Please ensure $(INSTALL_PATH) is in your PATH."
 	@echo "  >  Example: export PATH=\$$PATH:$(INSTALL_PATH)"
+
+# ── Release (goreleaser) ─────────────────────────────────────────
+# Uses `go run` so there is nothing to install; drop the `go run ...@latest`
+# prefix if you have goreleaser on PATH.
+GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@latest
+
+.PHONY: build install release-check snapshot clean-dist
+
+release-check:
+	$(GORELEASER) check
+
+# Full cross-platform build into ./dist without touching GitHub.
+snapshot:
+	$(GORELEASER) release --snapshot --clean --skip=publish
+
+clean-dist:
+	rm -rf dist

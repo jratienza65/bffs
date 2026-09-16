@@ -121,7 +121,7 @@ func goldenDrift() projectDrift {
 
 // goldenApp builds the browser at a size with every panel seeded, then
 // applies the tweak the state under test needs.
-func goldenApp(t *testing.T, w, h int, tweak func(*app)) *app {
+func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 	t.Helper()
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("BFFS_THEME", "")
@@ -269,7 +269,7 @@ func goldenAccountLines(r *accountRow) []string {
 
 // goldenTZ pins the zone, because a preview formats timestamps in the
 // local one: without this a golden written in Manila fails in CI.
-func goldenTZ(t *testing.T) {
+func goldenTZ(t testing.TB) {
 	t.Helper()
 	prev := time.Local
 	time.Local = time.UTC
@@ -277,14 +277,14 @@ func goldenTZ(t *testing.T) {
 }
 
 // painted renders a frame with its escapes, for the tests about colour.
-func painted(t *testing.T, w, h int, tweak func(*app)) string {
+func painted(t testing.TB, w, h int, tweak func(*app)) string {
 	t.Helper()
 	return goldenApp(t, w, h, tweak).View().Content
 }
 
 // frameAt strips the escapes: a golden holds layout, not colour, which
 // keeps it readable and immune to a colour profile differing per machine.
-func frameAt(t *testing.T, w, h int, tweak func(*app)) string {
+func frameAt(t testing.TB, w, h int, tweak func(*app)) string {
 	t.Helper()
 	return ansi.Strip(painted(t, w, h, tweak))
 }

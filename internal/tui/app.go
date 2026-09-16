@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -27,6 +28,7 @@ type app struct {
 	statusErr bool
 	help      help.Model
 	quitting  bool
+	tracer    *os.File // BFFS_DEBUG, nil when unset (trace.go)
 }
 
 func newApp(svc *services) *app {
@@ -39,7 +41,7 @@ func newApp(svc *services) *app {
 	svc.theme, svc.isDark = name, true
 	p, _ := paletteByName(name)
 	applyTheme(p, true)
-	return &app{svc: svc, ws: newWorkspace(svc), help: h}
+	return &app{svc: svc, ws: newWorkspace(svc), help: h, tracer: openTrace()}
 }
 
 // Init hands the app the roots the services already enumerated (the
@@ -178,10 +180,14 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 
 	case tea.KeyPressMsg:
-		return a, a.handleKey(msg)
+		cmd := a.handleKey(msg)
+		a.trace("key:" + msg.String())
+		return a, cmd
 
 	case tea.MouseMsg:
-		return a, a.handleMouse(msg)
+		cmd := a.handleMouse(msg)
+		a.trace(traceMouse(msg))
+		return a, cmd
 	}
 	// Data messages: the workspace's and the overlay's are disjoint
 	// types, so both see everything else.

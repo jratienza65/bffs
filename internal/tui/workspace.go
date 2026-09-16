@@ -106,7 +106,7 @@ type workspace struct {
 
 func newWorkspace(svc *services) *workspace {
 	ws := &workspace{svc: svc, focus: panelProjects, byID: map[string]*sessionRow{}, sel: map[string]bool{}, pending: map[string]bool{}, vp: newViewport()}
-	ws.panels[panelAccounts] = newPanel(panelAccounts, "accounts", "account", "accounts", "no accounts — bffs login adds one")
+	ws.panels[panelAccounts] = newPanel(panelAccounts, "accounts", "account", "accounts", "no accounts "+glyph.emdash+" bffs login adds one")
 	ws.panels[panelProjects] = newPanel(panelProjects, "projects", "project", "projects", "no projects")
 	ws.panels[panelItems] = newPanel(panelItems, "sessions", "session", "sessions", "no sessions")
 	if svc.start == "memories" {
@@ -171,11 +171,11 @@ func (ws *workspace) sideOnly() bool {
 func (ws *workspace) hint() string {
 	switch {
 	case ws.mode == modeSideOnly:
-		return "preview hidden (_ pressed) — enter shows it for one item, _ brings it back"
+		return "preview hidden (_ pressed) " + glyph.emdash + " enter shows it for one item, _ brings it back"
 	case ws.sideOnly() && !ws.mainFocus:
-		return fmt.Sprintf("preview hidden: the terminal is narrower than %d columns — enter shows it, + keeps it, or widen the window", sideAndMainMinWidth)
+		return fmt.Sprintf("preview hidden: the terminal is narrower than %d columns "+glyph.emdash+" enter shows it, + keeps it, or widen the window", sideAndMainMinWidth)
 	case ws.mode == modeMainOnly:
-		return "panels hidden (+ pressed) — + brings them back; the keys still move the cursor"
+		return "panels hidden (+ pressed) " + glyph.emdash + " + brings them back; the keys still move the cursor"
 	}
 	return ""
 }
@@ -368,7 +368,7 @@ func (ws *workspace) accountsStatus(rows []*accountRow) string {
 	}
 	s := countNoun(n, "account")
 	if ws.svc.state.Active != "" {
-		s += " · active " + transcripts.Sanitize(ws.svc.state.Active)
+		s += "" + sepDot + "active " + transcripts.Sanitize(ws.svc.state.Active)
 	}
 	return s
 }
@@ -471,10 +471,10 @@ func (ws *workspace) updateItemsStatus() {
 		}
 		s := countNoun(len(ws.sessRows), "session")
 		if live > 0 {
-			s += " · " + countNoun(live, "live")
+			s += "" + sepDot + "" + countNoun(live, "live")
 		}
 		if n := len(ws.sel); n > 0 {
-			s += " · " + fmt.Sprintf("%d marked", n)
+			s += "" + sepDot + "" + fmt.Sprintf("%d marked", n)
 		}
 		p.setStatus(s)
 	case tabMemory:
@@ -494,9 +494,9 @@ func (ws *workspace) updateItemsStatus() {
 		}
 		s := countNoun(len(ws.mem.Files), "file")
 		if pinned > 0 {
-			s += " · " + countNoun(pinned, "pinned")
+			s += "" + sepDot + "" + countNoun(pinned, "pinned")
 		}
-		p.setStatus(s + " · " + shortPath(ws.mem.Dir))
+		p.setStatus(s + "" + sepDot + "" + shortPath(ws.mem.Dir))
 	}
 }
 
@@ -749,7 +749,7 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 		}
 		ws.svc.state.Active = msg.account
 		ws.previewKey = ""
-		return tea.Batch(ws.reloadAccounts(), ws.sync(), statusDone(fmt.Sprintf("active account is now %s — claude uses it from its next launch", transcripts.Sanitize(msg.account))))
+		return tea.Batch(ws.reloadAccounts(), ws.sync(), statusDone(fmt.Sprintf("active account is now %s "+glyph.emdash+" claude uses it from its next launch", transcripts.Sanitize(msg.account))))
 
 	case refreshMsg:
 		return ws.refresh()
@@ -1142,7 +1142,7 @@ func (ws *workspace) back() tea.Cmd {
 		return tea.Batch(cmd, ws.sync())
 	}
 	if ws.focus == panelAccounts {
-		return status("q quits · x opens the menu")
+		return status("q quits" + sepDot + "x opens the menu")
 	}
 	return ws.setFocus(ws.focus - 1)
 }
@@ -1309,7 +1309,7 @@ var actionHints = map[string]string{
 	"t": "no cwd recorded for this project; nothing to trust",
 	"S": "no memory dir for this project", "p": "no memory dir for this project",
 	"w": "no pool to work in yet",
-	"d": "d never deletes — use bffs sessions rm",
+	"d": "d never deletes " + glyph.emdash + " use bffs sessions rm",
 }
 
 // action runs the action behind a key, or explains why it cannot.
@@ -1366,7 +1366,9 @@ func (ws *workspace) helpGroups() [][]key.Binding {
 		{keys.Wizard, keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
 		{keys.Trust, keys.SyncMemory, keys.Diff, keys.Pointer, keys.ScanPaths, keys.Yank},
 		{keys.ScreenMode, keys.ScreenModePrev, keys.Theme, keys.Menu, keys.Help, keys.Quit, reservedKeys},
-		{key.NewBinding(key.WithKeys("mouse"), key.WithHelp("click", "focus a panel and pick a row")), key.NewBinding(key.WithKeys("wheel"), key.WithHelp("wheel", "scroll what is under the pointer")), key.NewBinding(key.WithKeys("shift"), key.WithHelp("shift+drag", "select text (the terminal's own selection)"))},
+		{key.NewBinding(key.WithKeys("mouse"), key.WithHelp("click", "focus a panel and pick a row")), key.NewBinding(key.WithKeys("wheel"), key.WithHelp("wheel", "scroll what is under the pointer")), key.NewBinding(key.WithKeys("drag"), key.WithHelp("drag", "select text; release copies it")), key.NewBinding(key.WithKeys("shift"), key.WithHelp("shift+drag", "the terminal's own selection"))},
+		// The legend reads from the glyph set, so BFFS_ASCII reaches it.
+		{key.NewBinding(key.WithKeys(glyph.live), key.WithHelp(glyph.live, "live")), key.NewBinding(key.WithKeys(glyph.imported), key.WithHelp(glyph.imported, "imported")), key.NewBinding(key.WithKeys(glyph.missing), key.WithHelp(glyph.missing, "cwd missing here")), key.NewBinding(key.WithKeys(glyph.mark), key.WithHelp(glyph.mark, "marked")), key.NewBinding(key.WithKeys(glyph.here), key.WithHelp(glyph.here, "the selected account")), key.NewBinding(key.WithKeys(glyph.ok), key.WithHelp(glyph.ok+"/"+glyph.bad+"/"+glyph.unknown, "accepted / declined / never answered"))},
 	}
 }
 
@@ -1384,14 +1386,14 @@ func (ws *workspace) crumb() string {
 			parts = append(parts, "sessions")
 		}
 	}
-	return strings.Join(parts, " › ")
+	return strings.Join(parts, " "+glyph.crumb+" ")
 }
 
 // previewTitle names the main pane's subject.
 func (ws *workspace) previewTitle() string {
 	switch {
 	case ws.previewBusy:
-		return "preview …"
+		return "preview " + glyph.ellipsis
 	case strings.HasPrefix(ws.previewKey, "session:"):
 		if r := ws.selectedSession(); r != nil {
 			return "session " + shortID(r.s.ID)
@@ -1417,7 +1419,7 @@ func cell(s string, width int) string {
 	}
 	s = strings.ReplaceAll(s, "\n", " ")
 	if lipgloss.Width(s) > width {
-		s = ansi.Truncate(s, width, ellipsis)
+		s = ansi.Truncate(s, width, glyph.ellipsis)
 	}
 	if n := width - lipgloss.Width(s); n > 0 {
 		s += strings.Repeat(" ", n)
@@ -1451,11 +1453,11 @@ func titled(title, right string, inner int, focused bool) string {
 	if focused {
 		bs, ts = styleBorderFocus, styleTitleFocus
 	}
-	line := bs.Render("─") + ts.Render(t) + bs.Render(strings.Repeat("─", max(0, inner-1-w-rw-1)))
+	line := bs.Render(glyph.h) + ts.Render(t) + bs.Render(strings.Repeat(glyph.h, max(0, inner-1-w-rw-1)))
 	if r != "" {
-		line += styleCounter.Render(r) + bs.Render("─")
+		line += styleCounter.Render(r) + bs.Render(glyph.h)
 	} else {
-		line += bs.Render("─")
+		line += bs.Render(glyph.h)
 	}
 	return line
 }
@@ -1491,8 +1493,8 @@ var errTooSmall = errors.New("too small")
 func tooSmallLines(width, height int) []string {
 	return []string{
 		truncate(errTooSmall.Error(), width),
-		truncate(fmt.Sprintf("need %d×%d", minWidth, minHeight), width),
-		truncate(fmt.Sprintf("have %d×%d", width, height), width),
+		truncate(fmt.Sprintf("need %d"+glyph.times+"%d", minWidth, minHeight), width),
+		truncate(fmt.Sprintf("have %d"+glyph.times+"%d", width, height), width),
 	}
 }
 
@@ -1533,24 +1535,24 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 			above := focused || (i > 0 && panelID(i-1) == ws.focus)
 			label, counter := ws.panelTitle(panelID(i))
 			if i == 0 {
-				out = append(out, bar("┌", focused)+titled(label, counter, side, focused)+bar("┐", focused))
+				out = append(out, bar(glyph.tl, focused)+titled(label, counter, side, focused)+bar(glyph.tr, focused))
 			} else {
-				out = append(out, bar("├", above)+titled(label, counter, side, focused)+bar("┤", above))
+				out = append(out, bar(glyph.lt, above)+titled(label, counter, side, focused)+bar(glyph.rt, above))
 			}
 			for _, l := range p.body(side-2*padX, hs[i], focused) {
-				out = append(out, bar("│", focused)+padded(l, side)+bar("│", focused))
+				out = append(out, bar(glyph.v, focused)+padded(l, side)+bar(glyph.v, focused))
 			}
 		}
 		last := ws.focus == panelCount-1
-		out = append(out, bar("└"+strings.Repeat("─", side)+"┘", last))
+		out = append(out, bar(glyph.bl+strings.Repeat(glyph.h, side)+glyph.br, last))
 		return strings.Join(out, "\n")
 	case side == 0:
 		main = fill(main, h)
-		out = append(out, bar("┌", mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar("┐", mainFocused))
+		out = append(out, bar(glyph.tl, mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar(glyph.tr, mainFocused))
 		for _, l := range main {
-			out = append(out, bar("│", mainFocused)+padded(l, mi)+bar("│", mainFocused))
+			out = append(out, bar(glyph.v, mainFocused)+padded(l, mi)+bar(glyph.v, mainFocused))
 		}
-		out = append(out, bar("└"+strings.Repeat("─", mi)+"┘", mainFocused))
+		out = append(out, bar(glyph.bl+strings.Repeat(glyph.h, mi)+glyph.br, mainFocused))
 		return strings.Join(out, "\n")
 	}
 	hs := ws.panelHeights()
@@ -1566,23 +1568,23 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 			l = main[row]
 		}
 		row++
-		return bar("│", mainFocused) + padded(l, mi) + bar("│", mainFocused)
+		return bar(glyph.v, mainFocused) + padded(l, mi) + bar(glyph.v, mainFocused)
 	}
 	for i, p := range ws.panels {
 		focused := panelID(i) == ws.focus && !ws.mainFocus
 		above := focused || (i > 0 && panelID(i-1) == ws.focus && !ws.mainFocus)
 		label, counter := ws.panelTitle(panelID(i))
 		if i == 0 {
-			out = append(out, bar("┌", focused)+titled(label, counter, side, focused)+bar("┐", focused)+gap+bar("┌", mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar("┐", mainFocused))
+			out = append(out, bar(glyph.tl, focused)+titled(label, counter, side, focused)+bar(glyph.tr, focused)+gap+bar(glyph.tl, mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar(glyph.tr, mainFocused))
 		} else {
-			out = append(out, bar("├", above)+titled(label, counter, side, focused)+bar("┤", above)+gap+next())
+			out = append(out, bar(glyph.lt, above)+titled(label, counter, side, focused)+bar(glyph.rt, above)+gap+next())
 		}
 		for _, l := range p.body(side-2*padX, hs[i], focused) {
-			out = append(out, bar("│", focused)+padded(l, side)+bar("│", focused)+gap+next())
+			out = append(out, bar(glyph.v, focused)+padded(l, side)+bar(glyph.v, focused)+gap+next())
 		}
 	}
 	last := ws.focus == panelCount-1 && !ws.mainFocus
-	out = append(out, bar("└"+strings.Repeat("─", side)+"┘", last)+gap+bar("└"+strings.Repeat("─", mi)+"┘", mainFocused))
+	out = append(out, bar(glyph.bl+strings.Repeat(glyph.h, side)+glyph.br, last)+gap+bar(glyph.bl+strings.Repeat(glyph.h, mi)+glyph.br, mainFocused))
 	return strings.Join(out, "\n")
 }
 

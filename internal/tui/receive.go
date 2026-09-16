@@ -308,7 +308,7 @@ func resolveHost(ctx context.Context, target string, local []transfer.LinkAddr, 
 	}
 	warn := ""
 	if strings.HasSuffix(strings.ToLower(host), ".local") || !strings.Contains(host, ".") {
-		warn = "any host on this network can answer that name — the IPv4 address shown on the other machine is the safe form"
+		warn = "any host on this network can answer that name " + glyph.emdash + " the IPv4 address shown on the other machine is the safe form"
 	}
 	addrs, err := fetchLookup(ctx, host)
 	if err != nil || len(addrs) == 0 {
@@ -587,12 +587,12 @@ func (s *receiveScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		switch ev.Kind {
 		case "connect":
 			s.peerKey = keyFromText(ev.Text, "peer key ")
-			s.events = append(s.events, fmt.Sprintf("connected to %s (TLS 1.3, peer key %s) — it asks for the pairing code", fromTarget(s.addr.Addr(), s.addr.Port()), s.peerKey))
+			s.events = append(s.events, fmt.Sprintf("connected to %s (TLS 1.3, peer key %s) "+glyph.emdash+" it asks for the pairing code", fromTarget(s.addr.Addr(), s.addr.Port()), s.peerKey))
 			if s.state == recvConnecting {
 				s.state = recvCode
 			}
 		case "code-ok":
-			s.events = append(s.events, "code accepted — the other machine proved it knows the code too")
+			s.events = append(s.events, "code accepted "+glyph.emdash+" the other machine proved it knows the code too")
 			if s.state == recvCode {
 				s.state = recvAuth
 			}
@@ -718,7 +718,7 @@ func (s *receiveScreen) finish(msg recvDoneMsg) (Screen, tea.Cmd) {
 	case msg.sinkRan:
 		// Everything landed; only the completion report to the other
 		// machine failed (it went away first). The import is whole.
-		lines = append(lines, "", fmt.Sprintf("warning: %v — the import itself is complete; the other machine may show it as unfinished", err))
+		lines = append(lines, "", fmt.Sprintf("warning: %v "+glyph.emdash+" the import itself is complete; the other machine may show it as unfinished", err))
 		return s, replaceScreen(newResultScreen("receive", lines, nil))
 	default:
 		return s, replaceScreen(newResultScreen("receive", s.events, err))
@@ -881,14 +881,14 @@ func (p *recvProject) asIs() bool { return !p.exists && p.mapped == "" }
 func (s *receiveScreen) summaryLines() []string {
 	lines := []string{"Bundle " + s.header + ":"}
 	for i, p := range s.projects {
-		placement := "exists here ✗ → imported as-is; rehome later with r"
+		placement := "exists here " + glyph.bad + " " + glyph.arrow + " imported as-is; rehome later with r"
 		switch {
 		case p.exists:
-			placement = "exists here ✓ (same directory — no rehome needed)"
+			placement = "exists here " + glyph.ok + " (same directory " + glyph.emdash + " no rehome needed)"
 		case p.mapped != "":
-			placement = "exists here ✗ → " + shortPath(p.mapped) + " (relocated record appended)"
+			placement = "exists here " + glyph.bad + " " + glyph.arrow + " " + shortPath(p.mapped) + " (relocated record appended)"
 		case s.state == recvPlace && i == s.current:
-			placement = "exists here ✗"
+			placement = "exists here " + glyph.bad
 		}
 		lines = append(lines, fmt.Sprintf("  project %s        %s", p.label, placement))
 		line := fmt.Sprintf("    %s  %s", countNoun(p.sessions, "session"), formatSize(p.bytes))
@@ -896,16 +896,16 @@ func (s *receiveScreen) summaryLines() []string {
 			line += fmt.Sprintf("   memory %d files", p.memoryFiles)
 		}
 		if p.trust != "" {
-			line += fmt.Sprintf("   (trust: %s on the other machine — informational)", p.trust)
+			line += fmt.Sprintf("   (trust: %s on the other machine "+glyph.emdash+" informational)", p.trust)
 		}
 		lines = append(lines, line)
 		if p.mapped != "" {
 			if slug, err := transcripts.Slug(p.mapped); err == nil {
-				lines = append(lines, fmt.Sprintf("    → sessions will be placed under projects/%s/ (relocated record appended)", slug))
+				lines = append(lines, fmt.Sprintf("    "+glyph.arrow+" sessions will be placed under projects/%s/ (relocated record appended)", slug))
 			}
 			if p.memoryFiles > 0 {
 				if dir, err := transcripts.MemoryDirFor(s.root, p.mapped); err == nil {
-					lines = append(lines, "    → memory merged into "+shortPath(dir))
+					lines = append(lines, "    "+glyph.arrow+" memory merged into "+shortPath(dir))
 				}
 			}
 		}
@@ -929,7 +929,7 @@ func (s *receiveScreen) summaryLines() []string {
 	if s.days > 0 {
 		retention = fmt.Sprintf("%d days (%s)", s.days, s.daysSrc)
 	}
-	lines = append(lines, fmt.Sprintf("Target: account %q → %s   limit %s   retention: %s", acct, shortPath(s.root.Dir), formatSize(s.limit), retention))
+	lines = append(lines, fmt.Sprintf("Target: account %q "+glyph.arrow+" %s   limit %s   retention: %s", acct, shortPath(s.root.Dir), formatSize(s.limit), retention))
 	return lines
 }
 
@@ -950,12 +950,12 @@ func (s *receiveScreen) View(width, height int) string {
 	var lines []string
 	switch s.state {
 	case recvPeeking:
-		return strings.Join([]string{head, "", "reading the bundle's manifest…"}, "\n")
+		return strings.Join([]string{head, "", "reading the bundle's manifest" + glyph.ellipsis}, "\n")
 	case recvHost, recvResolving:
 		lines = []string{head, "", s.input.View()}
 		switch {
 		case s.state == recvResolving:
-			lines = append(lines, "checking that the address is on this machine's local network…")
+			lines = append(lines, "checking that the address is on this machine's local network"+glyph.ellipsis)
 		case s.note != "":
 			lines = append(lines, styleError.Render(truncate(s.note, width)))
 		default:
@@ -963,7 +963,7 @@ func (s *receiveScreen) View(width, height int) string {
 		}
 		return strings.Join(lines, "\n")
 	case recvConnecting:
-		lines = []string{head, "", fmt.Sprintf("connecting to %s…", fromTarget(s.addr.Addr(), s.addr.Port()))}
+		lines = []string{head, "", fmt.Sprintf("connecting to %s"+glyph.ellipsis, fromTarget(s.addr.Addr(), s.addr.Port()))}
 	case recvCode:
 		lines = append([]string{head, ""}, s.events...)
 		lines = append(lines, "", s.code.View())
@@ -975,7 +975,7 @@ func (s *receiveScreen) View(width, height int) string {
 		return strings.Join(lines, "\n")
 	case recvAuth:
 		lines = append([]string{head, ""}, s.events...)
-		lines = append(lines, "", "waiting for the manifest…")
+		lines = append(lines, "", "waiting for the manifest"+glyph.ellipsis)
 	case recvPlace, recvPath:
 		lines = append([]string{head, ""}, s.summaryLines()...)
 		p := s.projects[s.current]

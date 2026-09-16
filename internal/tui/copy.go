@@ -91,7 +91,7 @@ func copyRows(svc *services, src transcripts.Root) []copyRow {
 		case err != nil:
 			r.note = err.Error()
 		case porter.SameRoot(src, root):
-			r.note = "already shared under partial isolation — run trust sync (t)"
+			r.note = "already shared under partial isolation " + glyph.emdash + " run trust sync (t)"
 		}
 		r.root = root
 		rows = append(rows, r)
@@ -306,9 +306,9 @@ func (s *copyScreen) View(width, height int) string {
 			lines = append(lines, line)
 		}
 		if s.state == copyPlanning {
-			lines = append(lines, "", "planning…")
+			lines = append(lines, "", "planning"+glyph.ellipsis)
 		} else {
-			lines = append(lines, "", styleFaint.Render(truncate("enter chooses the destination · greyed rows share the source pool · esc goes back", width)))
+			lines = append(lines, "", styleFaint.Render(truncate("enter chooses the destination"+sepDot+"greyed rows share the source pool"+sepDot+"esc goes back", width)))
 		}
 		return strings.Join(lines, "\n")
 	case copyConfirm:

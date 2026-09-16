@@ -62,7 +62,7 @@ func (r *projectRow) renderStyled(width int) string {
 func (r *projectRow) parts(width int) (mark, name, right string) {
 	mark = " "
 	if r.cwd != "" && !r.cwdExists {
-		mark = "!"
+		mark = glyph.missing
 	}
 	mem := "   "
 	if r.hasMemory {

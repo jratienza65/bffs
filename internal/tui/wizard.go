@@ -108,14 +108,14 @@ func newWizardScreen(svc *services, tgt actionTarget, root transcripts.Root, acc
 	for _, pr := range projects {
 		meta := countNoun(pr.sessions, "session")
 		if pr.hasMemory {
-			meta += " · memory"
+			meta += "" + sepDot + "memory"
 		}
 		if !pr.newest.IsZero() {
-			meta += " · " + humanizeAgo(pr.newest, svc.now())
+			meta += "" + sepDot + "" + humanizeAgo(pr.newest, svc.now())
 		}
 		label := pr.label()
 		if pr.cwd == "" {
-			meta += " · no cwd recorded: only with every project"
+			meta += "" + sepDot + "no cwd recorded: only with every project"
 		}
 		w.projItem = append(w.projItem, checkItem{id: pr.cwd, label: label, meta: meta, on: true})
 	}
@@ -128,9 +128,9 @@ func newWizardScreen(svc *services, tgt actionTarget, root transcripts.Root, acc
 		if title == "" {
 			title = "(" + shortID(sess.ID) + ")"
 		}
-		meta := humanizeAgo(sess.LastTS, svc.now()) + " · " + formatSize(sess.Size)
+		meta := humanizeAgo(sess.LastTS, svc.now()) + "" + sepDot + "" + formatSize(sess.Size)
 		if sess.Live {
-			meta += " · live"
+			meta += "" + sepDot + "live"
 		}
 		w.sessions = append(w.sessions, checkItem{id: sess.ID, label: sessionGlyph(sess) + " " + title, meta: meta, on: len(marked) == 0 || marked[sess.ID]})
 	}
@@ -139,7 +139,7 @@ func newWizardScreen(svc *services, tgt actionTarget, root transcripts.Root, acc
 			for _, f := range listMemoryFiles(dir) {
 				meta := formatSize(f.size)
 				if f.pinned {
-					meta += " · pinned"
+					meta += "" + sepDot + "pinned"
 				}
 				w.memFiles = append(w.memFiles, checkItem{id: f.name, label: f.name, meta: meta, on: true})
 			}
@@ -230,11 +230,11 @@ func (s *wizardScreen) rebuild() {
 		}
 	}
 	rows = append(rows, checkRow{header: "PARTS OF EVERY SELECTED SESSION"},
-		checkRow{on: &s.parts.ToolResults, label: "tool results", desc: "saved tool outputs — may contain pasted secrets"},
+		checkRow{on: &s.parts.ToolResults, label: "tool results", desc: "saved tool outputs " + glyph.emdash + " may contain pasted secrets"},
 		checkRow{on: &s.parts.FileHistory, label: "file history", desc: "backups of files Claude edited, what /rewind uses"},
 		checkRow{on: &s.parts.History, label: "prompt history", desc: "the lines claude shows when you press up"},
-		checkRow{on: &s.live, label: "live sessions", desc: "sessions open in a running claude — exported read-only, possibly truncated"},
-		checkRow{cont: true, label: "continue →", desc: "choose how to send"})
+		checkRow{on: &s.live, label: "live sessions", desc: "sessions open in a running claude " + glyph.emdash + " exported read-only, possibly truncated"},
+		checkRow{cont: true, label: "continue " + glyph.arrow, desc: "choose how to send"})
 	s.rows = rows
 	if s.cursor < 0 || s.cursor >= len(rows) || !rows[s.cursor].selectable() {
 		s.cursor = max(0, s.firstSelectable(0, 1))
@@ -277,7 +277,7 @@ func (s *wizardScreen) counts() string {
 				}
 			}
 		}
-		return fmt.Sprintf("%d of %d projects · %s", on, len(s.projItem), countNoun(n, "session"))
+		return fmt.Sprintf("%d of %d projects"+sepDot+"%s", on, len(s.projItem), countNoun(n, "session"))
 	}
 	on, total := 0, len(s.sessions)
 	for _, it := range s.sessions {
@@ -295,7 +295,7 @@ func (s *wizardScreen) counts() string {
 		}
 		parts = append(parts, fmt.Sprintf("%d of %d memory files", mon, len(s.memFiles)))
 	}
-	return strings.Join(parts, " · ")
+	return strings.Join(parts, ""+sepDot+"")
 }
 
 // sectionOf is the items of the section the cursor is in.
@@ -389,13 +389,13 @@ func (s *wizardScreen) options() []wizardOption {
 		return opts
 	case wizSendHow:
 		return []wizardOption{
-			{label: "Over the local network", desc: "this machine shows an address and a pairing code; the other one runs bffs import --from <address> (or w → receive) and types the code. Needs an inbound port; macOS asks once whether bffs may accept connections"},
-			{label: "To a .bffs file", desc: "written here; carry it however you like and import it on the other machine (w → receive → file, or bffs import --from <file>)"},
+			{label: "Over the local network", desc: "this machine shows an address and a pairing code; the other one runs bffs import --from <address> (or w " + glyph.arrow + " receive) and types the code. Needs an inbound port; macOS asks once whether bffs may accept connections"},
+			{label: "To a .bffs file", desc: "written here; carry it however you like and import it on the other machine (w " + glyph.arrow + " receive " + glyph.arrow + " file, or bffs import --from <file>)"},
 			{label: "Through ssh", desc: "no inbound port needed: a one-line command pipes the bundle straight into bffs import on the other machine; shown for you to run in a terminal"},
 		}
 	case wizRecvFrom:
 		return []wizardOption{
-			{label: "From another machine on the local network", desc: "it runs bffs export --serve (or w → send there) and shows an address and a pairing code"},
+			{label: "From another machine on the local network", desc: "it runs bffs export --serve (or w " + glyph.arrow + " send there) and shows an address and a pairing code"},
 			{label: "From a .bffs file on this machine", desc: "written by bffs export on the other machine"},
 		}
 	}
@@ -815,13 +815,13 @@ func (s *wizardScreen) checklistView(lines []string, width, height int) string {
 		s.offset = 0
 	}
 	if s.offset > 0 {
-		lines = append(lines, styleFaint.Render(fmt.Sprintf("  ↑ %d more", s.offset)))
+		lines = append(lines, styleFaint.Render(fmt.Sprintf("  "+glyph.up+" %d more", s.offset)))
 	}
 	s.bodyTop = len(lines)
 	end := min(len(body), s.offset+avail)
 	lines = append(lines, body[s.offset:end]...)
 	if end < len(body) {
-		lines = append(lines, styleFaint.Render(fmt.Sprintf("  ↓ %d more", len(body)-end)))
+		lines = append(lines, styleFaint.Render(fmt.Sprintf("  "+glyph.down+" %d more", len(body)-end)))
 	}
 	if s.note != "" {
 		lines = append(lines, "", styleError.Render(truncate(s.note, width)))
@@ -905,7 +905,7 @@ func (s *wizardScreen) View(width, height int) string {
 			what = "Which projects of " + shortRootLabel(s.root)
 		}
 		head("step 3 of 4", what)
-		lines = append(lines, styleFaint.Render(truncate(s.counts()+" · space toggles · a checks or clears a section · enter continues · nothing is read yet", width)), "")
+		lines = append(lines, styleFaint.Render(truncate(s.counts()+""+sepDot+"space toggles"+sepDot+"a checks or clears a section"+sepDot+"enter continues"+sepDot+"nothing is read yet", width)), "")
 		return s.checklistView(lines, width, height)
 	case wizSendHow:
 		head("step 4 of 4", "How to send it")
@@ -916,7 +916,7 @@ func (s *wizardScreen) View(width, height int) string {
 		if s.copied {
 			lines = append(lines, "", styleOK.Render("  copied to the clipboard (OSC 52)"))
 		} else {
-			lines = append(lines, "", styleFaint.Render("  c copies it to the clipboard · esc goes back"))
+			lines = append(lines, "", styleFaint.Render("  c copies it to the clipboard"+sepDot+"esc goes back"))
 		}
 		return joinLines(lines, width)
 	case wizRecvFrom:
@@ -928,7 +928,7 @@ func (s *wizardScreen) View(width, height int) string {
 			acct = transcripts.HomeName
 		}
 		head("step 2 of 2", "Where from?")
-		lines = append(lines, styleFaint.Render(truncate(fmt.Sprintf("into %s as account %q — 1 accounts changes that", shortRootLabel(s.root), acct), width)), "")
+		lines = append(lines, styleFaint.Render(truncate(fmt.Sprintf("into %s as account %q "+glyph.emdash+" 1 accounts changes that", shortRootLabel(s.root), acct), width)), "")
 	case wizRecvFile:
 		head("receive from a file", "Which file?")
 		lines = append(lines, s.input.View())

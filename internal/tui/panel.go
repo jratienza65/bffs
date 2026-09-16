@@ -26,7 +26,7 @@ type panel struct {
 	id      panelID
 	name    string // the frame title: "accounts", "projects", "sessions"…
 	list    list.Model
-	status  string // the list's title row: "16 sessions · 2 live"
+	status  string // the list's title row: "16 sessions" + sepDot + "2 live"
 	empty   string // shown when there is nothing to list
 	loading bool
 	width   int // inner width
@@ -120,7 +120,7 @@ func (p *panel) label(tabs string) string {
 // the rows load.
 func (p *panel) counter() string {
 	if p.loading {
-		return "…"
+		return glyph.ellipsis
 	}
 	return p.count()
 }
@@ -133,7 +133,7 @@ func (p *panel) titleRow(width int) string {
 		return truncate(p.list.FilterInput.View(), width)
 	}
 	if p.list.FilterState() == list.FilterApplied {
-		return styleTitle.Render(truncate(fmt.Sprintf("“%s” · %d of %d", p.list.FilterValue(), len(p.list.VisibleItems()), len(p.list.Items())), width))
+		return styleTitle.Render(truncate(fmt.Sprintf(glyph.quoteL+"%s"+glyph.quoteR+sepDot+"%d of %d", p.list.FilterValue(), len(p.list.VisibleItems()), len(p.list.Items())), width))
 	}
 	return styleTitle.Render(truncate(p.status, width))
 }
@@ -191,7 +191,7 @@ func (p *panel) body(width, height int, focused bool) []string {
 	if len(items) == 0 {
 		text := p.empty
 		if p.loading {
-			text = "loading…"
+			text = "loading" + glyph.ellipsis
 		}
 		return fill(append(lines, styleFaint.Render(truncate(text, width))), height)
 	}

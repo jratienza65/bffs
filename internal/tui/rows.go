@@ -86,8 +86,8 @@ func listKeyMap() list.KeyMap {
 	return list.KeyMap{
 		CursorUp:             keys.Up,
 		CursorDown:           keys.Down,
-		PrevPage:             key.NewBinding(key.WithKeys("left", "h", "pgup"), key.WithHelp("←/pgup", "prev page")),
-		NextPage:             key.NewBinding(key.WithKeys("right", "l", "pgdown"), key.WithHelp("→/pgdown", "next page")),
+		PrevPage:             key.NewBinding(key.WithKeys("left", "h", "pgup"), key.WithHelp(glyph.left+"/pgup", "prev page")),
+		NextPage:             key.NewBinding(key.WithKeys("right", "l", "pgdown"), key.WithHelp(glyph.arrow+"/pgdown", "next page")),
 		GoToStart:            key.NewBinding(key.WithKeys("home", "g"), key.WithHelp("g/home", "first")),
 		GoToEnd:              key.NewBinding(key.WithKeys("end", "G"), key.WithHelp("G/end", "last")),
 		Filter:               keys.Filter,

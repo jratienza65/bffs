@@ -44,7 +44,7 @@ func sessionState(s transcripts.Session) string {
 	case s.Live:
 		return "live"
 	case s.Import != nil && !s.CwdExists:
-		return "imported·pending"
+		return "imported" + glyph.sep + "pending"
 	case s.Import != nil:
 		return "imported"
 	default:
@@ -57,11 +57,11 @@ func sessionState(s transcripts.Session) string {
 func sessionGlyph(s transcripts.Session) string {
 	switch {
 	case s.Live:
-		return "●"
+		return glyph.live
 	case s.Import != nil:
-		return "↓"
+		return glyph.imported
 	case s.Cwd != "" && !s.CwdExists:
-		return "!"
+		return glyph.missing
 	}
 	return " "
 }

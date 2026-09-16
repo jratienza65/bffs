@@ -146,9 +146,9 @@ func (s *menuScreen) View(width, height int) string {
 		}
 		lines = append(lines, line)
 	}
-	hint := "enter or the key runs it · esc closes"
+	hint := "enter or the key runs it" + sepDot + "esc closes"
 	if len(s.items) > s.avail {
-		hint = fmt.Sprintf("items %d-%d of %d · ↑/↓ or the wheel · enter runs it · esc closes", s.offset+1, min(len(s.items), s.offset+s.avail), len(s.items))
+		hint = fmt.Sprintf("items %d-%d of %d"+sepDot+glyph.up+"/"+glyph.down+" or the wheel"+sepDot+"enter runs it"+sepDot+"esc closes", s.offset+1, min(len(s.items), s.offset+s.avail), len(s.items))
 	}
 	lines = append(lines, "", styleFaint.Render(truncate(hint, width)))
 	return strings.Join(lines, "\n")
@@ -163,6 +163,7 @@ type helpScreen struct {
 
 func newHelpScreen(groups [][]key.Binding) *helpScreen {
 	h := help.New()
+	h.Ellipsis = glyph.ellipsis
 	return &helpScreen{vp: newViewport(), groups: groups, help: h}
 }
 

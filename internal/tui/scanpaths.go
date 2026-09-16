@@ -82,7 +82,7 @@ func (s *scanPathsScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd { return vpM
 func (s *scanPathsScreen) View(width, height int) string {
 	head := fmt.Sprintf("%s in %s", countNoun(s.refs, "reference"), shortPath(s.dir))
 	if s.busy {
-		head = "scanning…"
+		head = "scanning" + glyph.ellipsis
 	}
 	return styleFaint.Render(truncate(head, width)) + "\n" + s.vp.View()
 }

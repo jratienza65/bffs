@@ -153,7 +153,7 @@ const barWidth = 20
 func barBlocks(pct float64) string {
 	n := int(pct*barWidth + 0.5)
 	n = max(0, min(barWidth, n))
-	return strings.Repeat("█", n) + strings.Repeat("░", barWidth-n)
+	return strings.Repeat(glyph.barFull, n) + strings.Repeat(glyph.barEmpty, barWidth-n)
 }
 
 // update records a progress frame and turns the spinner.
@@ -283,10 +283,10 @@ func yesNo(msg tea.KeyPressMsg) int {
 
 // quitPrompt is the question an action screen asks when q is pressed
 // while its operation runs.
-const quitPrompt = "an operation is running — quit anyway? it is cancelled first [y/N]"
+var quitPrompt = "an operation is running " + glyph.emdash + " quit anyway? it is cancelled first [y/N]"
 
 // cancelling is the line shown between esc and the operation's end.
-const cancelling = "cancelling…"
+var cancelling = "cancelling" + glyph.ellipsis
 
 // joinLines renders lines for a screen, each sanitised and cut to width.
 // scrollBox keeps a confirmation readable when its summary is longer
@@ -311,7 +311,7 @@ func (b *scrollBox) view(head, body, footer []string, width, height int) string 
 		}
 		end := min(len(body), b.offset+inner)
 		out = append(out, body[b.offset:end]...)
-		out = append(out, fmt.Sprintf("  ↑/↓ scroll · lines %d-%d of %d", b.offset+1, end, len(body)))
+		out = append(out, fmt.Sprintf("  "+glyph.up+"/"+glyph.down+" scroll"+sepDot+"lines %d-%d of %d", b.offset+1, end, len(body)))
 	}
 	return joinLines(append(out, footer...), width)
 }

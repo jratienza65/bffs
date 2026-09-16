@@ -354,7 +354,7 @@ func effect(changes []trust.Change) string {
 
 func (s *trustScreen) View(width, height int) string {
 	if !s.loaded {
-		return styleFaint.Render("loading…")
+		return styleFaint.Render("loading" + glyph.ellipsis)
 	}
 	if s.err != nil {
 		return styleError.Render(truncate(transcripts.Sanitize(s.err.Error()), width))
@@ -381,12 +381,12 @@ func (s *trustScreen) View(width, height int) string {
 	}
 	legend := `"-" = never answered on that account (claude will ask); "inherited" = a parent directory is trusted (claude will not ask); * = the active account`
 	if hidden := c.hidden(); hidden != "" {
-		legend = hidden + " — widen the pane (+) to see them. " + legend
+		legend = hidden + " " + glyph.emdash + " widen the pane (+) to see them. " + legend
 	}
 	lines = append(lines, "", styleFaint.Render(truncate(legend, width)))
 	if s.state == trustConfirm && len(s.statuses) > 0 {
 		row := s.statuses[s.cursor].Account
-		lines = append(lines, "", fmt.Sprintf("project %s → %s (from %s):", shortPath(s.key), trustRowLabel(row), trustRowLabel(s.source)))
+		lines = append(lines, "", fmt.Sprintf("project %s "+glyph.arrow+" %s (from %s):", shortPath(s.key), trustRowLabel(row), trustRowLabel(s.source)))
 		for _, c := range s.changes {
 			lines = append(lines, fmt.Sprintf("  %-41s %s -> %s", c.Key, rawCell(c.From), rawCell(c.To)))
 		}

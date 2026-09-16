@@ -12,8 +12,6 @@ import (
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
 
-const ellipsis = "…"
-
 // humanizeAgo renders a past instant relative to now the way the tables
 // do: "never", "just now", "5m ago", "3h ago", "2d ago".
 func humanizeAgo(t, now time.Time) string {
@@ -85,7 +83,7 @@ func truncate(s string, width int) string {
 		return s
 	}
 	if width == 1 {
-		return ellipsis
+		return glyph.ellipsis
 	}
 	var b strings.Builder
 	used := 0
@@ -97,7 +95,7 @@ func truncate(s string, width int) string {
 		b.WriteRune(r)
 		used += w
 	}
-	return strings.TrimRight(b.String(), " ") + ellipsis
+	return strings.TrimRight(b.String(), " ") + glyph.ellipsis
 }
 
 // pad fits s into exactly width cells: truncated when longer, padded

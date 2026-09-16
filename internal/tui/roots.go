@@ -49,7 +49,7 @@ func (r *accountRow) renderStyled(width int) string {
 func (r *accountRow) parts(width int) (name, right string) {
 	right = r.kind
 	if r.active {
-		right = "● active"
+		right = glyph.live + " active"
 	}
 	nameW := width - 1 - lipgloss.Width(right)
 	if nameW < 6 {
@@ -104,7 +104,7 @@ func rootLabel(r transcripts.Root) string {
 	case r.Owner != "":
 		return transcripts.Sanitize(r.Owner) + " [full isolation]"
 	case r.Shared && len(r.Accounts) > 0:
-		return fmt.Sprintf("shared pool (%s) — accounts: %s", shortPath(r.ConfigDir), accountList(r.Accounts))
+		return fmt.Sprintf("shared pool (%s) "+glyph.emdash+" accounts: %s", shortPath(r.ConfigDir), accountList(r.Accounts))
 	default:
 		return fmt.Sprintf("home (%s)", shortPath(r.ConfigDir))
 	}

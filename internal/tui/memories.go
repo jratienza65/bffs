@@ -76,13 +76,13 @@ func loadMemories(ctx context.Context, root transcripts.Root) tea.Cmd {
 func memoryVisibility(r transcripts.Root) string {
 	switch {
 	case r.Orphan:
-		return fmt.Sprintf("orphan session dir %s — no account reads it", transcripts.Sanitize(r.Owner))
+		return fmt.Sprintf("orphan session dir %s "+glyph.emdash+" no account reads it", transcripts.Sanitize(r.Owner))
 	case r.Owner != "":
 		return "account: " + transcripts.Sanitize(r.Owner)
 	case r.Shared && len(r.Accounts) > 0:
-		return "shared pool — visible to: " + accountList(r.Accounts)
+		return "shared pool " + glyph.emdash + " visible to: " + accountList(r.Accounts)
 	default:
-		return "home — unmanaged " + shortPath(r.ConfigDir)
+		return "home " + glyph.emdash + " unmanaged " + shortPath(r.ConfigDir)
 	}
 }
 
@@ -179,7 +179,7 @@ func (s *fileScreen) View(width, height int) string {
 	}
 	head += "  " + transcripts.Sanitize(shortPath(s.path))
 	if s.busy {
-		head = "loading…"
+		head = "loading" + glyph.ellipsis
 	}
 	return styleFaint.Render(truncate(head, width)) + "\n" + s.vp.View()
 }

@@ -125,7 +125,7 @@ func (s *pointerScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		if msg.err != nil {
 			return s, statusError(msg.err)
 		}
-		return s, tea.Batch(popRefresh(), status(fmt.Sprintf("%s: lastSessionId for %s now points at %s — claude --continue there reopens it", transcripts.Sanitize(msg.account), shortPath(s.session.Cwd), shortID(s.session.ID))))
+		return s, tea.Batch(popRefresh(), status(fmt.Sprintf("%s: lastSessionId for %s now points at %s "+glyph.emdash+" claude --continue there reopens it", transcripts.Sanitize(msg.account), shortPath(s.session.Cwd), shortID(s.session.ID))))
 	case tea.KeyPressMsg:
 		if s.busy {
 			return s, nil
@@ -182,13 +182,13 @@ func (s *pointerScreen) View(width, height int) string {
 	}
 	switch {
 	case s.busy:
-		lines = append(lines, "", "writing under Claude's lock…")
+		lines = append(lines, "", "writing under Claude's lock"+glyph.ellipsis)
 	case s.confirm:
 		r := s.rows[s.cursor]
 		lines = append(lines, "", fmt.Sprintf("point %s's lastSessionId for %s at %s? [y/N]", transcripts.Sanitize(r.name), shortPath(s.session.Cwd), shortID(s.session.ID)),
 			styleFaint.Render("only the pointer changes; trust answers and everything else in the file stay"))
 	default:
-		lines = append(lines, "", styleFaint.Render("enter chooses the account · esc goes back"))
+		lines = append(lines, "", styleFaint.Render("enter chooses the account"+sepDot+"esc goes back"))
 	}
 	return strings.Join(lines, "\n")
 }

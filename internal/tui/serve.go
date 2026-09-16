@@ -219,9 +219,9 @@ func serveEventLine(ev transfer.Event, manifestSize int64) string {
 	text := ""
 	switch ev.Kind {
 	case "connect":
-		text = peerIP(ev.Peer) + " connected — waiting for its code"
+		text = peerIP(ev.Peer) + " connected " + glyph.emdash + " waiting for its code"
 	case "manifest-sent":
-		text = fmt.Sprintf("%s code accepted; manifest sent (%s) — waiting for the other side to review", peerIP(ev.Peer), formatSize(manifestSize))
+		text = fmt.Sprintf("%s code accepted; manifest sent (%s) "+glyph.emdash+" waiting for the other side to review", peerIP(ev.Peer), formatSize(manifestSize))
 	case "accept":
 		if name, ok := strings.CutSuffix(ev.Text, " accepted"); ok {
 			text = "manifest accepted by " + transcripts.Sanitize(name)
@@ -411,7 +411,7 @@ var styleCode = lipgloss.NewStyle().Bold(true).Padding(0, 3).Border(lipgloss.Thi
 // machine's first bound address, the code in a box beside the key
 // fingerprint, and the waiting line with the countdown.
 func (s *serveScreen) banner(width int) []string {
-	target := "…"
+	target := glyph.ellipsis
 	if s.bound {
 		target = fromTarget(s.addr.Addr(), s.addr.Port())
 	}
@@ -420,7 +420,7 @@ func (s *serveScreen) banner(width int) []string {
 		"",
 	}
 	box := strings.Split(styleCode.Render(s.code.Display()), "\n")
-	note := fmt.Sprintf("   pairing code — this machine's key: %s (the other side shows it as \"peer key\")", s.keyFP)
+	note := fmt.Sprintf("   pairing code "+glyph.emdash+" this machine's key: %s (the other side shows it as \"peer key\")", s.keyFP)
 	for i, l := range box {
 		if i == len(box)/2 {
 			l += note
@@ -429,7 +429,7 @@ func (s *serveScreen) banner(width int) []string {
 	}
 	left := time.Until(s.deadline)
 	lines = append(lines, "",
-		truncate(fmt.Sprintf("Waiting for the other machine…  code valid for %s, %d attempts, one transfer.   (esc cancels)", fmtMMSS(left), serveAttempts), width))
+		truncate(fmt.Sprintf("Waiting for the other machine"+glyph.ellipsis+"  code valid for %s, %d attempts, one transfer.   (esc cancels)", fmtMMSS(left), serveAttempts), width))
 	return lines
 }
 

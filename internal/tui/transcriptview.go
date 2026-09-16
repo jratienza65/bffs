@@ -116,13 +116,13 @@ func renderRecord(line string) (out []string, shown bool) {
 		}
 		return renderMessage(stamp, role, m.Content), true
 	case "summary":
-		return []string{styleFaint.Render(stamp + "— summary: " + clip(transcripts.Sanitize(rec.Summary), lineRuneCap))}, true
+		return []string{styleFaint.Render(stamp + glyph.emdash + " summary: " + clip(transcripts.Sanitize(rec.Summary), lineRuneCap))}, true
 	case "custom-title":
-		return []string{styleFaint.Render(stamp + "— title: " + clip(transcripts.Sanitize(rec.CustomTitle), lineRuneCap))}, true
+		return []string{styleFaint.Render(stamp + glyph.emdash + " title: " + clip(transcripts.Sanitize(rec.CustomTitle), lineRuneCap))}, true
 	case "ai-title":
-		return []string{styleFaint.Render(stamp + "— title (ai): " + clip(transcripts.Sanitize(rec.AITitle), lineRuneCap))}, true
+		return []string{styleFaint.Render(stamp + glyph.emdash + " title (ai): " + clip(transcripts.Sanitize(rec.AITitle), lineRuneCap))}, true
 	case "relocated":
-		return []string{styleFaint.Render(stamp + "— relocated to " + clip(transcripts.Sanitize(rec.RelocatedCwd), lineRuneCap))}, true
+		return []string{styleFaint.Render(stamp + glyph.emdash + " relocated to " + clip(transcripts.Sanitize(rec.RelocatedCwd), lineRuneCap))}, true
 	}
 	return nil, false
 }
@@ -154,11 +154,11 @@ func renderMessage(stamp, role string, content json.RawMessage) []string {
 		case "text":
 			out = append(out, textLinesWith(first, cont, b.Text)...)
 		case "tool_use":
-			out = append(out, styleFaint.Render(cont+"⚙ "+transcripts.Sanitize(b.Name)+" "+clip(transcripts.Sanitize(toolInputSummary(b.Input)), 160)))
+			out = append(out, styleFaint.Render(cont+glyph.tool+" "+transcripts.Sanitize(b.Name)+" "+clip(transcripts.Sanitize(toolInputSummary(b.Input)), 160)))
 		case "tool_result":
-			label := "⇠ result"
+			label := glyph.result + " result"
 			if b.IsError {
-				label = "⇠ error"
+				label = glyph.result + " error"
 			}
 			out = append(out, styleFaint.Render(cont+label+": "+clip(transcripts.Sanitize(toolResultSummary(b.Content)), 160)))
 		case "thinking":
@@ -258,7 +258,7 @@ func clip(s string, n int) string {
 	if len(r) <= n {
 		return s
 	}
-	return string(r[:n-1]) + "…"
+	return string(r[:n-1]) + glyph.ellipsis
 }
 
 // transcriptScreen is the full conversation of one session in a
@@ -341,7 +341,7 @@ func (s *transcriptScreen) mouse(msg tea.MouseMsg, x, y int) tea.Cmd {
 
 func (s *transcriptScreen) View(width, height int) string {
 	if s.busy {
-		return styleFaint.Render("reading transcript…")
+		return styleFaint.Render("reading transcript" + glyph.ellipsis)
 	}
 	head := fmt.Sprintf("%s shown", countNoun(s.records-s.hidden, "record"))
 	if s.hidden > 0 {

@@ -141,7 +141,7 @@ func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 		&accountRow{name: "work", kind: "full", root: goldenFullRoot()},
 	}
 	_ = ws.panels[panelAccounts].setRows(accounts)
-	ws.panels[panelAccounts].setStatus("3 accounts · active alpha")
+	ws.panels[panelAccounts].setStatus("3 accounts " + glyph.sep + " active alpha")
 	ws.account, ws.rootKey, ws.root = "alpha", rootID(goldenRoot()), goldenRoot()
 
 	projects := []row{
@@ -161,7 +161,7 @@ func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 	}
 	ws.sessLoadedFor = ws.projectKey
 	_ = ws.panels[panelItems].setRows(ws.sessionRowsAsRows())
-	ws.panels[panelItems].setStatus("3 sessions · 1 live")
+	ws.panels[panelItems].setStatus("3 sessions " + glyph.sep + " 1 live")
 	ws.itemsKey = fmt.Sprintf("%d\x00%s", ws.tab, ws.projectKey)
 
 	ws.mem = &transcripts.Memory{Root: goldenRoot(), Slug: ws.project.slug, Dir: goldenPool + "/projects/-home-d-build-projects-bffs/memory",
@@ -184,7 +184,7 @@ func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 	// implies.
 	if ws.tab == tabMemory {
 		_ = ws.panels[panelItems].setRows(ws.memoryRows())
-		ws.panels[panelItems].setStatus("2 files · 1 pinned · " + shortPath(ws.mem.Dir))
+		ws.panels[panelItems].setStatus("2 files " + glyph.sep + " 1 pinned " + glyph.sep + " " + shortPath(ws.mem.Dir))
 	}
 	seedPreview(a)
 	// An overlay a tweak put on the stack gets its size the way push
@@ -275,9 +275,9 @@ const goldenPreviewWidth = 73
 
 // goldenAccountLines mirrors accountPreview without reading .claude.json.
 func goldenAccountLines(r *accountRow) []string {
-	summary := "oauth · " + r.kind + " isolation"
+	summary := "oauth " + glyph.sep + " " + r.kind + " isolation"
 	if r.active {
-		summary += " · active"
+		summary += " " + glyph.sep + " active"
 	}
 	return []string{
 		styleHeader.Render(r.name), summary, "",
@@ -289,7 +289,7 @@ func goldenAccountLines(r *accountRow) []string {
 		kvLine("live sessions", "1"),
 		"", section("recorded in its .claude.json", shortPath(r.root.ConfigDir+"/.claude.json")),
 		kvLine("projects", "12"), kvLine("trusted", "9"), kvLine("last sessions", "4"),
-		"", styleFaint.Render("space makes it the active account · enter opens its projects · i receives a bundle into its pool"),
+		"", styleFaint.Render("space makes it the active account " + glyph.sep + " enter opens its projects " + glyph.sep + " i receives a bundle into its pool"),
 	}
 }
 
@@ -373,7 +373,7 @@ func goldenStates() map[string]func(*app) {
 			a.stack = append(a.stack, newResultScreen("export", []string{"wrote ~/bffs-mac-a.bffs (5.2 MB, 3 sessions, 2 memory files, bundle 6f1e2c0a)", "", "On the other machine: bffs import --from bffs-mac-a.bffs"}, nil))
 		},
 		"toast": func(a *app) {
-			_ = a.notify(noteDone, "export finished", "wrote ~/bffs-mac-a.bffs — 5.2 MB, 3 sessions, 2 memory files")
+			_ = a.notify(noteDone, "export finished", "wrote ~/bffs-mac-a.bffs "+glyph.emdash+" 5.2 MB, 3 sessions, 2 memory files")
 		},
 		"status-done": func(a *app) {
 			a.status, a.statusKind = "copied the transcript path: ~/.claude/projects/-home-d-build-projects-bffs/1e005053.jsonl", noteDone
@@ -397,7 +397,7 @@ func goldenStates() map[string]func(*app) {
 				"  notes.md  " + stateStyled("differs (newer there)")}
 			hunks := textdiff.Diff(there, here)
 			stat := textdiff.Count(hunks)
-			lines = append(lines, styleFaint.Render(fmt.Sprintf("    %d added, %d removed (there → here)", stat.Added, stat.Removed)))
+			lines = append(lines, styleFaint.Render(fmt.Sprintf("    %d added, %d removed (there "+glyph.arrow+" here)", stat.Added, stat.Removed)))
 			_ = a.forward(diffLoadedMsg{key: sc.key, lines: append(lines, hunkLines(hunks)...)})
 		},
 		"trust": func(a *app) {
@@ -475,7 +475,7 @@ func TestFramesFitTheirTerminal(t *testing.T) {
 func TestTooSmallNamesTheMinimum(t *testing.T) {
 	for _, size := range [][2]int{{39, 20}, {80, 11}, {20, 5}} {
 		frame := frameAt(t, size[0], size[1], nil)
-		if !strings.Contains(frame, fmt.Sprintf("need %d×%d", minWidth, minHeight)) {
+		if !strings.Contains(frame, fmt.Sprintf("need %d"+glyph.times+"%d", minWidth, minHeight)) {
 			t.Errorf("%dx%d: %q", size[0], size[1], frame)
 		}
 		if strings.Contains(frame, "1 accounts") {

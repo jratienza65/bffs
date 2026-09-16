@@ -398,7 +398,7 @@ func (s *rehomeScreen) View(width, height int) string {
 	head := styleFaint.Render(truncate(fmt.Sprintf("rehome %s  in %s", countNoun(len(s.chosen), "session"), shortRootLabel(s.tgt.root)), width))
 	switch s.state {
 	case rehomeLoading:
-		return head + "\n\nreading the sessions' directories and looking for candidates…"
+		return head + "\n\nreading the sessions' directories and looking for candidates" + glyph.ellipsis
 	case rehomePick, rehomePath:
 		g := s.groups[s.current]
 		lines := []string{head, "",
@@ -422,11 +422,11 @@ func (s *rehomeScreen) View(width, height int) string {
 		}
 		return strings.Join(lines, "\n")
 	case rehomePlanning:
-		return head + "\n\nplanning (dry run)…"
+		return head + "\n\nplanning (dry run)" + glyph.ellipsis
 	case rehomeConfirm:
 		return s.box.view([]string{head, ""}, s.planned, []string{"", fmt.Sprintf("Rehome %s? [y/N]", rehomeCount(s.plan))}, width, height)
 	}
-	lines := append([]string{head, ""}, joinLines(s.planned, width), "", "applying…  (each session moves transactionally; a cancel rolls the one in flight back)")
+	lines := append([]string{head, ""}, joinLines(s.planned, width), "", "applying"+glyph.ellipsis+"  (each session moves transactionally; a cancel rolls the one in flight back)")
 	switch {
 	case s.askQuit:
 		lines = append(lines, "", quitPrompt)

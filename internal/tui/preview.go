@@ -40,19 +40,19 @@ func accountPreview(svc *services, r *accountRow) func() ([]string, error) {
 		summary := r.kind
 		switch r.kind {
 		case "partial", "full":
-			summary = "oauth · " + r.kind + " isolation"
+			summary = "oauth" + sepDot + "" + r.kind + " isolation"
 		case "api key":
-			summary = "api key · runs against the unmanaged ~/.claude"
+			summary = "api key" + sepDot + "runs against the unmanaged ~/.claude"
 		case "home":
-			summary = "the unmanaged ~/.claude — no bffs account reads it"
+			summary = "the unmanaged ~/.claude " + glyph.emdash + " no bffs account reads it"
 		case "orphan":
-			summary = "orphan session dir — no account behind it; read-only"
+			summary = "orphan session dir " + glyph.emdash + " no account behind it; read-only"
 		}
 		if r.active {
-			summary += " · active"
+			summary += "" + sepDot + "active"
 		}
 		if acc, ok := svc.accs.Get(r.name); ok && acc.Email != "" {
-			summary += " · " + transcripts.Sanitize(acc.Email)
+			summary += "" + sepDot + "" + transcripts.Sanitize(acc.Email)
 		}
 		lines = append(lines, summary, "")
 		root := r.root
@@ -83,9 +83,9 @@ func accountPreview(svc *services, r *accountRow) func() ([]string, error) {
 				lines = append(lines, kvLine("projects", "(no file yet)"))
 			}
 		}
-		hint := "enter opens its projects · i receives a bundle into its pool"
+		hint := "enter opens its projects" + sepDot + "i receives a bundle into its pool"
 		if r.kind == "partial" || r.kind == "full" || r.kind == "api key" {
-			hint = "space makes it the active account · " + hint
+			hint = "space makes it the active account" + sepDot + "" + hint
 		}
 		lines = append(lines, "", styleFaint.Render(hint))
 		return lines, nil
@@ -159,7 +159,7 @@ func sessionPreview(svc *services, s transcripts.Session, resolved bool, perspec
 		default:
 			parts = append(parts, shortPath(s.Cwd)+" (missing here)")
 		}
-		lines = append(lines, strings.Join(parts, " · "), styleFaint.Render("resume  "+resumeLine(s)))
+		lines = append(lines, strings.Join(parts, ""+sepDot+""), styleFaint.Render("resume  "+resumeLine(s)))
 
 		head, _ := transcripts.ReadHead(s.Path)
 		tail, _ := transcripts.ReadTail(s.Path)
@@ -180,7 +180,7 @@ func sessionPreview(svc *services, s transcripts.Session, resolved bool, perspec
 							}
 							rows = append(rows, ad)
 						}
-						lines = append(lines, "", section("per account", "t trust sync · L point a last session here · ← selected account"))
+						lines = append(lines, "", section("per account", "t trust sync"+sepDot+"L point a last session here"+sepDot+glyph.left+" selected account"))
 						lines = append(lines, accountTable(rows, perspective, "(this session)")...)
 					}
 				}
@@ -194,14 +194,14 @@ func sessionPreview(svc *services, s transcripts.Session, resolved bool, perspec
 		if !s.FirstTS.IsZero() {
 			first := s.FirstTS.Local().Format("2006-01-02 15:04") + " (" + humanizeAgo(s.FirstTS, now) + ")"
 			if s.Version != "" {
-				first += " · claude " + s.Version
+				first += "" + sepDot + "claude " + s.Version
 			}
 			lines = append(lines, kvLine("started", first))
 		}
 		if s.Account != "" {
 			attr := s.AttribSource
 			if len(d.Claimants) > 0 {
-				attr += " · pointer of " + transcripts.Sanitize(strings.Join(d.Claimants, ", "))
+				attr += "" + sepDot + "pointer of " + transcripts.Sanitize(strings.Join(d.Claimants, ", "))
 			}
 			lines = append(lines, kvLine("attribution", attr))
 		} else {
@@ -287,7 +287,7 @@ func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, nam
 			if len(drift) == 0 {
 				drift = append(drift, "no other root on this machine")
 			}
-			lines = append(lines, kvLine("drift", strings.Join(drift, " · ")))
+			lines = append(lines, kvLine("drift", strings.Join(drift, ""+sepDot+"")))
 		}
 		if refs := refLines(dir, name); len(refs) > 0 {
 			lines = append(lines, "", section("references", "absolute paths and @-refs inside the file"))
@@ -307,7 +307,7 @@ func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, nam
 			lines = append(lines, msg.lines...)
 		}
 		if msg.truncated {
-			lines = append(lines, styleFaint.Render("… (first 1 MB)"))
+			lines = append(lines, styleFaint.Render(glyph.ellipsis+" (first 1 MB)"))
 		}
 		return lines, nil
 	}

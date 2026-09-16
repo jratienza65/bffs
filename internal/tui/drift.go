@@ -236,16 +236,16 @@ func computeDrift(ctx context.Context, svc *services, ref transcripts.Root, slug
 func answerCell(a trust.Answer, inheritedFrom string) string {
 	switch a {
 	case trust.Accepted:
-		return "✓"
+		return glyph.ok
 	case trust.Declined:
-		return "✗"
+		return glyph.bad
 	case trust.Inherited:
-		return "✓*"
+		return glyph.ok + "*"
 	}
 	if inheritedFrom != "" {
-		return "✓*"
+		return glyph.ok + "*"
 	}
-	return "–"
+	return glyph.unknown
 }
 
 // answerStyled is answerCell padded to its column and coloured: ✓ ok,
@@ -292,7 +292,7 @@ func memoryCell(rd rootDrift) string {
 		for _, f := range rd.diffs {
 			parts = append(parts, transcripts.Sanitize(f.name)+" "+f.state)
 		}
-		return stateStyled("differs") + " — " + strings.Join(parts, ", ")
+		return stateStyled("differs") + " " + glyph.emdash + " " + strings.Join(parts, ", ")
 	case "same":
 		return countNoun(len(rd.files), "file") + ", " + stateStyled("same")
 	case "only there":
@@ -317,7 +317,7 @@ func section(title, note string) string {
 func accountTable(accounts []accountDrift, perspective, thisLabel string) []string {
 	lines := []string{"  " + pad("account", driftAccountW) + "   " + pad("trust", driftAnswerW) + " " + pad("external", driftAnswerW) + " last session"}
 	for _, ad := range accounts {
-		last := "–"
+		last := glyph.unknown
 		if ad.lastSession != "" {
 			last = shortID(transcripts.Sanitize(ad.lastSession))
 			if ad.inProject {
@@ -326,7 +326,7 @@ func accountTable(accounts []accountDrift, perspective, thisLabel string) []stri
 		}
 		mark := "  "
 		if ad.status.Account == perspective {
-			mark = styleAccent.Render("← ")
+			mark = styleAccent.Render(glyph.here + " ")
 		}
 		lines = append(lines, "  "+pad(transcripts.Sanitize(ad.status.Account), driftAccountW)+" "+mark+answerStyled(ad.status.Folder, ad.status.InheritedFrom)+" "+answerStyled(ad.status.External, "")+" "+last)
 	}
@@ -345,20 +345,20 @@ func driftLines(d projectDrift, perspective string, now time.Time) []string {
 	for _, rd := range d.roots {
 		if rd.here {
 			if rd.files == nil {
-				summary += " · no memory"
+				summary += "" + sepDot + "no memory"
 			} else {
-				summary += " · memory " + countNoun(len(rd.files), "file")
+				summary += "" + sepDot + "memory " + countNoun(len(rd.files), "file")
 			}
 		}
 	}
 	if !d.newest.IsZero() {
-		summary += " · newest " + humanizeAgo(d.newest, now)
+		summary += "" + sepDot + "newest " + humanizeAgo(d.newest, now)
 	}
 	if d.gitRoot != "" && d.gitRoot != d.cwd {
-		summary += " · git root " + transcripts.Sanitize(shortPath(d.gitRoot))
+		summary += "" + sepDot + "git root " + transcripts.Sanitize(shortPath(d.gitRoot))
 	}
 	if d.cwd != "" && !isDir(d.cwd) {
-		summary += " · directory missing here"
+		summary += "" + sepDot + "directory missing here"
 	}
 	lines = append(lines, summary, "", section("across roots", "reference: "+shortRootLabel(d.ref)),
 		"  "+pad("root", driftRootW)+" "+pad("sessions", driftCountW)+" memory")
@@ -369,12 +369,12 @@ func driftLines(d projectDrift, perspective string, now time.Time) []string {
 		lines = append(lines, styleFaint.Render("  one root on this machine: every account reads the same files"))
 	}
 	if len(d.accounts) > 0 {
-		lines = append(lines, "", section("per account", "what each .claude.json records · ← selected account · ✓* inherited"))
+		lines = append(lines, "", section("per account", "what each .claude.json records"+sepDot+glyph.left+" selected account"+sepDot+glyph.ok+"* inherited"))
 		lines = append(lines, accountTable(d.accounts, perspective, "(this project)")...)
 	}
 	for _, w := range d.warnings {
 		lines = append(lines, "warning: "+transcripts.Sanitize(w))
 	}
-	lines = append(lines, "", styleFaint.Render("t trust sync · L last-session pointer · S sync memory to a full-isolation account · c copy sessions"))
+	lines = append(lines, "", styleFaint.Render("t trust sync"+sepDot+"L last-session pointer"+sepDot+"S sync memory to a full-isolation account"+sepDot+"c copy sessions"))
 	return lines
 }

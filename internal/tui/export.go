@@ -369,7 +369,7 @@ func (s *exportScreen) View(width, height int) string {
 		if s.note != "" {
 			lines = append(lines, styleError.Render(truncate(s.note, width)))
 		} else {
-			lines = append(lines, styleFaint.Render(truncate("enter exports here · esc goes back · an existing file is never overwritten", width)))
+			lines = append(lines, styleFaint.Render(truncate("enter exports here"+sepDot+"esc goes back"+sepDot+"an existing file is never overwritten", width)))
 		}
 		return strings.Join(lines, "\n")
 	case exportConfirm:

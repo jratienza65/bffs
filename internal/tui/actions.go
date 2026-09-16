@@ -367,7 +367,7 @@ func exportSummaryLines(root transcripts.Root, m *bundle.Manifest, src bundle.Op
 				line += fmt.Sprintf("   %d live (may be truncated)", p.live)
 			}
 			lines = append(lines, line,
-				fmt.Sprintf("      tool-results %s (saved tool outputs — may contain pasted secrets)   file-history %s (backups of files Claude edited)   history %s (prompt history)",
+				fmt.Sprintf("      tool-results %s (saved tool outputs "+glyph.emdash+" may contain pasted secrets)   file-history %s (backups of files Claude edited)   history %s (prompt history)",
 					partSize(parts.ToolResults, p.toolResults), partSize(parts.FileHistory, p.fileHistory), partLines(parts.History, p.historyLines)))
 		}
 		if p.memoryFiles > 0 {
@@ -449,7 +449,7 @@ func importReceiptLines(cfgDir string, rep porter.Report, account string) []stri
 		acct = transcripts.HomeName
 	}
 	for _, key := range rep.TrustCarried {
-		lines = append(lines, fmt.Sprintf("  trust      carried over for %s → %q", shortPath(key), acct))
+		lines = append(lines, fmt.Sprintf("  trust      carried over for %s "+glyph.arrow+" %q", shortPath(key), acct))
 	}
 	if len(rep.LastSession) > 0 {
 		dirs := make([]string, 0, len(rep.LastSession))
@@ -473,7 +473,7 @@ func importReceiptLines(cfgDir string, rep porter.Report, account string) []stri
 		}
 	}
 	if n := len(rep.Pending); n > 0 {
-		lines = append(lines, fmt.Sprintf("    pending: %s imported as-is (directory missing here) — rehome them with r", countNoun(n, "session")))
+		lines = append(lines, fmt.Sprintf("    pending: %s imported as-is (directory missing here) "+glyph.emdash+" rehome them with r", countNoun(n, "session")))
 	}
 	if landed > 0 {
 		lines = append(lines, "",
@@ -529,7 +529,7 @@ func copyReceiptLines(rep porter.Report) []string {
 func rehomePlanLines(p rehome.Plan, maps []rehome.Mapping) []string {
 	lines := []string{"rehome in " + rootLabel(p.Root) + ":"}
 	for _, m := range maps {
-		lines = append(lines, fmt.Sprintf("  rule    %s → %s", m.Old, shortPath(m.New)))
+		lines = append(lines, fmt.Sprintf("  rule    %s "+glyph.arrow+" %s", m.Old, shortPath(m.New)))
 	}
 	for _, mv := range p.Moves {
 		title := mv.Title
@@ -538,7 +538,7 @@ func rehomePlanLines(p rehome.Plan, maps []rehome.Mapping) []string {
 		}
 		title = truncate(transcripts.Sanitize(title), 40)
 		from := filepath.Base(filepath.Dir(mv.From))
-		action := fmt.Sprintf("projects/%s → projects/%s", from, mv.NewSlug)
+		action := fmt.Sprintf("projects/%s "+glyph.arrow+" projects/%s", from, mv.NewSlug)
 		if mv.SameSlug {
 			action = fmt.Sprintf("projects/%s (already there; relocated stamp only)", mv.NewSlug)
 		}
@@ -553,7 +553,7 @@ func rehomePlanLines(p rehome.Plan, maps []rehome.Mapping) []string {
 		if mode == "" {
 			mode = rehome.MemoryMerge
 		}
-		lines = append(lines, fmt.Sprintf("  memory  %s → %s  (%s; the old directory stays)", shortPath(m.From), shortPath(m.To), mode))
+		lines = append(lines, fmt.Sprintf("  memory  %s "+glyph.arrow+" %s  (%s; the old directory stays)", shortPath(m.From), shortPath(m.To), mode))
 	}
 	for _, r := range p.Refusals {
 		lines = append(lines, "  "+refusalLine(r))
@@ -611,7 +611,7 @@ func rehomeResultLines(res rehome.Result) []string {
 		lines = append(lines, "moved no sessions")
 	}
 	for _, slug := range slugs {
-		lines = append(lines, fmt.Sprintf("moved %s → projects/%s (relocated stamp appended; mtimes and picker order preserved)", countNoun(perSlug[slug], "session"), slug))
+		lines = append(lines, fmt.Sprintf("moved %s "+glyph.arrow+" projects/%s (relocated stamp appended; mtimes and picker order preserved)", countNoun(perSlug[slug], "session"), slug))
 	}
 	if n := len(res.Moves) - len(res.Moved); n > 0 {
 		lines = append(lines, countNoun(n, "session")+" not moved (see the error)")

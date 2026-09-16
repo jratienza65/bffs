@@ -293,3 +293,23 @@ func TestRungsKeepRolesApart(t *testing.T) {
 		}
 	}
 }
+
+// BFFS_ASCII is the opt-in for a terminal whose font has no symbols: no
+// glyph bffs draws may be outside ASCII when it is set. The separator
+// and the state marks all come from one set (glyphs.go), so this is a
+// scan of the whole frame rather than a list of call sites.
+func TestAsciiModeDrawsOnlyAscii(t *testing.T) {
+	t.Setenv("BFFS_ASCII", "1")
+	for name, tweak := range goldenStates() {
+		t.Run(name, func(t *testing.T) {
+			frame := frameAt(t, 120, 32, tweak)
+			for i, line := range strings.Split(frame, "\n") {
+				for _, r := range line {
+					if r > 126 {
+						t.Fatalf("line %d draws %q with BFFS_ASCII=1: %q", i, string(r), line)
+					}
+				}
+			}
+		})
+	}
+}

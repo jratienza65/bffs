@@ -40,9 +40,9 @@ func resumeCommand(svc *services, s transcripts.Session) (*exec.Cmd, func(), err
 	case cwd == "":
 		return nil, nil, fmt.Errorf("session %s records no cwd; nothing to resume into", shortID(s.ID))
 	case !isDir(cwd):
-		return nil, nil, fmt.Errorf("cwd %s is missing on this machine — rehome the session first (r)", shortPath(cwd))
+		return nil, nil, fmt.Errorf("cwd %s is missing on this machine "+glyph.emdash+" rehome the session first (r)", shortPath(cwd))
 	case s.Root.Orphan:
-		return nil, nil, errors.New("orphan session dir: run it by hand — " + resumeLine(s))
+		return nil, nil, errors.New("orphan session dir: run it by hand " + glyph.emdash + " " + resumeLine(s))
 	}
 	account := porter.ResumeAccount(svc.cfgDir, s.Root, cwd)
 	args := []string{"--resume", s.ID}

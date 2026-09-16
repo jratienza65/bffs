@@ -104,7 +104,7 @@ func (s *driftScreen) mouse(msg tea.MouseMsg, x, y int) tea.Cmd {
 
 func (s *driftScreen) View(width, height int) string {
 	if s.busy {
-		return styleFaint.Render("comparing…")
+		return styleFaint.Render("comparing" + glyph.ellipsis)
 	}
 	s.vp.SetWidth(width)
 	s.vp.SetHeight(max(0, height-1))
@@ -112,7 +112,7 @@ func (s *driftScreen) View(width, height int) string {
 	if s.err != nil {
 		body = styleError.Render(truncate(transcripts.Sanitize(s.err.Error()), width))
 	}
-	return body + "\n" + styleFaint.Render(truncate("esc back · ↑/↓ scroll · S syncs the memory of this project to a full-isolation account", width))
+	return body + "\n" + styleFaint.Render(truncate("esc back"+sepDot+glyph.up+"/"+glyph.down+" scroll"+sepDot+"S syncs the memory of this project to a full-isolation account", width))
 }
 
 // driftDiffLines compares the reference root's memory against every
@@ -176,7 +176,7 @@ func diffSections(refDir, otherDir string, diffs []fileDrift, only string) []str
 		}
 		hunks := textdiff.Diff(there, here)
 		stat := textdiff.Count(hunks)
-		lines = append(lines, styleFaint.Render(fmt.Sprintf("    %d added, %d removed (there → here)", stat.Added, stat.Removed)))
+		lines = append(lines, styleFaint.Render(fmt.Sprintf("    %d added, %d removed (there "+glyph.arrow+" here)", stat.Added, stat.Removed)))
 		lines = append(lines, hunkLines(hunks)...)
 	}
 	if shown == 0 {

@@ -36,8 +36,12 @@ type app struct {
 }
 
 func newApp(svc *services) *app {
+	// Before anything that bakes a glyph into a value: the help
+	// bubble's separator, the key map, the fixed prompts.
+	resolveGlyphs()
 	h := help.New()
-	h.ShortSeparator = " · "
+	h.ShortSeparator = sepDot
+	h.Ellipsis = glyph.ellipsis
 	name, note := resolveThemeName(svc.state.Theme, osEnv)
 	if note != "" {
 		svc.warnings = append(svc.warnings, note)
@@ -46,7 +50,6 @@ func newApp(svc *services) *app {
 	p, _ := paletteByName(name)
 	themeProfile = detectProfile()
 	applyTheme(p, true)
-	resolveGlyphs()
 	return &app{svc: svc, ws: newWorkspace(svc), help: h, tracer: openTrace()}
 }
 
@@ -345,7 +348,7 @@ func (a *app) breadcrumb() string {
 	for _, s := range a.stack {
 		parts = append(parts, s.Title())
 	}
-	return strings.Join(parts, " › ")
+	return strings.Join(parts, " "+glyph.crumb+" ")
 }
 
 func (a *app) View() tea.View {

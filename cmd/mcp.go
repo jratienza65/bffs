@@ -76,6 +76,7 @@ config dir, so re-run install after moving either. Do not run it via
 		}
 		fmt.Fprintf(out, "\nRegistered %q with Claude Code. Restart claude (or run /mcp) to connect; tools appear as mcp__%s__<tool>.\n", mcpserver.ServerName, mcpserver.ServerName)
 		fmt.Fprintln(out, "Re-run `bffs mcp install` if you move the bffs binary or the config dir; undo with `bffs mcp uninstall`.")
+		fmt.Fprintln(out, skillInstallHint)
 		return nil
 	},
 }

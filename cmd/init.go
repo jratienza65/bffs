@@ -109,6 +109,7 @@ bootstrap) it behaves as --auto rather than hanging on a prompt.`,
 		reportOutcome(out, dir, probeInstallDir(dir, self))
 
 		fmt.Fprintln(out, "\nOptional: let Claude Code inspect and switch bffs accounts itself:  bffs mcp install")
+		fmt.Fprintln(out, skillInstallHint)
 		return nil
 	},
 }

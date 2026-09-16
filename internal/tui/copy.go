@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -283,7 +282,7 @@ func (s *copyScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
 }
 
 func (s *copyScreen) View(width, height int) string {
-	head := styleFaint.Render(truncate("copy "+s.tgt.what()+"  from "+shortRootLabel(s.tgt.root), width))
+	head := styleFaint.Render("copy " + s.tgt.what() + "  from " + shortRootLabel(s.tgt.root))
 	switch s.state {
 	case copyPick, copyPlanning:
 		lines := []string{head, "", "  " + pad("ACCOUNT", 16) + " " + pad("TYPE", 14) + " DESTINATION"}
@@ -308,9 +307,9 @@ func (s *copyScreen) View(width, height int) string {
 		if s.state == copyPlanning {
 			lines = append(lines, "", "planning"+glyph.ellipsis)
 		} else {
-			lines = append(lines, "", styleFaint.Render(truncate("enter chooses the destination"+sepDot+"greyed rows share the source pool"+sepDot+"esc goes back", width)))
+			lines = append(lines, "", styleFaint.Render("enter chooses the destination"+sepDot+"greyed rows share the source pool"+sepDot+"esc goes back"))
 		}
-		return strings.Join(lines, "\n")
+		return joinLines(lines, width)
 	case copyConfirm:
 		body := []string{fmt.Sprintf("plan: %s, %s  from %s  to  %s", countNoun(len(s.sel.Sessions), "session"), countNoun(len(s.sel.Memories), "memory dir"), shortPath(s.tgt.root.Dir), shortPath(s.dest.root.Dir))}
 		for _, sess := range s.sel.Sessions {
@@ -336,5 +335,5 @@ func (s *copyScreen) View(width, height int) string {
 	default:
 		lines = append(lines, styleFaint.Render("esc cancels (a session in flight is rolled back; landed ones stay)"))
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }

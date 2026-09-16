@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,16 +12,30 @@ import (
 // from a path that may have been recorded on another machine, so it is
 // sanitised and escaped before it is handed to the terminal to act on.
 func TestFileURL(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
+	// What counts as a local path is the platform's business: a rooted
+	// POSIX path is not absolute on Windows, and a path from another
+	// machine is not a file here — so it gets no link either way.
+	cases := []struct{ in, want string }{
 		{"/home/d/.claude/projects/x", "file:///home/d/.claude/projects/x"},
 		{"/home/d/my notes/MEMORY.md", "file:///home/d/my%20notes/MEMORY.md"},
 		{"/home/d/a#b?c", "file:///home/d/a%23b%3Fc"},
-		{"relative/path", ""},
-		{"", ""},
+
 		// Sanitize drops the whole sequence, payload included, not just
 		// the escape byte that opens it.
 		{"/home/d/\x1b]52;c;cGF5bG9hZA==\x07evil", "file:///home/d/evil"},
-	} {
+	}
+	if runtime.GOOS == "windows" {
+		cases = []struct{ in, want string }{
+			{`C:\Users\d\.claude\projects\x`, "file:///C:/Users/d/.claude/projects/x"},
+			{`C:\Users\d\my notes\MEMORY.md`, "file:///C:/Users/d/my%20notes/MEMORY.md"},
+			{"/home/d/.claude/projects/x", ""}, // rooted, but not a path here
+		}
+	}
+	cases = append(cases,
+		struct{ in, want string }{"relative/path", ""},
+		struct{ in, want string }{"", ""},
+	)
+	for _, tc := range cases {
 		if got := fileURL(tc.in); got != tc.want {
 			t.Errorf("fileURL(%q) = %q, want %q", tc.in, got, tc.want)
 		}

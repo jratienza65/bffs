@@ -943,9 +943,9 @@ func (s *receiveScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
 }
 
 func (s *receiveScreen) View(width, height int) string {
-	head := styleFaint.Render(truncate("receive into "+shortRootLabel(s.root)+"  ("+shortPath(s.root.Dir)+")", width))
+	head := styleFaint.Render("receive into " + shortRootLabel(s.root) + "  (" + shortPath(s.root.Dir) + ")")
 	if s.file != "" {
-		head = styleFaint.Render(truncate("import "+shortPath(s.file)+" into "+shortRootLabel(s.root)+"  ("+shortPath(s.root.Dir)+")", width))
+		head = styleFaint.Render("import " + shortPath(s.file) + " into " + shortRootLabel(s.root) + "  (" + shortPath(s.root.Dir) + ")")
 	}
 	var lines []string
 	switch s.state {
@@ -957,22 +957,22 @@ func (s *receiveScreen) View(width, height int) string {
 		case s.state == recvResolving:
 			lines = append(lines, "checking that the address is on this machine's local network"+glyph.ellipsis)
 		case s.note != "":
-			lines = append(lines, styleError.Render(truncate(s.note, width)))
+			lines = append(lines, styleError.Render(s.note))
 		default:
-			lines = append(lines, styleFaint.Render(truncate("only an address on a local network of this machine is dialled; the other machine runs bffs export --serve (or s here)", width)))
+			lines = append(lines, styleFaint.Render("only an address on a local network of this machine is dialled; the other machine runs bffs export --serve (or s here)"))
 		}
-		return strings.Join(lines, "\n")
+		return joinLines(lines, width)
 	case recvConnecting:
 		lines = []string{head, "", fmt.Sprintf("connecting to %s"+glyph.ellipsis, fromTarget(s.addr.Addr(), s.addr.Port()))}
 	case recvCode:
 		lines = append([]string{head, ""}, s.events...)
 		lines = append(lines, "", s.code.View())
 		if s.note != "" {
-			lines = append(lines, styleError.Render(truncate(s.note, width)))
+			lines = append(lines, styleError.Render(s.note))
 		} else {
 			lines = append(lines, styleFaint.Render("XXXX-XXXX as shown there; case, dashes and spaces do not matter; enter sends it, esc cancels"))
 		}
-		return strings.Join(lines, "\n")
+		return joinLines(lines, width)
 	case recvAuth:
 		lines = append([]string{head, ""}, s.events...)
 		lines = append(lines, "", "waiting for the manifest"+glyph.ellipsis)
@@ -992,10 +992,10 @@ func (s *receiveScreen) View(width, height int) string {
 		if s.state == recvPath {
 			lines = append(lines, "", s.input.View())
 			if s.note != "" {
-				lines = append(lines, styleError.Render(truncate(s.note, width)))
+				lines = append(lines, styleError.Render(s.note))
 			}
 		}
-		return strings.Join(lines, "\n")
+		return joinLines(lines, width)
 	case recvConfirm:
 		return s.box.view([]string{head, ""}, s.summaryLines(), []string{"", fmt.Sprintf("Import into %s? [y/N]", shortPath(s.root.ConfigDir))}, width, height)
 	case recvImporting:
@@ -1013,5 +1013,5 @@ func (s *receiveScreen) View(width, height int) string {
 	default:
 		lines = append(lines, "", styleFaint.Render("esc cancels"))
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }

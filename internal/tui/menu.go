@@ -151,7 +151,7 @@ func (s *menuScreen) View(width, height int) string {
 		hint = fmt.Sprintf("items %d-%d of %d"+sepDot+glyph.up+"/"+glyph.down+" or the wheel"+sepDot+"enter runs it"+sepDot+"esc closes", s.offset+1, min(len(s.items), s.offset+s.avail), len(s.items))
 	}
 	lines = append(lines, "", styleFaint.Render(truncate(hint, width)))
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }
 
 // helpScreen renders every binding, grouped, in a scrollable overlay.

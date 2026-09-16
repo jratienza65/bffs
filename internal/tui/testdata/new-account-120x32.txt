@@ -1,14 +1,14 @@
 bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
-┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ receive ─────────────────────────────────────────────────────────────────┐
-│   alpha                       ● active │ │ receive into shared pool: alpha, beta  (/home/d/.claude/projects)         │
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ new account ─────────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ a new account for this machine · esc goes back                            │
 │   beta                         partial │ │                                                                           │
-│   work                            full │ │ from: IPv4 address, or host[:port], shown on the other machine            │
-│                                        │ │ only an address on a local network of this machine is dialled; the        │
-├─ 2 projects ───────────────────── 1/3 ─┤ │   other machine runs bffs export --serve (or s here)                      │
-│ 3 projects in /home/d/.claude/projects │ │                                                                           │
-│ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
+│   work                            full │ │ > Claude subscription (oauth)                                             │
+│                                        │ │      opens `claude auth login` in this terminal; the credential stays     │
+├─ 2 projects ───────────────────── 1/3 ─┤ │        in Claude's own store                                              │
+│ 3 projects in /home/d/.claude/projects │ │   API key (sk-ant-…)                                                      │
+│ >   /home/d/build/pr…   3 mem 1h ago   │ │      stored in accounts.toml at 0600 on this machine                      │
 │     /home/d/build/si…   4     1d ago   │ │                                                                           │
-│   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │ ↑/↓ chooses · enter continues                                             │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │
@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 
-TYPE  enter connect · esc cancel · x more · ? keys · q quit
+ACTION  ↑/k up · ↓/j down · enter choose · esc cancel · x more · ? keys · q quit

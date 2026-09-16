@@ -397,5 +397,5 @@ func (s *trustScreen) View(width, height int) string {
 	} else if s.state == trustMatrix {
 		lines = append(lines, styleFaint.Render(truncate("enter or y on a row carries the answers of the best source to that account", width)))
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }

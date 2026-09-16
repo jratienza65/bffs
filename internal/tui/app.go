@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
@@ -27,6 +28,7 @@ type app struct {
 
 	status     string
 	statusKind noteKind
+	keyAt      time.Time // when the last key arrived (momentum, below)
 	statusAt   time.Time
 	toast      toast
 	toastSeq   int
@@ -84,7 +86,15 @@ func (a *app) contentHeight() int { return max(0, a.height-3) }
 
 // mainSize is the size an overlay draws into: the main pane's inside.
 func (a *app) mainSize() tea.WindowSizeMsg {
-	return tea.WindowSizeMsg{Width: a.ws.mainInner(), Height: a.ws.bodyHeight()}
+	w := a.ws.mainInner()
+	if w == 0 && a.top() != nil {
+		// Below the breakpoint the side column takes the width, but an
+		// overlay is always drawn in the main pane alone (workspace.View
+		// widens it there), so it is as wide as the frame. Telling it
+		// zero is how every head and hint came out empty.
+		w = max(0, a.ws.width-2-2*padX)
+	}
+	return tea.WindowSizeMsg{Width: w, Height: a.ws.bodyHeight()}
 }
 
 // forward sends msg to the top overlay and stores what it returns.
@@ -210,6 +220,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 
 	case tea.KeyPressMsg:
+		a.keyAt = time.Now()
 		cmd := a.handleKey(msg)
 		a.trace("key:" + msg.String())
 		return a, cmd
@@ -261,6 +272,17 @@ func (a *app) modeLabel() (string, bool) {
 	return "BROWSE", false
 }
 
+// copyOverlay puts the text an overlay is showing on the clipboard, as
+// drawn and with the styling stripped.
+func (a *app) copyOverlay(s Screen) tea.Cmd {
+	size := a.mainSize()
+	text := strings.TrimRight(ansi.Strip(s.View(size.Width, size.Height)), " \n")
+	if strings.TrimSpace(text) == "" {
+		return statusWarn("nothing to copy here")
+	}
+	return tea.Batch(tea.SetClipboard(text), statusDone(copiedNote(text)))
+}
+
 // post puts a note on the status line and starts the timer that takes
 // it down: a note left standing is read as the answer to the next key.
 func (a *app) post(kind noteKind, text string) tea.Cmd {
@@ -308,6 +330,11 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return a.push(newHelpScreen(a.overlayHelpGroups(s)))
 		case key.Matches(msg, keys.Back) && !key.Matches(msg, screenKeys...):
 			return popScreen()
+		case key.Matches(msg, keys.Yank) && !key.Matches(msg, screenKeys...):
+			// An overlay is not a viewport, so a drag cannot select in
+			// it; y takes what it is showing instead. A confirmation
+			// binds y for "yes", and the guard above leaves it alone.
+			return a.copyOverlay(s)
 		case key.Matches(msg, reservedKeys) && !key.Matches(msg, screenKeys...):
 			return statusWarn(reservedHint)
 		}
@@ -332,8 +359,24 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 // handleMouse routes a mouse event: to the overlay when one is open
 // (in its own content coordinates), else to the workspace. The mouse
 // only ever accelerates what the keyboard can already do.
+// momentumWindow is how long after a key press a wheel event is taken
+// for inertia rather than intent. It is a variable because the model
+// tests drive a key and a wheel event in the same microsecond, which no
+// hand can do; they set it to zero and the test that is about the
+// window sets it back.
+var momentumWindow = 350 * time.Millisecond
+
 func (a *app) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	m := msg.Mouse()
+	// A touchpad keeps sending wheel events after the fingers lift —
+	// macOS momentum runs for about a second — and they are already on
+	// their way when a key is pressed. Without this, esc could not
+	// interrupt a scroll: the keystroke was handled and then the tail
+	// of the flick carried on scrolling. A key stops the inertia, the
+	// way it does in every other scrolling program.
+	if _, ok := msg.(tea.MouseWheelMsg); ok && time.Since(a.keyAt) < momentumWindow {
+		return nil
+	}
 	y := m.Y - 1 // the header line
 	if s := a.top(); s != nil {
 		h, ok := s.(mouser)

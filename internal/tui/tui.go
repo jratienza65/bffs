@@ -43,7 +43,9 @@ func Run(ctx context.Context, o Options) error {
 	if err != nil {
 		return err
 	}
-	p := tea.NewProgram(newApp(svc), tea.WithContext(ctx))
+	a := newApp(svc)
+	defer a.closeTrace()
+	p := tea.NewProgram(a, tea.WithContext(ctx))
 	if _, err := p.Run(); err != nil {
 		switch {
 		case errors.Is(err, tea.ErrInterrupted):

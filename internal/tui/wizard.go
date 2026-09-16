@@ -826,7 +826,7 @@ func (s *wizardScreen) checklistView(lines []string, width, height int) string {
 	if s.note != "" {
 		lines = append(lines, "", styleError.Render(truncate(s.note, width)))
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }
 
 // mouse picks the row or option under the pointer; the wheel moves the
@@ -937,7 +937,7 @@ func (s *wizardScreen) View(width, height int) string {
 		} else {
 			lines = append(lines, styleFaint.Render("the manifest is shown and confirmed before anything is written"))
 		}
-		return strings.Join(lines, "\n")
+		return joinLines(lines, width)
 	}
 	s.bodyTop = len(lines)
 	for i, o := range s.options() {
@@ -960,7 +960,7 @@ func (s *wizardScreen) View(width, height int) string {
 	if s.note != "" {
 		lines = append(lines, "", styleError.Render(truncate(s.note, width)))
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }
 
 // lipglossWidthOf is lipgloss.Width, named for the checklist layout.

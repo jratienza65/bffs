@@ -17,6 +17,9 @@ func TestTraceRecordsEventsWhenAsked(t *testing.T) {
 	a := goldenApp(t, 120, 32, func(a *app) { _ = a.ws.setFocus(panelItems) })
 	a.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 	a.Update(tea.MouseWheelMsg{X: 20, Y: 10, Button: tea.MouseWheelDown})
+	// Read it after the writer has let go: on Windows an open file
+	// cannot be deleted, so leaving it open fails the temp-dir cleanup.
+	a.closeTrace()
 
 	b, err := os.ReadFile(path)
 	if err != nil {

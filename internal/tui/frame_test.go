@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -127,11 +128,15 @@ func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("BFFS_THEME", "")
 	goldenTZ(t)
+	prevWindow := momentumWindow
+	momentumWindow = 0
+	t.Cleanup(func() { momentumWindow = prevWindow })
 	prevHost := osHostname
 	osHostname = func() (string, error) { return "mac-a", nil }
 	t.Cleanup(func() { osHostname = prevHost })
 	svc := goldenServices()
 	a := newApp(svc)
+	t.Cleanup(a.closeTrace) // BFFS_DEBUG leaves a file open otherwise
 	ws := a.ws
 	ws.roots = svc.roots
 
@@ -345,8 +350,28 @@ func checkGolden(t *testing.T, name, got string) {
 		t.Fatalf("%v (run: make golden)", err)
 	}
 	if got != string(want) {
-		t.Fatalf("frame %s differs (make golden rewrites it; read the diff first)\n--- want ---\n%s\n--- got ---\n%s", name, want, got)
+		t.Fatalf("frame %s differs (make golden rewrites it; read the diff first)\n%s", name, firstDiff(string(want), got))
 	}
+}
+
+// firstDiff names the first line that differs and shows both, then the
+// whole of each frame. A CI log is read in one pass, so the line that
+// matters comes first.
+func firstDiff(want, got string) string {
+	w, g := strings.Split(want, "\n"), strings.Split(got, "\n")
+	for i := 0; i < max(len(w), len(g)); i++ {
+		a, b := "", ""
+		if i < len(w) {
+			a = w[i]
+		}
+		if i < len(g) {
+			b = g[i]
+		}
+		if a != b {
+			return fmt.Sprintf("first difference on line %d:\nwant %q\n got %q\n\n--- want ---\n%s\n--- got ---\n%s", i+1, a, b, want, got)
+		}
+	}
+	return fmt.Sprintf("--- want ---\n%s\n--- got ---\n%s", want, got)
 }
 
 // states are the frames worth pinning: every panel focused, both tabs,
@@ -400,6 +425,9 @@ func goldenStates() map[string]func(*app) {
 			lines = append(lines, styleFaint.Render(fmt.Sprintf("    %d added, %d removed (there "+glyph.arrow+" here)", stat.Added, stat.Removed)))
 			_ = a.forward(diffLoadedMsg{key: sc.key, lines: append(lines, hunkLines(hunks)...)})
 		},
+		"new-account": func(a *app) {
+			a.stack = append(a.stack, newNewAccountScreen(a.svc))
+		},
 		"trust": func(a *app) {
 			cwd := a.ws.projectCwd()
 			a.stack = append(a.stack, newTrustScreen(a.svc, cwd))
@@ -439,6 +467,16 @@ func goldenStates() map[string]func(*app) {
 // Every state at the standard size, pinned. When one of these changes, the
 // diff of the golden is the review.
 func TestGoldenFrames(t *testing.T) {
+	// A frame golden holds one rendering of a path, and paths are not
+	// rendered the same everywhere: Windows's filepath cleans
+	// separators to backslashes and treats a rooted POSIX path as
+	// relative, so it carries no file:// link. Both are correct there
+	// and make a different frame. Everything that holds on every OS
+	// keeps running — the fit sweep, the paint scans, the ASCII sweep,
+	// the rung table (which has no paths in it) and every model test.
+	if runtime.GOOS == "windows" {
+		t.Skip("goldens pin a Unix rendering of paths; the fit and paint sweeps still run here")
+	}
 	for name, tweak := range goldenStates() {
 		t.Run(name, func(t *testing.T) {
 			checkGolden(t, name+"-120x32", frameAt(t, 120, 32, tweak))

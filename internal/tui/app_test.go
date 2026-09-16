@@ -55,6 +55,9 @@ func newFixture(t *testing.T) *fixture {
 	// A note's expiry is a tea.Tick and the harness runs commands where
 	// they are returned, so the timers are off here; the test that is
 	// about expiry sends statusOutMsg itself.
+	prevWindow := momentumWindow
+	momentumWindow = 0 // a test's key and wheel arrive in the same instant
+	t.Cleanup(func() { momentumWindow = prevWindow })
 	prevNote, prevToast := expireNote, expireToast
 	expireNote = func(time.Time) tea.Cmd { return nil }
 	expireToast = func(int) tea.Cmd { return nil }
@@ -192,6 +195,7 @@ func (f *fixture) start(start string) *harness {
 	}
 	svc.now = func() time.Time { return fixedNow }
 	h := &harness{t: f.t, a: newApp(svc)}
+	f.t.Cleanup(h.a.closeTrace)
 	h.run(h.a.Init())
 	h.send(tea.WindowSizeMsg{Width: 400, Height: 40})
 	return h

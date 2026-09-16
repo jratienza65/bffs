@@ -123,6 +123,9 @@ func (s *serveScreen) Keys() []key.Binding {
 	if s.state == serveConfirm {
 		return append([]key.Binding{keys.Yes, keys.No}, scrollKeys()...)
 	}
+	if s.state == serveServing {
+		return []key.Binding{key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy the code")), keys.Cancel}
+	}
 	return []key.Binding{keys.Cancel}
 }
 
@@ -397,6 +400,12 @@ func (s *serveScreen) key(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, nil
 	}
 	switch {
+	case msg.String() == "c" && s.state == serveServing:
+		// The code has to be typed on the other machine, and a
+		// terminal that has the mouse cannot be asked to select it.
+		// It is already on this screen; the clipboard is not a new
+		// place for it, and it still reaches no log and no argv.
+		return s, tea.Batch(tea.SetClipboard(s.code.Display()), statusDone("copied the pairing code"))
 	case key.Matches(msg, keys.Cancel):
 		s.op.stop()
 	case key.Matches(msg, keys.Quit):
@@ -416,7 +425,7 @@ func (s *serveScreen) banner(width int) []string {
 		target = fromTarget(s.addr.Addr(), s.addr.Port())
 	}
 	lines := []string{
-		truncate("On the other machine, run:    bffs import --from "+target, width),
+		"On the other machine, run:    bffs import --from " + target,
 		"",
 	}
 	box := strings.Split(styleCode.Render(s.code.Display()), "\n")
@@ -429,7 +438,7 @@ func (s *serveScreen) banner(width int) []string {
 	}
 	left := time.Until(s.deadline)
 	lines = append(lines, "",
-		truncate(fmt.Sprintf("Waiting for the other machine"+glyph.ellipsis+"  code valid for %s, %d attempts, one transfer.   (esc cancels)", fmtMMSS(left), serveAttempts), width))
+		fmt.Sprintf("Waiting for the other machine"+glyph.ellipsis+"  code valid for %s, %d attempts, one transfer.   (c copies the code"+sepDot+"esc cancels)", fmtMMSS(left), serveAttempts))
 	return lines
 }
 
@@ -443,7 +452,7 @@ func (s *serveScreen) mouse(msg tea.MouseMsg, _, _ int) tea.Cmd {
 }
 
 func (s *serveScreen) View(width, height int) string {
-	head := styleFaint.Render(truncate("send "+s.tgt.what()+"  from "+shortRootLabel(s.tgt.root)+" over the LAN", width))
+	head := styleFaint.Render("send " + s.tgt.what() + "  from " + shortRootLabel(s.tgt.root) + " over the LAN")
 	switch s.state {
 	case servePreparing:
 		lines := []string{head, "", s.prog.view(width), ""}
@@ -454,7 +463,7 @@ func (s *serveScreen) View(width, height int) string {
 		} else {
 			lines = append(lines, styleFaint.Render("esc cancels"))
 		}
-		return strings.Join(lines, "\n")
+		return joinLines(lines, width)
 	case serveConfirm:
 		body := append([]string{}, s.summary...)
 		for _, w := range s.warnings {
@@ -464,9 +473,7 @@ func (s *serveScreen) View(width, height int) string {
 			[]string{"", "Serve this over the local network? A pairing code is shown next; the other machine runs bffs import --from <this address>. [y/N]"}, width, height)
 	}
 	lines := append([]string{head, ""}, s.banner(width)...)
-	for _, e := range s.events {
-		lines = append(lines, truncate(e, width))
-	}
+	lines = append(lines, s.events...)
 	if s.sending {
 		lines = append(lines, s.prog.view(width))
 	}
@@ -476,5 +483,5 @@ func (s *serveScreen) View(width, height int) string {
 	case s.op.cancelled():
 		lines = append(lines, "", cancelling)
 	}
-	return strings.Join(lines, "\n")
+	return joinLines(lines, width)
 }

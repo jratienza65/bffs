@@ -11,6 +11,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jratienza65/bffs/internal/bundle"
 	"github.com/jratienza65/bffs/internal/transcripts"
@@ -202,6 +204,11 @@ func newInput(prompt, placeholder string) textinput.Model {
 	ti.Placeholder = placeholder
 	st := ti.Styles()
 	st.Cursor.Blink = false
+	// The placeholder is a hint, not content: it takes the theme's
+	// faint token so it recedes on every palette and still reads on a
+	// terminal with sixteen colours.
+	st.Focused.Placeholder = styleFaint
+	st.Blurred.Placeholder = styleFaint
 	ti.SetStyles(st)
 	_ = ti.Focus()
 	return ti
@@ -295,7 +302,13 @@ var cancelling = "cancelling" + glyph.ellipsis
 type scrollBox struct{ offset int }
 
 // view lays head, a window of body and footer into height lines.
+//
+// Every part is wrapped to the width first, because a summary line is
+// a sentence — a path, a warning, a question — and cutting it at the
+// pane edge loses the end of it. Wrapping before the window is what
+// keeps the scroll arithmetic counting the lines the reader sees.
 func (b *scrollBox) view(head, body, footer []string, width, height int) string {
+	head, body, footer = wrapAll(head, width), wrapAll(body, width), wrapAll(footer, width)
 	out := append([]string{}, head...)
 	avail := max(1, height-len(head)-len(footer))
 	if len(body) <= avail {
@@ -313,7 +326,7 @@ func (b *scrollBox) view(head, body, footer []string, width, height int) string 
 		out = append(out, body[b.offset:end]...)
 		out = append(out, fmt.Sprintf("  "+glyph.up+"/"+glyph.down+" scroll"+sepDot+"lines %d-%d of %d", b.offset+1, end, len(body)))
 	}
-	return joinLines(append(out, footer...), width)
+	return strings.Join(append(out, footer...), "\n")
 }
 
 // key handles the scrolling keys; ok is false for anything else, which
@@ -377,9 +390,90 @@ func vpMouse(vp *viewport.Model, msg tea.MouseMsg) tea.Cmd {
 func scrollKeys() []key.Binding { return []key.Binding{keys.Up, keys.Down} }
 
 func joinLines(lines []string, width int) string {
-	out := make([]string, len(lines))
-	for i, l := range lines {
-		out[i] = truncate(transcripts.Sanitize(l), width)
+	return strings.Join(wrapAll(lines, width), "\n")
+}
+
+// sanitizeStyled keeps the styling a line was rendered with and drops
+// everything else an escape could do: only SGR (ESC[…m) survives.
+//
+// The blanket transcripts.Sanitize this replaces threw the styling away
+// with it — an overlay's head, hints and errors were drawn plain
+// whatever token they were rendered with. Data still cannot reach the
+// terminal: a path or a hostname from another machine carries no SGR of
+// its own, and anything else it carries — a hyperlink, a clipboard
+// write, a window title, a control character — is dropped here as well
+// as at the call site that sanitised it on the way in.
+func sanitizeStyled(s string) string {
+	if !strings.ContainsAny(s, "\x1b\x07") && strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) < 0 {
+		return s
 	}
-	return strings.Join(out, "\n")
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c != 0x1b {
+			if c >= 0x20 && c != 0x7f {
+				b.WriteByte(c)
+			}
+			i++
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+				j++
+			}
+			if j < len(s) {
+				if s[j] == 'm' {
+					b.WriteString(s[i : j+1]) // styling, and only styling
+				}
+				i = j + 1
+				continue
+			}
+			return b.String() // a truncated sequence ends the line
+		}
+		// Any other escape — OSC, a charset switch, a bare ESC — goes.
+		j := i + 1
+		for j < len(s) && s[j] != 0x07 && s[j] != 0x1b && !(s[j] >= 0x40 && s[j] <= 0x7e) {
+			j++
+		}
+		if j < len(s) && s[j] == 0x07 {
+			j++
+		} else if j < len(s) && s[j] != 0x1b {
+			j++
+		}
+		i = j
+	}
+	return b.String()
+}
+
+// wrapAll sanitises each line and wraps it to width, indenting the
+// continuations by the line's own indentation plus two columns so a
+// wrapped line reads as the tail of the one above rather than as a new
+// one. Styling survives: the cut and the wrap walk cells, not bytes.
+func wrapAll(lines []string, width int) []string {
+	if width < 8 {
+		width = 8
+	}
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		l = sanitizeStyled(l)
+		if lipgloss.Width(l) <= width {
+			out = append(out, l)
+			continue
+		}
+		plain := ansi.Strip(l)
+		lead := len(plain) - len(strings.TrimLeft(plain, " "))
+		cont := strings.Repeat(" ", min(width/2, lead+2))
+		avail := max(4, width-lipgloss.Width(cont))
+		body := ansi.Cut(l, lead, lipgloss.Width(l))
+		for i, part := range strings.Split(ansi.Wrap(body, avail, ""), "\n") {
+			if i == 0 {
+				out = append(out, strings.Repeat(" ", lead)+part)
+				continue
+			}
+			out = append(out, cont+part)
+		}
+	}
+	return out
 }

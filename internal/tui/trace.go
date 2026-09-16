@@ -57,6 +57,17 @@ func (a *app) trace(event string) {
 		top, a.busy(), ws.previewKey, a.status)
 }
 
+// closeTrace releases the trace file. The browser holds it open for the
+// life of the program, which is fine until something outlives it: on
+// Windows an open file cannot be deleted, so a test's temporary
+// directory could not be cleaned up.
+func (a *app) closeTrace() {
+	if a.tracer != nil {
+		_ = a.tracer.Close()
+		a.tracer = nil
+	}
+}
+
 // traceMouse names a mouse event the way the driver's script spells it.
 func traceMouse(msg tea.MouseMsg) string {
 	m := msg.Mouse()

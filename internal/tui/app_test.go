@@ -195,6 +195,7 @@ func (f *fixture) start(start string) *harness {
 	}
 	svc.now = func() time.Time { return fixedNow }
 	h := &harness{t: f.t, a: newApp(svc)}
+	f.t.Cleanup(h.a.closeTrace)
 	h.run(h.a.Init())
 	h.send(tea.WindowSizeMsg{Width: 400, Height: 40})
 	return h

@@ -136,6 +136,7 @@ func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 	t.Cleanup(func() { osHostname = prevHost })
 	svc := goldenServices()
 	a := newApp(svc)
+	t.Cleanup(a.closeTrace) // BFFS_DEBUG leaves a file open otherwise
 	ws := a.ws
 	ws.roots = svc.roots
 

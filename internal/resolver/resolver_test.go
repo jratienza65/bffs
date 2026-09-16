@@ -63,6 +63,73 @@ func TestProjectWinsOverGlobal(t *testing.T) {
 	}
 }
 
+func TestPathRuleWinsOverGlobal(t *testing.T) {
+	cfg := setupAccounts(t)
+	if err := store.SaveState(cfg, store.State{Active: "work"}); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	var p store.Paths
+	if _, err := p.Set(cwd, "personal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePaths(cfg, p); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAccount, "")
+	r, err := Resolve(cfg, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Source != SourcePath || r.Account.Name != "personal" {
+		t.Errorf("got %+v", r)
+	}
+	if r.PathRule == "" {
+		t.Error("PathRule should be set")
+	}
+}
+
+// A checked-in bffs.toml is the more explicit statement, so a path rule must
+// never re-point a repo that is already pinned by a file in the tree.
+func TestProjectWinsOverPathRule(t *testing.T) {
+	cfg := setupAccounts(t)
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, projectconfig.Filename), []byte(`account = "work"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var p store.Paths
+	if _, err := p.Set(cwd, "personal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePaths(cfg, p); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAccount, "")
+	r, err := Resolve(cfg, cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Source != SourceProject || r.Account.Name != "work" {
+		t.Errorf("got %+v", r)
+	}
+}
+
+func TestUnknownAccountFromPathRuleErrors(t *testing.T) {
+	cfg := setupAccounts(t)
+	cwd := t.TempDir()
+	var p store.Paths
+	if _, err := p.Set(cwd, "ghost"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePaths(cfg, p); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAccount, "")
+	if _, err := Resolve(cfg, cwd); err == nil {
+		t.Fatal("expected error for path rule naming an unknown account")
+	}
+}
+
 func TestGlobalWhenNoProject(t *testing.T) {
 	cfg := setupAccounts(t)
 	if err := store.SaveState(cfg, store.State{Active: "work"}); err != nil {

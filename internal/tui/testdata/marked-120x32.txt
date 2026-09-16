@@ -1,0 +1,32 @@
+bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ session 1e005053 ────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ session:      1e005053-380a-4245-a145-52c2715afa73                        │
+│   beta                         partial │ │ title:        Session and memory import/export  (custom)                  │
+│   work                            full │ │ root:         /home/d/.claude/projects  (shared pool: alpha, beta)        │
+│                                        │ │ project dir:  /home/d/.claude/projects/-home-d-build-projects-bffs        │
+├─ 2 projects ───────────────────── 1/3 ─┤ │ cwd:          /home/d/build/projects/bffs  (exists)                       │
+│     /home/d/build/pr…   3 mem 1h ago   │ │ account:      alpha  (last-session)                                       │
+│     /home/d/build/si…   4     1d ago   │ │ state:        live (pid 4213)                                             │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │ last-session pointer: alpha (claude-recorded)                             │
+│                                        │ │ first:        2026-08-24 09:00  (3h ago)                                  │
+├─ 3 SESSIONS | memory ──────────── 1/3 ─┤ │ last:         2026-08-24 11:00  (1h ago)                                  │
+│ 3 sessions · 1 live                    │ │ size:         5.2 MB                                                      │
+│ > *● Session and memory impo… 1h ago   │ │ branch:       main                                                        │
+│   *  Plan: session export     4h ago   │ │ version:      2.1.259                                                     │
+│    ↓ prompt from the other m… 9d ago   │ │ transcript:   /home/d/.claude/projects/-home-d-build-projects-bffs/1e0050 │
+│                                        │ │ 53-380a-4245-a145-52c2715afa73.jsonl                                      │
+│                                        │ │ sidecar:      /home/d/.claude/projects/-home-d-build-projects-bffs/1e0050 │
+│                                        │ │ 53-380a-4245-a145-52c2715afa73  (18 KB, 0 subagents)                      │
+│                                        │ │ file-history: /home/d/.claude/file-history/1e005053-380a-4245-a145-52c271 │
+│                                        │ │ 5afa73                                                                    │
+│                                        │ │ tasks:        /home/d/.claude/todos/1e005053-380a-4245-a145-52c2715afa73  │
+│                                        │ │  (absent)                                                                 │
+│                                        │ │ plan:         -                                                           │
+│                                        │ │ resume:       cd /home/d/build/projects/bffs && claude --resume 1e005053- │
+│                                        │ │ 380a-4245-a145-52c2715afa73                                               │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+└────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
+
+enter transcript · space mark · R resume · e export · ] memory tab · x more · ? keys · q quit

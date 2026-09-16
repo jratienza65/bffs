@@ -1,0 +1,32 @@
+bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ keys ────────────────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │                                                                           │
+│   beta                         partial │ │                                                                           │
+│   work                            full │ │                                                                           │
+│                                        │ │                                                                           │
+├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
+│ 3 projects in /home/d/.claude/projects │ │                                                                           │
+│ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
+│     /home/d/build/si…   4     1d ago   │ │                                                                           │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+├─ 3 SESSIONS | memory ──────────── 1/3 ─┤ │                                                                           │
+│    ● Session and memory impo… 1h ago   │ │                                                                           │
+│      Plan: session export     4h ago   │ │                                                                           │
+│    ↓ prompt from the other m… 9d ago   │ │                                                                           │
+│                                        │ │                                                                           │
+└────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
+
+↑/k up · ↓/j down · pgup page up · pgdown page down · esc done · x more · ? keys · q quit

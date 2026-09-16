@@ -419,7 +419,7 @@ func TestNarrowLayout(t *testing.T) {
 	}
 	wantAll(t, h.view(), "1 accounts")
 	h.send(tea.WindowSizeMsg{Width: 30, Height: 10})
-	wantAll(t, h.view(), "too small: need 40×12")
+	wantAll(t, h.view(), "too small", "need 40×12", "have 30×10")
 }
 
 // Panel 1 lists the accounts as perspectives: the active one first and

@@ -1,0 +1,32 @@
+bffs test  alpha › /home/d/build/projects/bffs › memory                                                                 
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ memory MEMORY.md ────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ MEMORY.md  /home/d/.claude/projects/-home-d-build-projects-bffs/memory/ME │
+│   beta                         partial │ │ MORY.md                                                                   │
+│   work                            full │ │   read by      shared pool — visible to: alpha, beta                      │
+│                                        │ │   drift        account: work: differs                                     │
+├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
+│     /home/d/build/pr…   3 mem 1h ago   │ │ REFERENCES  absolute paths and @-refs inside the file                     │
+│     /home/d/build/si…   4     1d ago   │ │   @~/notes.md  (missing)                                                  │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
+│                                        │ │ CONTENT                                                                   │
+├─ 3 sessions | MEMORY ──────────── 1/2 ─┤ │ # MEMORY.md                                                               │
+│ 2 files · 1 pinned · /home/d/.claude/… │ │                                                                           │
+│ > MEMORY.md       2 KB    2h ago       │ │ - the fixture's content is two lines long so the golden stays             │
+│   notes.md        1 KB    1d ago   pin │ │   about the frame rather than about a file on disk                        │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+└────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
+
+enter read · S sync memory · p scan paths · [ sessions tab · x more · ? keys · q quit

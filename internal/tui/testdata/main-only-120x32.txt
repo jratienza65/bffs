@@ -1,0 +1,32 @@
+bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
+┌─ project /home/d/build/projects/bffs ────────────────────────────────────────────────────────────────────────────────┐
+│ /home/d/build/projects/bffs                                                                                          │
+│ 3 sessions · memory 2 files · newest 1h ago · directory missing here                                                 │
+│                                                                                                                      │
+│ ACROSS ROOTS  reference: shared pool: alpha, beta                                                                    │
+│   root                       sessions memory                                                                         │
+│   shared pool: alpha, beta   3        2 files                                                                        │
+│   account: work              1        differs — MEMORY.md only here, notes.md differs (newer there)                  │
+│                                                                                                                      │
+│ PER ACCOUNT  what each .claude.json records · ← selected account · ✓* inherited                                      │
+│   account       trust    external last session                                                                       │
+│   alpha       ← ✓        ✓        1e005053 (this project)                                                            │
+│   beta          ✗        –        –                                                                                  │
+│   home          ✓*       –        –                                                                                  │
+│                                                                                                                      │
+│ t trust sync · L last-session pointer · S sync memory to a full-isolation account · c copy sessions                  │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+panels hidden (+ pressed) — + brings them back; the keys still move the cursor
+enter sessions · w transfer wizard · e export · c copy · t trust · x more · ? keys · q quit

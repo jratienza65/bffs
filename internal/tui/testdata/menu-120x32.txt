@@ -1,0 +1,32 @@
+bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ menu ────────────────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ actions for /home/d/build/projects/bffs  (shared pool: alpha, beta)       │
+│   beta                         partial │ │                                                                           │
+│   work                            full │ │ >   w   transfer wizard: send to or receive from another machine, step b… │
+│                                        │ │     i   receive a bundle over the LAN into shared pool: alpha, beta       │
+├─ 2 projects ───────────────────── 1/3 ─┤ │     e   export the whole project /home/d/build/projects/bffs and its mem… │
+│ 3 projects in /home/d/.claude/projects │ │     s   send the whole project /home/d/build/projects/bffs and its memor… │
+│ >   /home/d/build/pr…   3 mem 1h ago   │ │     c   copy the whole project /home/d/build/projects/bffs and its memor… │
+│     /home/d/build/si…   4     1d ago   │ │     r   rehome 1 session                                                  │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │     t   trust matrix for /home/d/build/projects/bffs                      │
+│                                        │ │                                                                           │
+│                                        │ │ enter or the key runs it · esc closes                                     │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+├─ 3 SESSIONS | memory ──────────── 1/3 ─┤ │                                                                           │
+│    ● Session and memory impo… 1h ago   │ │                                                                           │
+│      Plan: session export     4h ago   │ │                                                                           │
+│    ↓ prompt from the other m… 9d ago   │ │                                                                           │
+│                                        │ │                                                                           │
+└────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
+
+↑/k up · ↓/j down · enter choose · letter run that action · esc cancel · x more · ? keys · q quit

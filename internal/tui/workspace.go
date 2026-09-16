@@ -1396,6 +1396,18 @@ func (ws *workspace) panelTitle(i panelID) (string, string) {
 // errTooSmall is the message drawn below the minimum size.
 var errTooSmall = errors.New("too small")
 
+// tooSmallLines says what the browser needs and what it has, one short
+// line each so the numbers survive a terminal too narrow for a sentence.
+// Nothing else is drawn at that size: a frame that cannot be honest is
+// worse than a message.
+func tooSmallLines(width, height int) []string {
+	return []string{
+		truncate(errTooSmall.Error(), width),
+		truncate(fmt.Sprintf("need %d×%d", minWidth, minHeight), width),
+		truncate(fmt.Sprintf("have %d×%d", width, height), width),
+	}
+}
+
 // padded fits a line into inner cells with padX of space on each side.
 func padded(l string, inner int) string {
 	if inner <= 2*padX {
@@ -1413,7 +1425,7 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 		ws.setSize(width, height)
 	}
 	if ws.tooSmall() {
-		return fmt.Sprintf("%v: need %d×%d", errTooSmall, minWidth, minHeight)
+		return strings.Join(tooSmallLines(width, height), "\n")
 	}
 	side, mi, h := ws.sideWidth(), ws.mainWidth(), ws.bodyHeight()
 	if main == nil {

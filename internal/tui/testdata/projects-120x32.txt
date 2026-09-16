@@ -1,0 +1,32 @@
+bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ project /home/d/build/projects/bffs ─────────────────────────────────────┐
+│   alpha                       ● active │ │ /home/d/build/projects/bffs                                               │
+│   beta                         partial │ │ 3 sessions · memory 2 files · newest 1h ago · directory missing here      │
+│   work                            full │ │                                                                           │
+│                                        │ │ ACROSS ROOTS  reference: shared pool: alpha, beta                         │
+├─ 2 projects ───────────────────── 1/3 ─┤ │   root                       sessions memory                              │
+│ 3 projects in /home/d/.claude/projects │ │   shared pool: alpha, beta   3        2 files                             │
+│ >   /home/d/build/pr…   3 mem 1h ago   │ │   account: work              1        differs — MEMORY.md only here, note │
+│     /home/d/build/si…   4     1d ago   │ │ s.md differs (newer there)                                                │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
+│                                        │ │ PER ACCOUNT  what each .claude.json records · ← selected account · ✓* inh │
+│                                        │ │ erited                                                                    │
+│                                        │ │   account       trust    external last session                            │
+│                                        │ │   alpha       ← ✓        ✓        1e005053 (this project)                 │
+│                                        │ │   beta          ✗        –        –                                       │
+│                                        │ │   home          ✓*       –        –                                       │
+│                                        │ │                                                                           │
+│                                        │ │ t trust sync · L last-session pointer · S sync memory to a full-isolation │
+│                                        │ │  account · c copy sessions                                                │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+│                                        │ │                                                                           │
+├─ 3 SESSIONS | memory ──────────── 1/3 ─┤ │                                                                           │
+│    ● Session and memory impo… 1h ago   │ │                                                                           │
+│      Plan: session export     4h ago   │ │                                                                           │
+│    ↓ prompt from the other m… 9d ago   │ │                                                                           │
+│                                        │ │                                                                           │
+└────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
+
+enter sessions · w transfer wizard · e export · c copy · t trust · x more · ? keys · q quit

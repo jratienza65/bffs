@@ -1,0 +1,32 @@
+bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
+┌─ 1 accounts ─────────────────────────────────────────────────────────────────────────────────────────────────── 1/3 ─┐
+│   alpha                                                                                                     ● active │
+│   beta                                                                                                       partial │
+│   work                                                                                                          full │
+│                                                                                                                      │
+├─ 2 projects ─────────────────────────────────────────────────────────────────────────────────────────────────── 1/3 ─┤
+│ 3 projects in /home/d/.claude/projects                                                                               │
+│ >   /home/d/build/projects/bffs                                                                       3 mem 1h ago   │
+│     /home/d/build/sidequests/ledger                                                                   4     1d ago   │
+│   ! /machine-a/src/proj                                                                               1 mem 9d ago   │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+├─ 3 SESSIONS | memory ────────────────────────────────────────────────────────────────────────────────────────── 1/3 ─┤
+│    ● Session and memory import/export                                                                       1h ago   │
+│      Plan: session export                                                                                   4h ago   │
+│    ↓ prompt from the other machine                                                                          9d ago   │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+preview hidden (_ pressed) — enter shows it for one item, _ brings it back
+enter sessions · w transfer wizard · e export · c copy · t trust · x more · ? keys · q quit

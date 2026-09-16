@@ -300,6 +300,9 @@ func (a *app) View() tea.View {
 	if a.quitting {
 		return tea.NewView("")
 	}
+	if a.ws.tooSmall() {
+		return tea.NewView(strings.Join(tooSmallLines(a.width, a.height), "\n"))
+	}
 	header := styleHeader.Render("bffs "+a.svc.version) + "  " + styleFaint.Render(a.ws.crumb())
 	if a.svc.theme != "" && a.svc.theme != "default" {
 		header += "  " + styleFaint.Render("theme "+a.svc.theme)

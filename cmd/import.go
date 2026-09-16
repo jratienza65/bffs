@@ -762,7 +762,7 @@ func renderImportReceipt(w io.Writer, r importReceipt) {
 	}
 	if landed > 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "note: the first claude launch there asks about folder trust (and external CLAUDE.md imports, if CLAUDE.md or a memory file")
+		fmt.Fprintln(w, "note: the first claude launch there asks about folder trust (and external CLAUDE.md imports, if the project's CLAUDE.md")
 		fmt.Fprintln(w, "      imports files outside the directory) — once per bffs account. `bffs trust sync --to <acct>` carries the answer to other accounts.")
 	}
 	if !r.DryRun {

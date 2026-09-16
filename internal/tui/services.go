@@ -32,6 +32,8 @@ type services struct {
 	imports       map[string]imports.SessionRef
 	warnings      []string
 	now           func() time.Time
+	theme         string // the active theme's name (theme.go)
+	isDark        bool   // the terminal background, dark until the terminal answers
 
 	// titles caches what the head and tail windows said, keyed by the
 	// transcript's identity, so a page scrolled back to costs nothing.

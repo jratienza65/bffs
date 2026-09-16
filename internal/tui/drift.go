@@ -256,6 +256,30 @@ func answerCell(a trust.Answer, inheritedFrom string) string {
 	return "–"
 }
 
+// answerStyled is answerCell padded to its column and coloured: ✓ ok,
+// ✗ bad, ✓* ok, – muted.
+func answerStyled(a trust.Answer, inheritedFrom string) string {
+	cellText := pad(answerCell(a, inheritedFrom), driftAnswerW)
+	switch {
+	case a == trust.Declined:
+		return styleBad.Render(cellText)
+	case a == trust.Accepted, a == trust.Inherited, inheritedFrom != "":
+		return styleOK.Render(cellText)
+	}
+	return styleFaint.Render(cellText)
+}
+
+// stateStyled colours a memory comparison word.
+func stateStyled(state string) string {
+	switch {
+	case state == "same":
+		return styleOK.Render(state)
+	case strings.HasPrefix(state, "differs"), strings.HasPrefix(state, "only"):
+		return styleWarn.Render(state)
+	}
+	return styleFaint.Render(state)
+}
+
 const (
 	driftRootW    = 26
 	driftCountW   = 8
@@ -276,13 +300,13 @@ func memoryCell(rd rootDrift) string {
 		for _, f := range rd.diffs {
 			parts = append(parts, transcripts.Sanitize(f.name)+" "+f.state)
 		}
-		return "differs — " + strings.Join(parts, ", ")
+		return stateStyled("differs") + " — " + strings.Join(parts, ", ")
 	case "same":
-		return countNoun(len(rd.files), "file") + ", same"
+		return countNoun(len(rd.files), "file") + ", " + stateStyled("same")
 	case "only there":
-		return countNoun(len(rd.files), "file") + " only there"
+		return countNoun(len(rd.files), "file") + " " + stateStyled("only there")
 	}
-	return rd.state
+	return styleFaint.Render(rd.state)
 }
 
 // section renders a preview section header.
@@ -310,9 +334,9 @@ func accountTable(accounts []accountDrift, perspective, thisLabel string) []stri
 		}
 		mark := "  "
 		if ad.status.Account == perspective {
-			mark = "← "
+			mark = styleAccent.Render("← ")
 		}
-		lines = append(lines, "  "+pad(transcripts.Sanitize(ad.status.Account), driftAccountW)+" "+mark+pad(answerCell(ad.status.Folder, ad.status.InheritedFrom), driftAnswerW)+" "+pad(answerCell(ad.status.External, ""), driftAnswerW)+" "+last)
+		lines = append(lines, "  "+pad(transcripts.Sanitize(ad.status.Account), driftAccountW)+" "+mark+answerStyled(ad.status.Folder, ad.status.InheritedFrom)+" "+answerStyled(ad.status.External, "")+" "+last)
 	}
 	return lines
 }

@@ -693,6 +693,13 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 		ws.vp.GotoTop()
 		return nil
 
+	case themeSavedMsg:
+		if msg.err != nil {
+			return statusError(fmt.Errorf("theme %s applied, not saved: %w", msg.name, msg.err))
+		}
+		ws.svc.state.Theme = msg.name
+		return status("theme " + msg.name + " (saved to state.toml; T cycles, NO_COLOR or BFFS_THEME override)")
+
 	case switchedMsg:
 		if msg.err != nil {
 			return statusError(msg.err)
@@ -883,6 +890,8 @@ func (ws *workspace) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case key.Matches(msg, keys.Menu):
 		return pushScreen(newMenuScreen(ws.menuTitle(), ws.actions()))
+	case key.Matches(msg, keys.Theme):
+		return ws.cycleTheme()
 	case key.Matches(msg, keys.Open):
 		return ws.open()
 	case key.Matches(msg, keys.Back):
@@ -957,6 +966,24 @@ func (ws *workspace) space() tea.Cmd {
 		return switchAccount(ws.svc.cfgDir, a.name)
 	}
 	return nil
+}
+
+// cycleTheme applies the next theme at once and saves it to state.toml.
+func (ws *workspace) cycleTheme() tea.Cmd {
+	next := nextThemeName(ws.svc.theme)
+	p, _ := paletteByName(next)
+	applyTheme(p, ws.svc.isDark)
+	ws.svc.theme = next
+	ws.previewKey = "" // the preview's lines carry the old colours
+	cfgDir := ws.svc.cfgDir
+	return tea.Batch(ws.sync(), func() tea.Msg {
+		state, err := store.LoadState(cfgDir)
+		if err != nil {
+			return themeSavedMsg{name: next, err: err}
+		}
+		state.Theme = next
+		return themeSavedMsg{name: next, err: store.SaveState(cfgDir, state)}
+	})
 }
 
 // switchAccount writes state.toml the way `bffs switch <name>` does.
@@ -1182,7 +1209,7 @@ func (ws *workspace) helpGroups() [][]key.Binding {
 		{keys.Up, keys.Down, keys.PageUp, keys.PageDn, keys.Open, keys.Select, keys.SelectAll, keys.Activate, keys.Filter},
 		{keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
 		{keys.Trust, keys.SyncMemory, keys.Pointer, keys.ScanPaths},
-		{keys.ScreenMode, keys.ScreenModePrev, keys.Menu, keys.Help, keys.Quit, reservedKeys},
+		{keys.ScreenMode, keys.ScreenModePrev, keys.Theme, keys.Menu, keys.Help, keys.Quit, reservedKeys},
 	}
 }
 
@@ -1243,7 +1270,8 @@ func cell(s string, width int) string {
 
 // titled draws a horizontal border of inner cells carrying a title on
 // the left and, when given, a counter on the right:
-// "─ 3 SESSIONS | memory ──────── 1/16 ─".
+// "─ 3 SESSIONS | memory ──────── 1/16 ─". The border takes the focus
+// colour, the title the focused or muted title style.
 func titled(title, right string, inner int, focused bool) string {
 	if inner <= 0 {
 		return ""
@@ -1262,17 +1290,25 @@ func titled(title, right string, inner int, focused bool) string {
 	if w > inner-1-rw {
 		t, w = "", 0
 	}
-	style := styleFaint
+	bs, ts := styleBorder, styleTitle
 	if focused {
-		style = styleHeader
+		bs, ts = styleBorderFocus, styleTitleFocus
 	}
-	line := "─" + style.Render(t) + strings.Repeat("─", max(0, inner-1-w-rw-1))
+	line := bs.Render("─") + ts.Render(t) + bs.Render(strings.Repeat("─", max(0, inner-1-w-rw-1)))
 	if r != "" {
-		line += style.Render(r) + "─"
+		line += styleCounter.Render(r) + bs.Render("─")
 	} else {
-		line += "─"
+		line += bs.Render("─")
 	}
 	return line
+}
+
+// bar is one vertical border cell in the focus colour or not.
+func bar(s string, focused bool) string {
+	if focused {
+		return styleBorderFocus.Render(s)
+	}
+	return styleBorder.Render(s)
 }
 
 // panelTitle is the frame title of panel i — the label and the counter;
@@ -1315,25 +1351,27 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 		hs := ws.panelHeights()
 		for i, p := range ws.panels {
 			focused := panelID(i) == ws.focus
+			above := focused || (i > 0 && panelID(i-1) == ws.focus)
 			label, counter := ws.panelTitle(panelID(i))
 			if i == 0 {
-				out = append(out, "┌"+titled(label, counter, side, focused)+"┐")
+				out = append(out, bar("┌", focused)+titled(label, counter, side, focused)+bar("┐", focused))
 			} else {
-				out = append(out, "├"+titled(label, counter, side, focused)+"┤")
+				out = append(out, bar("├", above)+titled(label, counter, side, focused)+bar("┤", above))
 			}
 			for _, l := range p.body(side, hs[i], focused) {
-				out = append(out, "│"+cell(l, side)+"│")
+				out = append(out, bar("│", focused)+cell(l, side)+bar("│", focused))
 			}
 		}
-		out = append(out, "└"+strings.Repeat("─", side)+"┘")
+		last := ws.focus == panelCount-1
+		out = append(out, bar("└"+strings.Repeat("─", side)+"┘", last))
 		return strings.Join(out, "\n")
 	case side == 0:
 		main = fill(main, h)
-		out = append(out, "┌"+titled(mainTitle, "", mi, mainFocused)+"┐")
+		out = append(out, bar("┌", mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar("┐", mainFocused))
 		for _, l := range main {
-			out = append(out, "│"+cell(l, mi)+"│")
+			out = append(out, bar("│", mainFocused)+cell(l, mi)+bar("│", mainFocused))
 		}
-		out = append(out, "└"+strings.Repeat("─", mi)+"┘")
+		out = append(out, bar("└"+strings.Repeat("─", mi)+"┘", mainFocused))
 		return strings.Join(out, "\n")
 	}
 	hs := ws.panelHeights()
@@ -1353,16 +1391,18 @@ func (ws *workspace) View(width, height int, main []string, mainTitle string, ma
 	}
 	for i, p := range ws.panels {
 		focused := panelID(i) == ws.focus && !ws.mainFocus
+		above := focused || (i > 0 && panelID(i-1) == ws.focus && !ws.mainFocus)
 		label, counter := ws.panelTitle(panelID(i))
 		if i == 0 {
-			out = append(out, "┌"+titled(label, counter, side, focused)+"┬"+titled(mainTitle, "", mi, mainFocused)+"┐")
+			out = append(out, bar("┌", focused)+titled(label, counter, side, focused)+bar("┬", focused || mainFocused)+titled(mainTitle, "", mi, mainFocused)+bar("┐", mainFocused))
 		} else {
-			out = append(out, "├"+titled(label, counter, side, focused)+"┤"+next()+"│")
+			out = append(out, bar("├", above)+titled(label, counter, side, focused)+bar("┤", above || mainFocused)+next()+bar("│", mainFocused))
 		}
 		for _, l := range p.body(side, hs[i], focused) {
-			out = append(out, "│"+cell(l, side)+"│"+next()+"│")
+			out = append(out, bar("│", focused)+cell(l, side)+bar("│", focused || mainFocused)+next()+bar("│", mainFocused))
 		}
 	}
-	out = append(out, "└"+strings.Repeat("─", side)+"┴"+strings.Repeat("─", mi)+"┘")
+	last := ws.focus == panelCount-1 && !ws.mainFocus
+	out = append(out, bar("└"+strings.Repeat("─", side), last)+bar("┴", last || mainFocused)+bar(strings.Repeat("─", mi)+"┘", mainFocused))
 	return strings.Join(out, "\n")
 }

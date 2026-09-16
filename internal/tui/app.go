@@ -32,14 +32,23 @@ type app struct {
 func newApp(svc *services) *app {
 	h := help.New()
 	h.ShortSeparator = " · "
+	name, note := resolveThemeName(svc.state.Theme, osEnv)
+	if note != "" {
+		svc.warnings = append(svc.warnings, note)
+	}
+	svc.theme, svc.isDark = name, true
+	p, _ := paletteByName(name)
+	applyTheme(p, true)
 	return &app{svc: svc, ws: newWorkspace(svc), help: h}
 }
 
-// Init hands the app the roots the services already enumerated; the
-// message path is the same one a later reload would take.
+// Init hands the app the roots the services already enumerated (the
+// message path is the same one a later reload would take) and asks the
+// terminal for its background colour so the theme can pick its light or
+// dark variants.
 func (a *app) Init() tea.Cmd {
 	svc := a.svc
-	return func() tea.Msg { return rootsLoadedMsg{roots: svc.roots, warnings: svc.warnings} }
+	return tea.Batch(func() tea.Msg { return rootsLoadedMsg{roots: svc.roots, warnings: svc.warnings} }, tea.RequestBackgroundColor)
 }
 
 // top is the visible overlay, nil when the workspace has the keys.
@@ -103,6 +112,17 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.help.SetWidth(msg.Width)
 		a.ws.setSize(msg.Width, a.contentHeight())
 		return a, a.forward(a.mainSize())
+
+	case tea.BackgroundColorMsg:
+		if dark := msg.IsDark(); dark != a.svc.isDark {
+			a.svc.isDark = dark
+			if p, ok := paletteByName(a.svc.theme); ok {
+				applyTheme(p, dark)
+			}
+			a.ws.previewKey = "" // rebuild the preview in the new variant
+			return a, a.ws.sync()
+		}
+		return a, nil
 
 	case rootsLoadedMsg:
 		var cmds []tea.Cmd
@@ -228,6 +248,10 @@ func globalKeys() []key.Binding {
 }
 
 func (a *app) helpView() string {
+	st := a.help.Styles
+	st.ShortKey, st.ShortDesc, st.ShortSeparator = styleKey, styleDesc, styleDesc
+	st.FullKey, st.FullDesc, st.FullSeparator = styleKey, styleDesc, styleDesc
+	a.help.Styles = st
 	var ks []key.Binding
 	if s := a.top(); s != nil {
 		ks = append(ks, s.Keys()...)
@@ -252,6 +276,9 @@ func (a *app) View() tea.View {
 		return tea.NewView("")
 	}
 	header := styleHeader.Render("bffs "+a.svc.version) + "  " + styleFaint.Render(a.ws.crumb())
+	if a.svc.theme != "" && a.svc.theme != "default" {
+		header += "  " + styleFaint.Render("theme "+a.svc.theme)
+	}
 	header = cell(header, a.width)
 
 	var main []string
@@ -266,24 +293,22 @@ func (a *app) View() tea.View {
 
 	// Errors reach the status line from every engine; sanitised like
 	// everything else that is rendered.
-	statusLine := transcripts.Sanitize(a.status)
-	if statusLine == "" {
-		switch {
-		case a.top() != nil:
-			if l, ok := a.top().(loader); ok && l.loading() {
-				statusLine = "loading…"
-			}
-		case a.ws.previewBusy:
-			statusLine = "loading…"
-		default:
-			statusLine = styleFaint.Render(a.ws.hint())
+	text := transcripts.Sanitize(a.status)
+	style := styleStatus
+	switch {
+	case a.statusErr:
+		style = styleError
+	case text != "":
+	case a.top() != nil:
+		if l, ok := a.top().(loader); ok && l.loading() {
+			text = "loading…"
 		}
+	case a.ws.previewBusy:
+		text = "loading…"
+	default:
+		text, style = a.ws.hint(), styleFaint
 	}
-	if a.statusErr {
-		statusLine = styleError.Render(truncate(statusLine, a.width))
-	} else {
-		statusLine = styleStatus.Render(truncate(statusLine, a.width))
-	}
+	statusLine := style.Render(truncate(text, a.width))
 
 	v := tea.NewView(strings.Join([]string{header, body, statusLine, truncate(a.helpView(), a.width)}, "\n"))
 	v.AltScreen = true

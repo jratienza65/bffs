@@ -100,6 +100,11 @@ type (
 		account string
 		err     error
 	}
+	// themeSavedMsg ends a theme change (state.toml written).
+	themeSavedMsg struct {
+		name string
+		err  error
+	}
 )
 
 // Operation messages (plan §11 "Long ops"): an action screen's goroutine

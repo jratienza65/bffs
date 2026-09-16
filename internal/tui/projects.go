@@ -43,7 +43,24 @@ const projectAgeW = 8
 // missing on this machine, the name, the session count, a "mem" tag and
 // the newest age.
 func (r *projectRow) render(width int) string {
-	mark := " "
+	mark, name, right := r.parts(width)
+	if name == "" {
+		return truncate(mark+" "+r.label(), width)
+	}
+	return mark + " " + name + " " + right
+}
+
+// renderStyled colours the missing-directory mark and mutes the counts.
+func (r *projectRow) renderStyled(width int) string {
+	mark, name, right := r.parts(width)
+	if name == "" {
+		return truncate(mark+" "+r.label(), width)
+	}
+	return styleMissing.Render(mark) + " " + name + " " + styleFaint.Render(right)
+}
+
+func (r *projectRow) parts(width int) (mark, name, right string) {
+	mark = " "
 	if r.cwd != "" && !r.cwdExists {
 		mark = "!"
 	}
@@ -55,12 +72,12 @@ func (r *projectRow) render(width int) string {
 	if !r.newest.IsZero() {
 		age = humanizeAgo(r.newest, r.now())
 	}
-	right := fmt.Sprintf("%3d %s %s", r.sessions, mem, pad(age, projectAgeW))
+	right = fmt.Sprintf("%3d %s %s", r.sessions, mem, pad(age, projectAgeW))
 	nameW := width - 2 - 1 - len([]rune(right))
 	if nameW < 8 {
-		return truncate(mark+" "+r.label(), width)
+		return mark, "", ""
 	}
-	return mark + " " + pad(r.label(), nameW) + " " + right
+	return mark, pad(r.label(), nameW), right
 }
 
 // loadProjects lists root's projects/ directory: one fast-path List

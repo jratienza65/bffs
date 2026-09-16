@@ -2,22 +2,31 @@ package cmd
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/jratienza65/bffs/internal/bundle"
 	"github.com/jratienza65/bffs/internal/porter"
 	"github.com/jratienza65/bffs/internal/resolver"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
+	"github.com/jratienza65/bffs/internal/transfer"
 )
 
 var (
@@ -35,6 +44,12 @@ var (
 	exportWithTasks     bool
 	exportOut           string
 	exportServe         bool
+	exportPort          int
+	exportTTL           time.Duration
+	exportIface         string
+	exportAllowRouted   bool
+	exportShowIPv6      bool
+	exportAllowLoopback bool
 	exportForce         bool
 	exportYes           bool
 	exportClaudeDir     string
@@ -48,7 +63,7 @@ const exportOutAuto = "auto"
 const exportOutStdout = "-"
 
 var exportCmd = &cobra.Command{
-	Use:   "export (--out <file.bffs> | --out -) [--project <dir>]... [--all-projects] [--session <id>]...",
+	Use:   "export (--out <file.bffs> | --out - | --serve) [--project <dir>]... [--all-projects] [--session <id>]...",
 	Short: "Pack sessions and auto-memory into a .bffs bundle for another machine or account",
 	Long: `Writes the selected Claude Code sessions (transcript, sidecar, file-history,
 plan files, prompt-history lines) and the project's auto-memory directory into
@@ -66,15 +81,32 @@ file-history, history) so they can be left out with --no-tool-results,
 exported read-only and may be truncated; --no-live skips them.
 
 With --out - the bundle goes to stdout and everything else to stderr:
-    bffs export --project . --out - | ssh other-machine 'bffs import --from - -y --as-is'`,
+    bffs export --project . --out - | ssh other-machine 'bffs import --from - -y --as-is'
+
+With --serve the bundle is offered to one other machine on the local network:
+this side shows an address and a pairing code, the other side runs
+` + "`bffs import --from <address>`" + ` and types the code, and the bundle streams
+over TLS once both sides have proven they know it. Only on-link peers are
+accepted (no VPN or Tailscale addresses; --allow-routed relaxes the on-link
+test), the code is valid for --ttl (10m, at most 30m) and three wrong codes
+end the serve. Everything is printed on stderr.
+
+Firewall notes: macOS asks once per binary whether bffs may accept
+connections (an ad-hoc-signed build asks again after every rebuild:
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /opt/bffs/bffs
+--unblockapp /opt/bffs/bffs); on Windows a non-administrator is blocked
+silently (netsh advfirewall firewall add rule name=bffs dir=in action=allow
+program=<path>\bffs.exe protocol=tcp localport=7345 profile=private); on
+Linux with ufw: ufw allow from 192.168.0.0/16 to any port 7345 proto tcp.
+When no inbound port can be opened, use the ssh pipe above instead.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dir := mustConfigDir(cmd)
-		if exportServe {
-			return exitWith(1, errors.New("serving over the network arrives in the next milestone; use --out"))
+		if exportServe && cmd.Flags().Changed("out") {
+			return errors.New("--serve and --out are mutually exclusive: serve the bundle to another machine, or write it to a file")
 		}
-		if !cmd.Flags().Changed("out") {
-			return errors.New(`--out is required: a .bffs file, "-" for stdout, or "auto" for bffs-<host>-<date>.bffs in the current directory`)
+		if !exportServe && !cmd.Flags().Changed("out") {
+			return errors.New(`--out is required: a .bffs file, "-" for stdout, or "auto" for bffs-<host>-<date>.bffs in the current directory (or --serve for another machine on the LAN)`)
 		}
 		since, err := parseSince(exportSince)
 		if err != nil {
@@ -100,14 +132,22 @@ With --out - the bundle goes to stdout and everything else to stderr:
 				History:     !exportNoHistory,
 				Tasks:       exportWithTasks,
 			},
-			Out:       exportOut,
-			Force:     exportForce,
-			Yes:       exportYes,
-			ClaudeDir: exportClaudeDir,
-			Cwd:       cwd,
-			Now:       time.Now(),
-			Version:   Version,
+			Out:           exportOut,
+			Serve:         exportServe,
+			Port:          exportPort,
+			TTL:           exportTTL,
+			Iface:         exportIface,
+			AllowRouted:   exportAllowRouted,
+			ShowIPv6:      exportShowIPv6,
+			AllowLoopback: exportAllowLoopback,
+			Force:         exportForce,
+			Yes:           exportYes,
+			ClaudeDir:     exportClaudeDir,
+			Cwd:           cwd,
+			Now:           time.Now(),
+			Version:       Version,
 		}
+		req.Host, req.User = localIdentity()
 		// Human text goes to stderr: stdout may carry the bundle.
 		pr := newPrompter(cmd.InOrStdin(), cmd.ErrOrStderr())
 		return runExport(cmd, dir, pr, req, isTTY())
@@ -129,7 +169,14 @@ func init() {
 	f.BoolVar(&exportNoHistory, "no-history", false, "leave out prompt-history lines")
 	f.BoolVar(&exportWithTasks, "with-tasks", false, "include task lists (tasks/<sid>/)")
 	f.StringVar(&exportOut, "out", "", `output file, "-" for stdout, or "auto" for bffs-<host>-<date>.bffs in the current directory`)
-	f.BoolVar(&exportServe, "serve", false, "serve the bundle to another machine on the LAN (next milestone)")
+	f.BoolVar(&exportServe, "serve", false, "offer the bundle to one other machine on the local network (shows an address and a pairing code)")
+	f.IntVar(&exportPort, "port", servePortDefault, "port to listen on with --serve (0 = kernel-chosen)")
+	f.DurationVar(&exportTTL, "ttl", serveTTLDefault, "how long the pairing code stays valid with --serve (at most 30m)")
+	f.StringVar(&exportIface, "iface", "", "listen on this interface only with --serve (e.g. en0)")
+	f.BoolVar(&exportAllowRouted, "allow-routed", false, "with --serve, accept peers that are not on-link (multi-VLAN offices); prints a warning")
+	f.BoolVar(&exportShowIPv6, "show-ipv6", false, "with --serve, also list IPv6 link-local addresses")
+	f.BoolVar(&exportAllowLoopback, "allow-loopback", false, "with --serve, also listen on loopback (tests and same-machine trials)")
+	_ = f.MarkHidden("allow-loopback")
 	f.BoolVar(&exportForce, "force", false, "overwrite an existing output file")
 	f.BoolVarP(&exportYes, "yes", "y", false, "skip the selection confirmation")
 	f.StringVar(&exportClaudeDir, "claude-dir", "", "override the shared claude config dir (testing)")
@@ -155,6 +202,17 @@ type exportRequest struct {
 	Cwd         string
 	Now         time.Time
 	Version     string
+
+	// --serve (plan §8): the listeners, the pairing window, what counts
+	// as the local network, and how this machine names itself in auth-ok.
+	Serve         bool
+	Port          int
+	TTL           time.Duration
+	Iface         string
+	AllowRouted   bool
+	ShowIPv6      bool
+	AllowLoopback bool
+	Host, User    string
 }
 
 // exportSource is the root an export reads and the account it runs as
@@ -170,6 +228,19 @@ type exportSource struct {
 // stdout for a file and to stderr when the bundle itself is on stdout.
 func runExport(cmd *cobra.Command, dir string, pr *prompter, req exportRequest, tty bool) error {
 	errOut := cmd.ErrOrStderr()
+	// --serve: the pairing flags and the local network are checked before
+	// any selection work, so a machine that cannot serve fails at once
+	// rather than after the summary was reviewed.
+	var setup serveSetup
+	if req.Serve {
+		var err error
+		if setup, err = prepareServe(req); err != nil {
+			return err
+		}
+		if req.AllowRouted {
+			fmt.Fprintln(errOut, "warning: --allow-routed: peers beyond this machine's own networks are accepted; only the pairing code protects the transfer")
+		}
+	}
 	env, err := loadCatalogEnv(dir, req.ClaudeDir)
 	if err != nil {
 		return err
@@ -227,10 +298,10 @@ func runExport(cmd *cobra.Command, dir string, pr *prompter, req exportRequest, 
 		fmt.Fprintln(errOut, "warning:", w)
 	}
 
-	toStdout := req.Out == exportOutStdout
+	toStdout := req.Out == exportOutStdout && !req.Serve
 	// A bundle on stdout is usually piped somewhere; the question is asked
 	// only when a terminal is there to answer it. A file is never written
-	// without an explicit yes.
+	// (and no code is shown) without an explicit yes.
 	if !req.Yes && (tty || !toStdout) {
 		ok, err := confirmOrAbort(pr, "Proceed? [y/N] ", false, tty)
 		if err != nil {
@@ -241,6 +312,10 @@ func runExport(cmd *cobra.Command, dir string, pr *prompter, req exportRequest, 
 			release()
 			return nil
 		}
+	}
+
+	if req.Serve {
+		return serveExport(ctx, cmd, req, setup, src, m, opener, opts)
 	}
 
 	nSessions, nMemoryFiles := manifestCounts(m)
@@ -621,4 +696,516 @@ func confirmOrAbort(pr *prompter, prompt string, yes, tty bool) (bool, error) {
 	}
 	fmt.Fprintln(pr.out, "aborted")
 	return false, nil
+}
+
+// ---- --serve: one bundle to one other machine on the LAN (plan §8) ----
+
+// Serve defaults (plan §8.8): the port, the pairing window and its cap,
+// the wrong-code budget of one serve.
+const (
+	servePortDefault = 7345
+	serveTTLDefault  = 10 * time.Minute
+	serveTTLMax      = 30 * time.Minute
+	serveAttempts    = 3
+)
+
+// Injection seams for the loopback end-to-end test: how a serve binds,
+// which local addresses it sees and which code it shows. Production uses
+// the real ones (a nil Listen is net.Listen inside transfer).
+var (
+	serveListen   transfer.Listener
+	serveLocal    = transfer.LANAddrs
+	serveGenerate = transfer.GenerateCode
+)
+
+// serveSetup is what --serve needs before any selection work: the
+// validated pairing window, what counts as the local network, and the
+// addresses to bind.
+type serveSetup struct {
+	ttl   time.Duration
+	lan   transfer.LANOptions
+	local []transfer.LinkAddr
+}
+
+// prepareServe validates --ttl and --port and enumerates the local-network
+// addresses; a machine with none (only loopback/VPN up) fails here, before
+// the selection is built and long before a code is shown.
+func prepareServe(req exportRequest) (serveSetup, error) {
+	s := serveSetup{ttl: req.TTL}
+	if s.ttl == 0 {
+		s.ttl = serveTTLDefault
+	}
+	if s.ttl < 0 || s.ttl > serveTTLMax {
+		return s, fmt.Errorf("invalid --ttl %s: the pairing code may stay valid for up to %s", req.TTL, serveTTLMax)
+	}
+	if req.Port < 0 || req.Port > 65535 {
+		return s, fmt.Errorf("invalid --port %d: use 1-65535, or 0 for a kernel-chosen port", req.Port)
+	}
+	s.lan = transfer.LANOptions{AllowLoopback: req.AllowLoopback, AllowRouted: req.AllowRouted, Iface: req.Iface}
+	local, err := serveLocal(s.lan)
+	if err != nil {
+		return s, err
+	}
+	if len(local) == 0 {
+		return s, exitWith(1, errors.New("no local-network address found (only loopback/VPN interfaces are up); connect to Wi-Fi/Ethernet or use --out file.bffs"))
+	}
+	s.local = local
+	return s, nil
+}
+
+// serveExport is the A side of plan §8.5: the manifest was built and
+// confirmed by runExport; this generates the code, binds every on-link
+// address, prints the banner and the event lines on stderr, streams the
+// bundle to the first peer that proves it knows the code, and maps the
+// outcome to the exit codes of §5.9. The opener is released when the serve
+// ends, whichever way.
+func serveExport(ctx context.Context, cmd *cobra.Command, req exportRequest, setup serveSetup, src exportSource, m *bundle.Manifest, opener bundle.Opener, opts porter.ExportOptions) error {
+	errOut := cmd.ErrOrStderr()
+	defer func() {
+		if c, ok := opener.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}()
+	// The manifest bytes transfer sends ahead of the body must be entry 0
+	// of that body byte for byte: bundle.Build marshals the manifest with a
+	// compact json.Marshal, so the same call here yields the same bytes
+	// (Body checks that below rather than trusting it).
+	manifestBytes, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+	code, err := serveGenerate()
+	if err != nil {
+		return fmt.Errorf("pairing code: %w", err)
+	}
+	account := src.root.Owner
+	if account == "" {
+		account = src.account.Name
+	}
+
+	sctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// The first Ctrl-C cancels the serve; restoring the default behaviour
+	// then lets a second one end the process however the serve is stuck.
+	context.AfterFunc(sctx, stop)
+	pr := &servePrinter{
+		w:            errOut,
+		code:         code,
+		local:        setup.local,
+		ttl:          setup.ttl,
+		showIPv6:     req.ShowIPv6,
+		manifestSize: int64(len(manifestBytes)),
+		bar:          newProgressBar(errOut, "sending", isTerminalWriter(errOut)),
+	}
+	res, err := transfer.Serve(sctx, transfer.ServeOptions{
+		Code:        code,
+		Port:        req.Port,
+		TTL:         setup.ttl,
+		MaxAttempts: serveAttempts,
+		Manifest:    manifestBytes,
+		Compression: byte(opts.Compression),
+		Body: func(ctx context.Context, w io.Writer) error {
+			// bundle.Build rather than porter.Write: Write closes the
+			// opener after one build, and a serve may stream again after a
+			// peer vanished mid-transfer. The opener is released above.
+			bw := bufio.NewWriterSize(w, 256<<10)
+			raw, err := bundle.Build(ctx, bw, m, opener, opts.Compression, pr.progress)
+			if err != nil {
+				return exportWriteError(err, m)
+			}
+			if !bytes.Equal(raw, manifestBytes) {
+				return errors.New("manifest changed between the summary and the stream")
+			}
+			return bw.Flush()
+		},
+		UI:      pr.uiWriter(),
+		Events:  pr.event,
+		LAN:     setup.lan,
+		Listen:  serveListen,
+		Version: req.Version,
+		Host:    req.Host,
+		User:    req.User,
+		Account: account,
+		Local:   setup.local,
+	})
+	switch {
+	case err == nil:
+		pr.delivered(res)
+		return nil
+	case sctx.Err() != nil || errors.Is(err, context.Canceled):
+		pr.interrupt()
+		if res.Bytes > 0 {
+			return exitWith(130, fmt.Errorf("cancelled after %s; the other machine discards the partial bundle", formatSize(res.Bytes)))
+		}
+		return exitWith(130, errors.New("cancelled; nothing was sent"))
+	case errors.Is(err, transfer.ErrTooManyAttempts):
+		pr.interrupt()
+		return exitWith(1, fmt.Errorf("%d failed pairing attempts; run bffs export --serve again for a new code", serveAttempts))
+	default:
+		// ErrExpired carries "code expired after MM:SS; no pairing
+		// happened"; a peer-reported failure "<host> reported: <reason>";
+		// the rest is this side's own failure.
+		pr.interrupt()
+		return exitWith(1, err)
+	}
+}
+
+// serveBanner is what the A side prints once its listeners are bound.
+type serveBanner struct {
+	Code     string // the pairing code's display form — its only appearance
+	Key      string // this machine's key fingerprint (8 hex)
+	Addr     netip.Addr
+	Port     uint16
+	Local    []transfer.LinkAddr
+	TTL      time.Duration
+	Attempts int
+	ShowIPv6 bool
+}
+
+// renderServeBanner prints the A-side banner of plan §5.10: the import
+// command with this machine's first bound address (the port omitted when
+// it is the default), with --show-ipv6 the link-local addresses without a
+// zone and the note about appending one, the code beside the key
+// fingerprint, and the waiting line.
+func renderServeBanner(w io.Writer, b serveBanner) {
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "On the other machine, run:    bffs import --from %s\n", fromTarget(b.Addr.WithZone(""), b.Port))
+	if b.ShowIPv6 {
+		for _, la := range b.Local {
+			if !la.Addr.Is6() || !la.Addr.IsLinkLocalUnicast() {
+				continue
+			}
+			fmt.Fprintf(w, "         or, over IPv6:       bffs import --from %s   (append %%<your interface> to the address, e.g. %%%s)\n", fromTarget(la.Addr.WithZone(""), b.Port), zoneExample(la.Iface))
+		}
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Pairing code:   %s          (this machine's key: %s — the other side shows it as \"peer key\")\n", b.Code, b.Key)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Waiting for the other machine…  code valid for %s, %d attempts, one transfer.   (Ctrl-C cancels; --show-ipv6 lists link-local addresses)\n", fmtMMSS(b.TTL), b.Attempts)
+}
+
+// fromTarget renders an address the way --from takes it: IPv6 in
+// brackets, the port only when it is not the default.
+func fromTarget(addr netip.Addr, port uint16) string {
+	s := addr.String()
+	if addr.Is6() {
+		s = "[" + s + "]"
+	}
+	if port != servePortDefault {
+		s += fmt.Sprintf(":%d", port)
+	}
+	return s
+}
+
+// zoneExample is the interface name the --show-ipv6 note suggests: the
+// listener's own name is the best guess for a machine of the same kind.
+func zoneExample(iface string) string {
+	if iface == "" || iface == "lo" || iface == "lo0" {
+		return "en0"
+	}
+	return iface
+}
+
+// fmtMMSS renders a duration as M:SS ("10:00").
+func fmtMMSS(d time.Duration) string {
+	secs := int(d.Round(time.Second).Seconds())
+	return fmt.Sprintf("%d:%02d", secs/60, secs%60)
+}
+
+// servePrinter turns transfer events into the A-side lines of plan §5.10:
+// the banner on the first listen event (the bound port is only known
+// then), one timestamped line per event, the progress bar while sending.
+// Every peer-derived string is sanitised; the code is printed exactly
+// once, in the banner. The mutex serialises event lines, progress and the
+// hints transfer writes to the UI writer.
+type servePrinter struct {
+	mu           sync.Mutex
+	w            io.Writer
+	code         transfer.Code
+	local        []transfer.LinkAddr
+	ttl          time.Duration
+	showIPv6     bool
+	manifestSize int64
+	banner       bool
+	bar          *progressBar
+	acceptedAt   time.Time
+}
+
+func (p *servePrinter) event(ev transfer.Event) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch ev.Kind {
+	case "listen":
+		if p.banner {
+			return
+		}
+		p.banner = true
+		b := serveBanner{Code: p.code.Display(), Key: keyFromText(ev.Text, "key "), Local: p.local, TTL: p.ttl, Attempts: serveAttempts, ShowIPv6: p.showIPv6}
+		if ap, err := netip.ParseAddrPort(ev.Peer); err == nil {
+			b.Addr, b.Port = ap.Addr(), ap.Port()
+		}
+		renderServeBanner(p.w, b)
+		return
+	case "code-ok", "sending", "progress", "done", "expired":
+		// code-ok is folded into the manifest line, the bar shows the
+		// sending, the delivered line follows the serve, and an expiry
+		// ends it with ErrExpired carrying the same text — printed once,
+		// as the error.
+		return
+	case "accept":
+		p.acceptedAt = time.Now()
+	}
+	p.bar.interrupt()
+	fmt.Fprintf(p.w, "  %s  %s\n", ev.Time.Format("15:04:05"), serveEventText(ev, p.manifestSize))
+}
+
+// serveEventText is the line for one A-side event: the plan's wording
+// where this side has the facts (the peer's address, the manifest size,
+// what was accepted), transfer's own text otherwise. Peer text is
+// sanitised.
+func serveEventText(ev transfer.Event, manifestSize int64) string {
+	switch ev.Kind {
+	case "connect":
+		return peerIP(ev.Peer) + " connected — waiting for its code"
+	case "manifest-sent":
+		return fmt.Sprintf("%s code accepted; manifest sent (%s) — waiting for the other side to review", peerIP(ev.Peer), formatSize(manifestSize))
+	case "accept":
+		// transfer says "<host> accepted"; the plan's line names what.
+		if name, ok := strings.CutSuffix(ev.Text, " accepted"); ok {
+			return "manifest accepted by " + transcripts.Sanitize(name)
+		}
+	}
+	return transcripts.Sanitize(ev.Text)
+}
+
+// peerIP is the address part of an event's ip:port peer, sanitised.
+func peerIP(peer string) string {
+	if ap, err := netip.ParseAddrPort(peer); err == nil {
+		return ap.Addr().String()
+	}
+	return transcripts.Sanitize(peer)
+}
+
+// keyFromText picks the key fingerprint out of a transfer event text
+// ("… key 3f9a1c2e" / "… peer key 3f9a1c2e)"): the hex run after marker.
+// Events are the only channel that carries it before the serve returns.
+func keyFromText(text, marker string) string {
+	i := strings.LastIndex(text, marker)
+	if i < 0 {
+		return "unknown"
+	}
+	s := text[i+len(marker):]
+	n := 0
+	for n < len(s) && n < 8 && isHexByte(s[n]) {
+		n++
+	}
+	if n == 0 {
+		return "unknown"
+	}
+	return s[:n]
+}
+
+func isHexByte(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func (p *servePrinter) progress(pr bundle.Progress) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bar.update(pr)
+}
+
+// uiWriter is the writer transfer prints its hints to (the firewall note
+// after 30 s without a connection), serialised with the event lines and
+// indented like them.
+func (p *servePrinter) uiWriter() io.Writer {
+	return writerFunc(func(b []byte) (int, error) {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.bar.interrupt()
+		if _, err := p.w.Write([]byte("  ")); err != nil {
+			return 0, err
+		}
+		return p.w.Write(b)
+	})
+}
+
+// delivered ends a successful serve: the final bar, the delivered line
+// and "Done.".
+func (p *servePrinter) delivered(res transfer.ServeResult) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bar.end()
+	host := transcripts.Sanitize(res.PeerHost)
+	if host == "" {
+		host = res.Peer.Addr().String()
+	}
+	took := time.Duration(0)
+	if !p.acceptedAt.IsZero() {
+		took = time.Since(p.acceptedAt)
+	}
+	fmt.Fprintf(p.w, "  %s  delivered: %s verified by %s in %.1fs\n", time.Now().Format("15:04:05"), countNoun(res.Done.Entries, "file"), host, took.Seconds())
+	fmt.Fprintln(p.w, "Done.")
+}
+
+// interrupt ends a partial progress line before an error is printed.
+func (p *servePrinter) interrupt() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.bar.interrupt()
+}
+
+// writerFunc adapts a function to io.Writer.
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(b []byte) (int, error) { return f(b) }
+
+// progressBar renders one "  sending ████░░ 42%   62.1 MB   40.0 MB/s"
+// line from bundle progress reports. On a terminal it is redrawn in place
+// at most every 200 ms; elsewhere only the final line is printed, so a log
+// never fills with partial bars. Callers serialise access.
+type progressBar struct {
+	w        io.Writer
+	label    string
+	live     bool
+	verified bool // final line says "N files verified (sha256)" instead of the rate
+	now      func() time.Time
+	started  time.Time
+	last     time.Time
+	bytes    int64
+	total    int64
+	files    int
+	onLine   bool // a partial bar is on the terminal line
+	width    int  // widest line drawn on the current terminal line, in runes
+	done     bool
+}
+
+func newProgressBar(w io.Writer, label string, live bool) *progressBar {
+	return &progressBar{w: w, label: label, live: live, now: time.Now}
+}
+
+// update takes one bundle progress report (Phase "build" or "unpack";
+// the hashing pre-pass is ignored).
+func (b *progressBar) update(p bundle.Progress) {
+	if p.Phase == "hash" || b.done {
+		return
+	}
+	if b.started.IsZero() {
+		b.started = b.now()
+	}
+	b.bytes, b.total, b.files = p.Bytes, p.TotalBytes, p.Files
+	if b.total > 0 && b.bytes >= b.total {
+		b.render(true)
+		return
+	}
+	if !b.live {
+		return
+	}
+	if t := b.now(); t.Sub(b.last) >= 200*time.Millisecond {
+		b.last = t
+		b.render(false)
+	}
+}
+
+// end prints the final line when progress was reported and the transfer
+// ended before the bar reached 100 %.
+func (b *progressBar) end() {
+	if !b.started.IsZero() && !b.done {
+		b.render(true)
+	}
+}
+
+// interrupt ends a partial line so another line can be printed.
+func (b *progressBar) interrupt() {
+	if b.onLine {
+		fmt.Fprintln(b.w)
+		b.onLine, b.width = false, 0
+	}
+}
+
+func (b *progressBar) render(final bool) {
+	pct := 0
+	if b.total > 0 {
+		pct = int(min(b.bytes*100/b.total, 100))
+	}
+	if final {
+		pct = 100
+	}
+	line := fmt.Sprintf("  %s %s %3d%%   %s", b.label, barBlocks(pct), pct, formatSize(b.bytes))
+	if final && b.verified {
+		line += fmt.Sprintf("   %s verified (sha256)", countNoun(b.files, "file"))
+	} else if rate := b.rate(); rate != "" {
+		line += "   " + rate
+	}
+	// A redraw overwrites in place; a shorter line (the rate fell) is
+	// padded so no tail of the previous one stays visible. No escape
+	// sequences: a plain "\r" works on every console.
+	w := utf8.RuneCountInString(line)
+	if b.onLine {
+		fmt.Fprint(b.w, "\r")
+		if w < b.width {
+			line += strings.Repeat(" ", b.width-w)
+		}
+	}
+	b.width = max(b.width, w)
+	fmt.Fprint(b.w, line)
+	if final {
+		fmt.Fprintln(b.w)
+		b.onLine, b.width, b.done = false, 0, true
+	} else {
+		b.onLine = true
+	}
+}
+
+func (b *progressBar) rate() string {
+	el := b.now().Sub(b.started).Seconds()
+	if el <= 0 || b.bytes == 0 {
+		return ""
+	}
+	return formatSize(int64(float64(b.bytes)/el)) + "/s"
+}
+
+// barBlocks is a twenty-cell bar for a percentage.
+func barBlocks(pct int) string {
+	filled := min(max(pct/5, 0), 20)
+	return strings.Repeat("█", filled) + strings.Repeat("░", 20-filled)
+}
+
+// isTerminalWriter reports whether w is the process's stderr and a
+// terminal — the only case a progress line is redrawn in place.
+func isTerminalWriter(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && f == os.Stderr && term.IsTerminal(int(f.Fd()))
+}
+
+// localIdentity names this machine and user for the peer (auth-ok /
+// accept): the hostname and the home directory's owner, reduced to a
+// constrained identifier the way the manifest's source block is.
+func localIdentity() (host, user string) {
+	host, _ = os.Hostname()
+	host = identStr(host)
+	if host == "" {
+		host = "host"
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		user = filepath.Base(home)
+	}
+	if user == "" || user == "." || user == string(filepath.Separator) {
+		user = os.Getenv("USER")
+	}
+	return host, identStr(user)
+}
+
+// identStr keeps the bytes an identifier may carry (letters, digits, "_",
+// "." and "-"), at most 64 of them.
+func identStr(s string) string {
+	var sb strings.Builder
+	for i := 0; i < len(s) && sb.Len() < 64; i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '.' || c == '-' {
+			sb.WriteByte(c)
+		}
+	}
+	return sb.String()
 }

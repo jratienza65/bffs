@@ -109,6 +109,91 @@ Identical effect, but nothing lands in the working tree. The most specific
 (longest) matching rule wins, matching is on path segments (a rule on `/a/b`
 never captures `/a/bc`), and `bffs.toml` still wins where both exist.
 
+## MCP server — let Claude Code drive bffs
+
+A Claude Code session can inspect and stage account changes itself, over the
+[Model Context Protocol](https://modelcontextprotocol.io):
+
+```bash
+bffs mcp install     # registers the server in Claude Code (user scope, all projects)
+bffs mcp uninstall   # removes the registration
+```
+
+After a restart (or `/mcp`), the session gets eight tools, surfaced as
+`mcp__bffs__<tool>`:
+
+| Tool | What it does |
+|------|--------------|
+| `list_accounts` | Names, types, emails, isolation, current default — never secrets |
+| `resolve_account` | Which account a directory resolves to, and *why* (source, matching `bffs.toml`/rule) |
+| `switch_account` | Set the global default |
+| `pin_account` / `unpin_account` | Add/remove a directory rule (the `bffs path set` mechanism) |
+| `check_shim` | Probe whether the shim actually wins on PATH per shell mode |
+| `account_usage` | Per-account headroom heuristics: 5h/7d token burn, limit events, suggested account |
+| `run_on_account` | Delegate a prompt to a headless claude session billed to another account |
+
+So "switch me to my work account" or "why is this repo using the personal
+account?" work from inside a session. One caveat, which the tools also state in
+their own results: changes apply to the **next** `claude` launched through the
+shim — nothing can re-point a session that is already running, including the
+one making the change.
+
+`bffs mcp install` writes the registration into `~/.claude.json` *and* into
+every per-account session `.claude.json` under the bffs config dir — both are
+needed because each oauth account runs with its own isolated config dir and
+reads its own copy. New oauth accounts inherit the entry automatically at
+`bffs login` time. The registration bakes in the absolute path of the bffs
+binary and config dir, so re-run `bffs mcp install` if you move either.
+
+(`bffs mcp serve` is the actual stdio server; Claude Code launches it itself.)
+
+## Usage heuristics — which account has headroom?
+
+```bash
+bffs usage           # per-account table: tier, last used, 5h/7d burn, limit status, suggestion
+bffs usage work      # detail: per-model and per-day breakdown, attribution sources
+```
+
+`bffs usage` estimates each account's recent Claude consumption so you can
+switch to whichever has the most room before a subscription limit: token burn
+in the last 5 hours (Anthropic's session-limit window) and 7 days, detected
+"you've hit your limit" events with their reset times, the account's cached
+plan tier, and a `suggested:` pick — the oauth account with the lowest recent
+weighted burn and no active limit. `bffs list` and `bffs show` gain a cheap
+LAST-USED column from the same data, and the `account_usage` MCP tool serves
+it to Claude Code sessions ("switch me to whichever account has headroom").
+
+How it works, honestly: Claude Code's transcripts carry full token counts but
+no account identity, so bffs records one small JSON line per shim launch in
+`<config>/launches.jsonl` (timestamp, account, working directory; `0600`;
+disable with `BFFS_NO_USAGE_LOG=1`). Sessions are then attributed by, in
+order: the config tree they live in (full-isolation accounts), the
+per-account session metadata Claude itself records (`lastSessionId`), and
+launch-log correlation by directory + time. Anything ambiguous — including
+history from before this feature existed — is reported as *unattributed*,
+never guessed. All numbers are heuristics, not billing truth; Anthropic
+publishes no official limit API for subscriptions.
+
+### Delegating runs to another account
+
+Claude Code subagents always run on the session's own credentials — but a
+fresh headless claude on a different account is an effective subagent that
+bills that account instead:
+
+```bash
+bffs run work                                          # interactive claude on `work`, wait, propagate exit code
+bffs run work -- -p "summarize this repo" --output-format json   # headless delegated run
+```
+
+From inside a Claude Code session, the `run_on_account` MCP tool does the
+same ("delegate this to whichever account has headroom" — with no `account`
+it auto-picks the `account_usage` suggestion). The delegated session shares
+**no conversation context** (the prompt must be self-contained), starts with
+conservative headless permissions (read-only tools unless `allowed_tools`
+grants more; permission bypasses are deliberately not exposed), and is
+recorded in the launch log so `bffs usage` attributes it. For plain shell
+scripting the shim route works too: `BFFS_ACCOUNT=work claude -p "…"`.
+
 ## Isolation presets (oauth only)
 
 `CLAUDE_CONFIG_DIR` isolates everything in a Claude Code config tree, not just credentials. To control how much actually gets isolated vs shared with your `~/.claude/`, pick a preset at `bffs login`-time (or change later with `bffs reisolate`):

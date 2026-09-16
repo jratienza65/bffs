@@ -25,7 +25,7 @@ var (
 
 // EnvShimDir lets a user pin the shim install directory persistently so
 // they don't have to pass --dir every time. --dir still wins.
-const EnvShimDir = "BFFS_SHIM_DIR"
+const EnvShimDir = shimcheck.EnvShimDir
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -107,6 +107,8 @@ bootstrap) it behaves as --auto rather than hanging on a prompt.`,
 		// cannot be reasoned about statically — so re-probe and report what
 		// the shells actually resolve now.
 		reportOutcome(out, dir, probeInstallDir(dir, self))
+
+		fmt.Fprintln(out, "\nOptional: let Claude Code inspect and switch bffs accounts itself:  bffs mcp install")
 		return nil
 	},
 }
@@ -122,23 +124,7 @@ func pickInstallDir() (string, error) {
 	if initInstallDir != "" {
 		return initInstallDir, nil
 	}
-	if v := os.Getenv(EnvShimDir); v != "" {
-		return v, nil
-	}
-	switch runtime.GOOS {
-	case "windows":
-		base := os.Getenv("LOCALAPPDATA")
-		if base == "" {
-			return "", fmt.Errorf("LOCALAPPDATA is not set; pass --dir or set $%s to choose an install directory", EnvShimDir)
-		}
-		return filepath.Join(base, "bffs", "bin"), nil
-	default:
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(home, ".bffs", "bin"), nil
-	}
+	return shimcheck.DefaultInstallDir()
 }
 
 func claudeShimName() string {

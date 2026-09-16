@@ -97,7 +97,7 @@ name) without changing anything.`,
 			Cwd:                cwd,
 			Now:                time.Now(),
 		}
-		pr := newPrompter(cmd.InOrStdin(), cmd.OutOrStdout())
+		pr := newPrompter(cmd.InOrStdin(), cmd.ErrOrStderr())
 		return runRehome(cmd, dir, pr, req, isTTY())
 	},
 }
@@ -340,7 +340,13 @@ func runRehome(cmd *cobra.Command, dir string, pr *prompter, req rehomeRequest, 
 	if req.SetLastSession {
 		lastSessionFile = target.claudeJSON
 	}
-	renderRehomePlan(out, plan, maps, lastSessionFile)
+	// The plan is what the confirmation is about; a dry run asks
+	// nothing and its plan is the result.
+	planOut := errOut
+	if req.DryRun {
+		planOut = out
+	}
+	renderRehomePlan(planOut, plan, maps, lastSessionFile)
 	switch {
 	case len(plan.Moves) == 0 && len(plan.Refusals) > 0:
 		return exitWith(1, fmt.Errorf("nothing could be moved: %s refused (listed above)", countNoun(len(plan.Refusals), "session")))

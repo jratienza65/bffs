@@ -116,7 +116,7 @@ will be removed is listed first; a session a running claude has open is
 refused. Memory directories and history.jsonl are never touched.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runSessionsRm(cmd, args, newPrompter(os.Stdin, cmd.OutOrStdout()), sessionsRmYes, isTTY())
+		return runSessionsRm(cmd, args, newPrompter(cmd.InOrStdin(), cmd.ErrOrStderr()), sessionsRmYes, isTTY())
 	},
 }
 

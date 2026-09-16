@@ -855,9 +855,9 @@ func serveExport(ctx context.Context, cmd *cobra.Command, req exportRequest, set
 	case sctx.Err() != nil || errors.Is(err, context.Canceled):
 		pr.interrupt()
 		if res.Bytes > 0 {
-			return exitWith(130, fmt.Errorf("cancelled after %s; the other machine discards the partial bundle", formatSize(res.Bytes)))
+			return exitWith(exitInterrupt, fmt.Errorf("cancelled after %s; the other machine discards the partial bundle", formatSize(res.Bytes)))
 		}
-		return exitWith(130, errors.New("cancelled; nothing was sent"))
+		return exitWith(exitInterrupt, errors.New("cancelled; nothing was sent"))
 	case errors.Is(err, transfer.ErrTooManyAttempts):
 		pr.interrupt()
 		return exitWith(1, fmt.Errorf("%d failed pairing attempts; run bffs export --serve again for a new code", serveAttempts))

@@ -74,7 +74,7 @@ bootstrap) it behaves as --auto rather than hanging on a prompt.`,
 		}
 		// One prompter for the whole run: a per-prompt reader would swallow
 		// the remaining input on the first read.
-		pr := newPrompter(cmd.InOrStdin(), out)
+		pr := newPrompter(cmd.InOrStdin(), cmd.ErrOrStderr())
 
 		// Probe before deciding: the same report drives the interactive menu
 		// and the non-interactive refusal, so the two can never disagree.

@@ -380,22 +380,25 @@ func TestImportConfirmFlow(t *testing.T) {
 		}
 	}
 
-	c, pr, out, _ := newImportCmd("n\n")
+	c, pr, out, errOut := newImportCmd("n\n")
 	if err := runImport(c, b.cfgDir, pr, req, true); err != nil {
 		t.Fatalf("decline: %v", err)
 	}
-	if !strings.Contains(out.String(), "Import into "+short(b.claudeDir)+"? [y/N] ") || !strings.Contains(out.String(), "aborted") {
-		t.Errorf("decline output:\n%s", out.String())
+	if !strings.Contains(errOut.String(), "Import into "+short(b.claudeDir)+"? [y/N] ") || !strings.Contains(errOut.String(), "aborted") {
+		t.Errorf("decline output:\n%s", errOut.String())
+	}
+	if out.String() != "" {
+		t.Errorf("a declined import wrote to stdout:\n%s", out.String())
 	}
 	noWrite("decline")
 
-	c, pr, out, _ = newImportCmd("")
+	c, pr, out, errOut = newImportCmd("")
 	err := runImport(c, b.cfgDir, pr, req, false)
 	if err == nil || !strings.Contains(err.Error(), "refusing to import: stdin is not a terminal; pass -y") {
 		t.Errorf("non-tty: err = %v", err)
 	}
-	if !strings.Contains(out.String(), "Bundle ") {
-		t.Errorf("the summary must precede the refusal:\n%s", out.String())
+	if !strings.Contains(streams(out, errOut), "Bundle ") {
+		t.Errorf("the summary must precede the refusal:\n%s", streams(out, errOut))
 	}
 	noWrite("non-tty")
 
@@ -482,14 +485,14 @@ func TestImportCleanStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c, pr, out, _ := newImportCmd("n\n")
+	c, pr, out, errOut := newImportCmd("n\n")
 	req := b.request(file)
 	req.CleanStaging, req.Yes = true, false
 	if err := runImport(c, b.cfgDir, pr, req, true); err != nil {
 		t.Fatalf("decline: %v", err)
 	}
-	if !strings.Contains(out.String(), "leftover staging of interrupted imports (1 directory):") || !strings.Contains(out.String(), short(leftover)) || !strings.Contains(out.String(), "remove them? [y/N] ") || !strings.Contains(out.String(), "aborted") {
-		t.Errorf("decline output:\n%s", out.String())
+	if !strings.Contains(errOut.String(), "leftover staging of interrupted imports (1 directory):") || !strings.Contains(errOut.String(), short(leftover)) || !strings.Contains(errOut.String(), "remove them? [y/N] ") || !strings.Contains(errOut.String(), "aborted") {
+		t.Errorf("decline output:\n%s", errOut.String())
 	}
 	if _, err := os.Stat(leftover); err != nil {
 		t.Errorf("declined clean removed the directory: %v", err)
@@ -549,8 +552,8 @@ func TestImportAsIs(t *testing.T) {
 		"    pending: 1 session imported as-is",
 		"    claude --resume " + testSID1 + "\n",
 	} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("as-is output missing %q:\n%s", want, out.String())
+		if !strings.Contains(streams(out, errOut), want) {
+			t.Errorf("as-is output missing %q:\n%s", want, streams(out, errOut))
 		}
 	}
 	recs, _ := imports.Load(b.cfgDir)

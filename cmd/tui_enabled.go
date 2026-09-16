@@ -24,7 +24,7 @@ func tuiSupported() bool { return tui.Supported() }
 func runTUI(ctx context.Context, dir, claudeDir, start string) error {
 	err := tui.Run(ctx, tui.Options{CfgDir: dir, HomeClaudeDir: claudeDir, Version: Version, Start: start})
 	if errors.Is(err, tui.ErrInterrupted) {
-		return exitWith(130, err)
+		return exitWith(exitInterrupt, err)
 	}
 	return err
 }

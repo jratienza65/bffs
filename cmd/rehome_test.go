@@ -180,13 +180,21 @@ func TestRunRehomeEndToEnd(t *testing.T) {
 		t.Fatal("dry run wrote .claude.json")
 	}
 
-	// Declined at the prompt: nothing written.
-	c, pr, out = newTestCmd("n\n")
+	// Declined at the prompt: nothing written, and nothing on stdout —
+	// the plan and the question are what a person reads, so a pipe that
+	// takes stdout as data gets neither.
+	c, pr, stdout, stderr := newSplitCmd("n\n")
 	if err := runRehome(c, cfgDir, pr, req, true); err != nil {
 		t.Fatalf("declined run: %v", err)
 	}
-	if !strings.Contains(out.String(), "Rehome 1 session and 1 memory directory? [y/N] ") || !strings.Contains(out.String(), "aborted") {
-		t.Errorf("prompt/abort missing:\n%s", out.String())
+	if !strings.Contains(stderr.String(), "Rehome 1 session and 1 memory directory? [y/N] ") || !strings.Contains(stderr.String(), "aborted") {
+		t.Errorf("prompt/abort missing:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "rehome in home:") {
+		t.Errorf("the plan the question is about is not with the question:\n%s", stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Errorf("a declined rehome wrote to stdout:\n%s", stdout.String())
 	}
 	if _, err := os.Stat(filepath.Join(claudeDir, "projects", newSlug)); err == nil {
 		t.Fatal("declined run wrote")

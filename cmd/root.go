@@ -71,7 +71,19 @@ var rootCmd = &cobra.Command{
 	Short: "Manage multiple Claude Code accounts and switch between them per-shell or per-project",
 	Long: `bffs stores multiple Claude credentials under named accounts and
 selects one for the next ` + "`claude`" + ` invocation, either globally or per-project
-via a bffs.toml file in the project root.`,
+via a bffs.toml file in the project root.
+
+Output: results go to stdout, everything a person reads while a command
+runs — progress, plans awaiting a yes, prompts, warnings — goes to
+stderr, so ` + "`bffs sessions list --json | jq`" + ` and ` + "`bffs export --out - | ssh …`" + `
+carry data and nothing else.
+
+Exit codes:
+  0    the command did what it was asked
+  1    it failed
+  2    invalid usage: an unknown flag, a bad or missing argument
+  75   safe to retry, nothing was written (a wrong pairing code)
+  130  interrupted (Ctrl-C)`,
 	// Runtime errors print a clean message; cobra's usage block only appears
 	// for actual flag/argument parse errors.
 	SilenceUsage: true,
@@ -90,12 +102,16 @@ via a bffs.toml file in the project root.`,
 }
 
 // Execute runs the cobra tree and ends the process with the error's exit
-// code: 1 for any error, or the code carried by an exitError (exitWith) —
-// see cmd/exit.go for the code conventions. Cobra has already printed
+// code: 2 for a usage error, 1 for any other failure, or the code carried
+// by an exitError (exitWith) — see cmd/exit.go for the table. Cobra has already printed
 // "Error: <msg>" to stderr by the time an error reaches here (SilenceErrors
 // is off; it also prints the `Run 'bffs --help'` hint for an unknown
 // subcommand), so nothing is printed a second time.
 func Execute() {
+	// Tagging happens here rather than in an init: every subcommand has
+	// been added to the tree by now, and a command's own init order is
+	// not something the tree should depend on.
+	tagUsageErrors(rootCmd)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(exitCode(err))
 	}

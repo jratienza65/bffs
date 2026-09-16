@@ -96,7 +96,7 @@ func validateName(name string) error {
 func resolveSecret(cmd *cobra.Command, flag string) (string, error) {
 	switch flag {
 	case "":
-		return promptSecret(cmd.OutOrStdout(), "Secret (input hidden): ")
+		return promptSecret(cmd.ErrOrStderr(), "Secret (input hidden): ")
 	case "-":
 		b, err := io.ReadAll(os.Stdin)
 		if err != nil {

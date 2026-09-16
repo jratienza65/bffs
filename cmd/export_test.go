@@ -635,12 +635,18 @@ func lastFields(line string, n int) string {
 	return strings.Join(f[len(f)-n:], " ")
 }
 
-// newImportCmd is newSplitCmd with the prompter on stdout, the way
-// `bffs import` wires it (its stdout never carries bundle bytes).
+// newImportCmd is newSplitCmd with the prompter on stderr, the way
+// `bffs import` wires it: the question and the plan it is about go to
+// the person, the receipt goes to the pipe.
 func newImportCmd(stdin string) (*cobra.Command, *prompter, *bytes.Buffer, *bytes.Buffer) {
 	c, _, out, errOut := newSplitCmd(stdin)
-	return c, newPrompter(c.InOrStdin(), out), out, errOut
+	return c, newPrompter(c.InOrStdin(), errOut), out, errOut
 }
+
+// streams is everything the command wrote, the way a person at a
+// terminal sees it — both streams, one after the other. Assertions
+// about *which* stream carried what name the buffer directly.
+func streams(out, errOut *bytes.Buffer) string { return out.String() + "\n" + errOut.String() }
 
 // A short read while writing — a live transcript changed under the
 // export — names --no-live; any other failure, and a short read with no
@@ -979,7 +985,7 @@ func TestServeValidation(t *testing.T) {
 }
 
 // End to end over loopback: machine A serves its project, machine B
-// first tries a wrong code (exit 2, A keeps serving), then declines
+// first tries a wrong code (exit 75, A keeps serving), then declines
 // without a terminal (exit 1, nothing written, A keeps serving), then
 // pairs with the code from $BFFS_TRANSFER_CODE and lands the session. The
 // code appears once on A's screen and never on B's.
@@ -1022,12 +1028,13 @@ func TestExportServeImportFromHost(t *testing.T) {
 		}
 	}
 
-	// 1. A wrong code: exit 2, the connection line named the peer key.
+	// 1. A wrong code: exit 75 (nothing landed, A keeps serving), the
+	// connection line named the peer key.
 	t.Setenv(envTransferCode, "ZZZZ-ZZZZ")
 	c, pr, out, errOut := newImportCmd("")
 	err := runImport(c, b.cfgDir, pr, breq, false)
 	bOutputs = append(bOutputs, out.String(), errOut.String())
-	if err == nil || exitCode(err) != 2 || !errors.Is(err, transfer.ErrBadCode) || !strings.Contains(err.Error(), "rejected the code (2 attempts left there). Run bffs import again.") {
+	if err == nil || exitCode(err) != exitRetry || !errors.Is(err, transfer.ErrBadCode) || !strings.Contains(err.Error(), "rejected the code (2 attempts left there). Run bffs import again.") {
 		t.Errorf("wrong code: err = %v (exit %d)", err, exitCode(err))
 	}
 	if !strings.Contains(errOut.String(), "connected to "+addr.String()+" (TLS 1.3, peer key ") || !strings.Contains(errOut.String(), "(from $BFFS_TRANSFER_CODE)") {

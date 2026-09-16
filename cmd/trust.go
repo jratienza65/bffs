@@ -169,7 +169,7 @@ about a second.`,
 			DryRun:             trustSyncDryRun,
 			Yes:                trustSyncYes,
 		}
-		pr := newPrompter(cmd.InOrStdin(), out)
+		pr := newPrompter(cmd.InOrStdin(), cmd.ErrOrStderr())
 		return runTrustSync(cmd, pr, env, req, isTTY())
 	},
 }
@@ -759,6 +759,12 @@ func planTrustSync(env *trustEnv, req syncRequest) ([]syncPlan, error) {
 // stops there. One prompter serves every confirmation.
 func runTrustSync(cmd *cobra.Command, pr *prompter, env *trustEnv, req syncRequest, interactive bool) error {
 	out := cmd.OutOrStdout()
+	// The plan is what the confirmation is about, so it goes to the
+	// person; a dry run asks nothing and its plan is the result.
+	planOut := cmd.ErrOrStderr()
+	if req.DryRun {
+		planOut = out
+	}
 	plans, err := planTrustSync(env, req)
 	if err != nil {
 		return err
@@ -777,17 +783,17 @@ func runTrustSync(cmd *cobra.Command, pr *prompter, env *trustEnv, req syncReque
 	for _, p := range plans {
 		if len(p.Projects) == 0 {
 			if len(plans) > 1 {
-				fmt.Fprintf(out, "no changes for %q\n", p.Target)
+				fmt.Fprintf(planOut, "no changes for %q\n", p.Target)
 			}
 			continue
 		}
 		for _, pp := range p.Projects {
-			fmt.Fprintf(out, "project %s → account %q (from %q):\n", short(transcripts.Sanitize(pp.Key)), p.Target, pp.Source)
+			fmt.Fprintf(planOut, "project %s → account %q (from %q):\n", short(transcripts.Sanitize(pp.Key)), p.Target, pp.Source)
 			for _, c := range pp.Changes {
-				fmt.Fprintf(out, "  %-41s %s -> %s\n", c.Key, changeCell(c.Key, c.From), changeCell(c.Key, c.To))
+				fmt.Fprintf(planOut, "  %-41s %s -> %s\n", c.Key, changeCell(c.Key, c.From), changeCell(c.Key, c.To))
 			}
 			if req.IncludePermissions {
-				printMCPCommands(out, pp.Changes)
+				printMCPCommands(planOut, pp.Changes)
 			}
 		}
 		if req.DryRun {
@@ -795,14 +801,14 @@ func runTrustSync(cmd *cobra.Command, pr *prompter, env *trustEnv, req syncReque
 		}
 		if !req.Yes {
 			if req.IncludePermissions {
-				fmt.Fprintln(out, "this copies allowedTools and MCP server approvals; each mcpServers command line is printed before applying")
+				fmt.Fprintln(planOut, "this copies allowedTools and MCP server approvals; each mcpServers command line is printed before applying")
 			}
 			ans, err := pr.line(fmt.Sprintf("apply to %s? [y/N] ", short(transcripts.Sanitize(p.Path))))
 			if err != nil {
 				return err
 			}
 			if a := strings.ToLower(strings.TrimSpace(ans)); a != "y" && a != "yes" {
-				fmt.Fprintln(out, "aborted")
+				fmt.Fprintln(planOut, "aborted")
 				return nil
 			}
 		}
@@ -985,7 +991,7 @@ func switchTrustSync(cmd *cobra.Command, cfgDir, account string) error {
 	if err != nil {
 		return err
 	}
-	pr := newPrompter(cmd.InOrStdin(), cmd.OutOrStdout())
+	pr := newPrompter(cmd.InOrStdin(), cmd.ErrOrStderr())
 	return runTrustSync(cmd, pr, env, syncRequest{To: []string{row}, Keys: []string{key}}, isTTY())
 }
 

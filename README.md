@@ -510,7 +510,7 @@ Import record: ~/Library/Application Support/bffs/imports/6f1e2c0a-….json  (bf
 
 The code is asked for only once the connection is up, so a wrong address
 fails first (`could not reach 192.168.1.99:7345 within 10s — is bffs export
---serve still running there …`). A wrong code exits 2 and burns one of the
+--serve still running there …`). A wrong code exits 75 — nothing was written and the other machine is still serving, so it is safe to run again — and burns one of the
 three attempts on A; three wrong codes end the serve. The importing side
 shows the whole manifest and asks before requesting a single payload byte;
 `--dry-run` reviews the plan and sends a "dry run" reject that A survives.
@@ -572,6 +572,20 @@ Highest priority wins:
 3. The most specific directory rule from `bffs path set` (`paths.toml`)
 4. The global default set by `bffs switch`
 5. Fall through — `claude` runs with its own credentials, untouched
+
+## Output, pipes and exit codes
+
+Results go to stdout; everything a person reads while a command runs — progress, a plan waiting for a yes, prompts, warnings — goes to stderr. So `bffs sessions list --json | jq '.[].session_id'` sees JSON and nothing else, `bffs export --out - | ssh host 'bffs import --from - -y --as-is'` carries bundle bytes and nothing else, and `bffs import --from a.bffs > receipt.txt` still shows you what you are agreeing to. A dry run is the exception by intent: `--dry-run` asks nothing, so its plan *is* the result and goes to stdout.
+
+`--json` (on `sessions list`, `sessions imports`, `memory list`, `trust`) prints one JSON document on stdout with stable snake_case field names — the same shape the MCP tools return. Those field names are the contract; the human-readable tables are not.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | the command did what it was asked |
+| 1 | it failed |
+| 2 | invalid usage: an unknown flag, a bad or missing argument |
+| 75 | safe to retry, nothing was written (a wrong pairing code) |
+| 130 | interrupted (Ctrl-C) |
 
 ## Storage
 

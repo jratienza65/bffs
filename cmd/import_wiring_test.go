@@ -87,18 +87,26 @@ func TestImportMappedEndToEnd(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil || last.Type != "relocated" || last.SessionID != testSID1 || last.RelocatedCwd != moved {
 		t.Errorf("last line = %q (%v), want a relocated record for %s", lines[len(lines)-1], err, moved)
 	}
+	// The summary is on stderr (it is what the confirmation is about)
+	// and the receipt on stdout, so each assertion names its stream.
 	for _, want := range []string{
 		"exists here ✗ → " + short(moved) + " (relocated record appended)",
 		"→ sessions will be placed under projects/" + slug + "/ (relocated record appended)",
 		"→ marks " + short(moved) + " trusted for \"work\"",
 		"→ sets the last-session pointer for " + short(moved) + " in \"work\"",
+	} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Errorf("the summary lacks %q:\n%s", want, errOut.String())
+		}
+	}
+	for _, want := range []string{
 		"(relocated → " + short(moved) + ")",
 		"trust      carried over for " + short(moved) + " → \"work\"",
 		"last-session pointer set for " + short(moved) + " in \"work\"",
 		"merged into",
 	} {
 		if !strings.Contains(out.String(), want) {
-			t.Errorf("output lacks %q:\n%s", want, out.String())
+			t.Errorf("the receipt lacks %q:\n%s", want, out.String())
 		}
 	}
 

@@ -133,7 +133,7 @@ machine is the safe form. A wrong code exits 2.`,
 			NoRewriteMemory: importNoRewriteMemory,
 		}
 		req.Host, req.User = localIdentity()
-		pr := newPrompter(cmd.InOrStdin(), cmd.OutOrStdout())
+		pr := newPrompter(cmd.InOrStdin(), cmd.ErrOrStderr())
 		return runImport(cmd, dir, pr, req, isTTY())
 	},
 }
@@ -436,7 +436,7 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 		out = errOut
 	}
 	if req.CleanStaging {
-		ok, err := cleanStaging(dir, pr, out, req.Yes, tty)
+		ok, err := cleanStaging(dir, pr, out, errOut, req.Yes, tty)
 		if err != nil {
 			return err
 		}
@@ -478,10 +478,17 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 	sum := newImportSummary(m, dest, req)
 	sum.Limit = limits.MaxTotalBytes
 	sum.Retention = retentionLabel(dest.root.ConfigDir, days, source)
-	req.Rules = append(req.Rules, renderImportSummaryAsk(out, &sum, newPlacementAsker(pr, tty && !req.Yes && !req.AsIs && !req.DryRun))...)
+	// The summary is what the confirmation is about, so it goes where
+	// the question goes; a dry run asks nothing and its summary is the
+	// result, which belongs on stdout.
+	planOut := errOut
+	if req.DryRun {
+		planOut = out
+	}
+	req.Rules = append(req.Rules, renderImportSummaryAsk(planOut, &sum, newPlacementAsker(pr, tty && !req.Yes && !req.AsIs && !req.DryRun))...)
 
 	if req.DryRun {
-		fmt.Fprintln(out, "dry run: nothing is written")
+		fmt.Fprintln(planOut, "dry run: nothing is written")
 	} else {
 		ok, err := confirmOrAbort(pr, fmt.Sprintf("Import into %s? [y/N] ", short(dest.root.ConfigDir)), req.Yes, tty)
 		if err != nil {
@@ -545,7 +552,9 @@ func runImport(cmd *cobra.Command, dir string, pr *prompter, req importRequest, 
 // cleanStaging lists the leftover staging directories under the bffs
 // config dir and removes them once the user agrees. ok is false when the
 // user declined (the run stops there).
-func cleanStaging(dir string, pr *prompter, out io.Writer, yes, tty bool) (bool, error) {
+// The listing is the question and the removals are the result, so the
+// two go to different streams.
+func cleanStaging(dir string, pr *prompter, out, errOut io.Writer, yes, tty bool) (bool, error) {
 	stale, err := porter.StaleStaging(dir)
 	if err != nil {
 		return false, err
@@ -554,9 +563,9 @@ func cleanStaging(dir string, pr *prompter, out io.Writer, yes, tty bool) (bool,
 		fmt.Fprintln(out, "no leftover staging directories")
 		return true, nil
 	}
-	fmt.Fprintf(out, "leftover staging of interrupted imports (%s):\n", countNoun(len(stale), "directory"))
+	fmt.Fprintf(errOut, "leftover staging of interrupted imports (%s):\n", countNoun(len(stale), "directory"))
 	for _, p := range stale {
-		fmt.Fprintf(out, "  %s\n", short(p))
+		fmt.Fprintf(errOut, "  %s\n", short(p))
 	}
 	ok, err := confirmOrAbort(pr, "remove them? [y/N] ", yes, tty)
 	if err != nil || !ok {
@@ -1410,10 +1419,11 @@ func runImportFromHost(cmd *cobra.Command, dir string, env *catalogEnv, dest imp
 		renderImportReceipt(errOut, newImportReceipt(dir, manifest, rep, false, elapsed))
 		return nil
 	case errors.Is(err, transfer.ErrBadCode):
-		return exitWith(2, err)
+		// Nothing was written and the other machine is still serving.
+		return exitWith(exitRetry, err)
 	case ctx.Err() != nil || errors.Is(err, context.Canceled):
 		reportPartialImport(errOut, dir, manifest, rep, elapsed)
-		return exitWith(130, errors.New("interrupted; the connection was closed"))
+		return exitWith(exitInterrupt, errors.New("interrupted; the connection was closed"))
 	case sinkErr != nil:
 		reportPartialImport(errOut, dir, manifest, rep, elapsed)
 		return exitWith(1, err)

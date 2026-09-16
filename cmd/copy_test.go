@@ -160,10 +160,18 @@ func TestRunCopyPoolToFull(t *testing.T) {
 	if _, err := os.Stat(src); err != nil {
 		t.Errorf("a copy must keep the source: %v", err)
 	}
-	for _, s := range []string{"plan: 1 session, 0 memory dirs", "copied 1 session", "verify:  cd " + rehome.ShellQuote(f.project) + " && BFFS_ACCOUNT=work claude --resume " + testSID1} {
+	// The plan is part of the question, so it is on stderr; the
+	// receipt is the result and stays on stdout.
+	if !strings.Contains(errOut.String(), "plan: 1 session, 0 memory dirs") {
+		t.Errorf("stderr lacks the plan:\n%s", errOut.String())
+	}
+	for _, s := range []string{"copied 1 session", "verify:  cd " + rehome.ShellQuote(f.project) + " && BFFS_ACCOUNT=work claude --resume " + testSID1} {
 		if !strings.Contains(out.String(), s) {
 			t.Errorf("output lacks %q:\n%s", s, out.String())
 		}
+	}
+	if strings.Contains(out.String(), "plan: ") {
+		t.Errorf("the plan reached stdout, where a pipe would take it as data:\n%s", out.String())
 	}
 
 	// A second copy of the same session is a skip, not an error.
@@ -233,13 +241,13 @@ func TestRunCopyMoveHoldsLiveSessions(t *testing.T) {
 	f := newCopyFixture(t, map[string]store.Account{"work": {Type: store.TypeOAuth, Isolation: store.IsolationFull}})
 	src := f.transcript(filepath.Join(f.claudeDir, "projects"), testSID1, "hello", catalogNow.Add(-time.Hour))
 	fakeLiveSession(t, f.claudeDir, testSID1, f.project)
-	c, pr, out, _ := newSplitCmd("")
+	c, pr, _, errOut := newSplitCmd("")
 	err := runCopy(c, f.cfgDir, pr, f.request("home", "work", true), false)
 	if err == nil || !strings.Contains(err.Error(), "open in a running claude") {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(out.String(), "held (live, skipped): "+testSID1) {
-		t.Errorf("held line missing:\n%s", out.String())
+	if !strings.Contains(errOut.String(), "held (live, skipped): "+testSID1) {
+		t.Errorf("held line missing:\n%s", errOut.String())
 	}
 	if _, err := os.Stat(src); err != nil {
 		t.Errorf("a held session must stay: %v", err)

@@ -54,7 +54,7 @@ its digest matched, and never touches a session a running claude has open.`,
 		if err != nil {
 			return err
 		}
-		return runCopy(cmd, dir, newPrompter(os.Stdin, cmd.OutOrStdout()), req, isTTY())
+		return runCopy(cmd, dir, newPrompter(cmd.InOrStdin(), cmd.ErrOrStderr()), req, isTTY())
 	},
 }
 
@@ -208,18 +208,26 @@ func runCopy(cmd *cobra.Command, dir string, pr *prompter, req copyRequest, tty 
 	}
 	if len(sel.Sessions) == 0 && len(sel.Memories) == 0 {
 		if len(held) > 0 {
-			renderHeld(out, held, live)
+			renderHeld(errOut, held, live)
 			return exitWith(1, errors.New("every selected session is open in a running claude; nothing was moved"))
 		}
 		return errors.New("nothing selected: no sessions or memory dirs matched")
 	}
 
-	fmt.Fprintf(out, "plan: %s, %s  from %s  to  %s\n",
+	// The plan is what the question is about, so it goes where the
+	// question goes (cli-design: a pipe gets the result, a person gets
+	// the reasoning). A dry run has no question and the plan is its
+	// result, so that one stays on stdout.
+	planOut := errOut
+	if req.DryRun {
+		planOut = out
+	}
+	fmt.Fprintf(planOut, "plan: %s, %s  from %s  to  %s\n",
 		countNoun(len(sel.Sessions), "session"), countNoun(len(sel.Memories), "memory dir"),
 		short(src.Dir), short(dst.Dir))
-	renderHeld(out, held, live)
+	renderHeld(planOut, held, live)
 	if req.DryRun {
-		fmt.Fprintln(out, "dry run: nothing written")
+		fmt.Fprintln(planOut, "dry run: nothing written")
 		return nil
 	}
 

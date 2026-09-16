@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/jratienza65/bffs/internal/store"
 )
 
@@ -104,5 +105,26 @@ func TestThemeKey(t *testing.T) {
 	}
 	if h.a.svc.isDark {
 		t.Error("a white background should read as light")
+	}
+}
+
+// detectProfile must clamp only what is not a terminal: a terminal with
+// sixteen colours has to be reported as one, or applyTheme never
+// reaches for the rungs.
+func TestDetectProfileClampsOnlyNonTerminals(t *testing.T) {
+	prev := themeProfile
+	t.Cleanup(func() { themeProfile = prev })
+	// A pipe (what a test and a golden are) keeps the full-fidelity
+	// colours, which Bubble Tea downsamples at write time.
+	if got := detectProfile(); got != colorprofile.ANSI256 {
+		t.Errorf("stdout is not a terminal here; profile = %v, want ANSI256", got)
+	}
+	// And the rungs are what a 16-colour profile is given.
+	themeProfile = colorprofile.ANSI
+	applyTheme(palettes[0], true)
+	t.Cleanup(func() { applyTheme(palettes[0], true) })
+	got := downsample(styleCursor.Render("x"), colorprofile.ANSI)
+	if !strings.Contains(got, "44") {
+		t.Errorf("the cursor row's background is %q, want the blue rung (44)", spellEscapes(got))
 	}
 }

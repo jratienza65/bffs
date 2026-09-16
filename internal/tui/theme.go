@@ -6,11 +6,63 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 )
 
 // pair is one semantic colour in its dark-background and
 // light-background variants (hex).
 type pair struct{ dark, light string }
+
+// rung is what a role falls back to on a terminal with sixteen
+// colours: an index into the base palette, per background.
+//
+// Without this, Lip Gloss picks the nearest of the sixteen to the hex,
+// which is where a theme quietly loses: the default palette's warn, bad
+// and section headers all land on bright red, and on its light variant
+// the pane borders land on bright white — invisible on a white
+// terminal (internal/tui/testdata/sixteen-colour-rungs.txt). The rungs
+// are a property of the role rather than of the theme, because with
+// sixteen colours there is nothing left to theme: the sixteen are the
+// terminal's own, and a user who themed them has already chosen.
+type rung struct{ dark, light int }
+
+var rungs = struct {
+	accent, accent2, ok, warn, bad, info, muted, border, selectionBg rung
+}{
+	accent:  rung{12, 4}, // bright blue on dark, blue on light
+	accent2: rung{11, 5}, // orange has no rung: bright yellow, magenta
+	ok:      rung{10, 2},
+	warn:    rung{3, 3},
+	bad:     rung{9, 1},
+	info:    rung{14, 6},
+	muted:   rung{7, 8}, // a grey on each: light on dark, dark on light
+	border:  rung{8, 7}, // dimmer than the text it frames, on both
+	// The cursor row paints a background and lets the terminal's own
+	// foreground ride on it, so the rung has to contrast with that
+	// foreground rather than with the hex: blue under white text on a
+	// dark terminal, bright cyan under black text on a light one.
+	selectionBg: rung{4, 14},
+}
+
+// themeProfile is the colour profile the styles are built for. A
+// non-terminal stdout — a test, a pipe, a golden — reads as no colour
+// at all, which would leave every token unpainted, so it is clamped up
+// to 256: what the frame is *drawn* with stays the full-fidelity
+// colour, and what the terminal can show is Bubble Tea's business at
+// write time.
+var themeProfile = colorprofile.ANSI256
+
+// detectProfile reads the profile of the terminal bffs is drawing to.
+// Only "not a terminal at all" is clamped up — a terminal that really
+// has sixteen colours must be told so, or the rungs never apply.
+func detectProfile() colorprofile.Profile {
+	switch p := colorprofile.Detect(os.Stdout, os.Environ()); p {
+	case colorprofile.NoTTY, colorprofile.Ascii:
+		return colorprofile.ANSI256
+	default:
+		return p
+	}
+}
 
 // palette is a theme: semantic colours, never used alone — every
 // coloured signal keeps its glyph or word (tui-design: meaning and
@@ -131,39 +183,47 @@ func applyTheme(p palette, isDark bool) {
 		return
 	}
 	ld := lipgloss.LightDark(isDark)
-	c := func(pr pair) color.Color { return ld(lipgloss.Color(pr.light), lipgloss.Color(pr.dark)) }
-	fg := func(pr pair) lipgloss.Style { return lipgloss.NewStyle().Foreground(c(pr)) }
-	styleHeader = fg(p.accent).Bold(true)
-	styleFaint = fg(p.muted)
-	styleCursor = lipgloss.NewStyle().Background(c(p.selectionBg)).Bold(true)
-	styleMuted = fg(p.muted).Background(c(p.border))
-	styleSection = fg(p.accent2).Bold(true)
-	styleError = fg(p.bad).Bold(true)
+	complete := lipgloss.Complete(themeProfile)
+	c := func(pr pair, r rung) color.Color {
+		idx := r.light
+		if isDark {
+			idx = r.dark
+		}
+		hex := ld(lipgloss.Color(pr.light), lipgloss.Color(pr.dark))
+		return complete(lipgloss.ANSIColor(idx), hex, hex)
+	}
+	fg := func(pr pair, r rung) lipgloss.Style { return lipgloss.NewStyle().Foreground(c(pr, r)) }
+	styleHeader = fg(p.accent, rungs.accent).Bold(true)
+	styleFaint = fg(p.muted, rungs.muted)
+	styleCursor = lipgloss.NewStyle().Background(c(p.selectionBg, rungs.selectionBg)).Bold(true)
+	styleMuted = fg(p.muted, rungs.muted).Background(c(p.border, rungs.border))
+	styleSection = fg(p.accent2, rungs.accent2).Bold(true)
+	styleError = fg(p.bad, rungs.bad).Bold(true)
 	styleStatus = lipgloss.NewStyle()
-	styleBorder = fg(p.border)
-	styleBorderFocus = fg(p.accent)
-	styleTitle = fg(p.muted)
-	styleTitleFocus = fg(p.accent).Bold(true)
-	styleCounter = fg(p.muted)
-	styleKey = fg(p.accent).Bold(true)
-	styleDesc = fg(p.muted)
-	styleLive = fg(p.ok)
-	styleImported = fg(p.info)
-	styleMissing = fg(p.warn)
-	styleMark = fg(p.accent2).Bold(true)
-	stylePin = fg(p.accent2)
-	styleOK = fg(p.ok)
-	styleBad = fg(p.bad)
-	styleWarn = fg(p.warn)
-	styleAccent = fg(p.accent)
-	stylePrompt = fg(p.accent)
+	styleBorder = fg(p.border, rungs.border)
+	styleBorderFocus = fg(p.accent, rungs.accent)
+	styleTitle = fg(p.muted, rungs.muted)
+	styleTitleFocus = fg(p.accent, rungs.accent).Bold(true)
+	styleCounter = fg(p.muted, rungs.muted)
+	styleKey = fg(p.accent, rungs.accent).Bold(true)
+	styleDesc = fg(p.muted, rungs.muted)
+	styleLive = fg(p.ok, rungs.ok)
+	styleImported = fg(p.info, rungs.info)
+	styleMissing = fg(p.warn, rungs.warn)
+	styleMark = fg(p.accent2, rungs.accent2).Bold(true)
+	stylePin = fg(p.accent2, rungs.accent2)
+	styleOK = fg(p.ok, rungs.ok)
+	styleBad = fg(p.bad, rungs.bad)
+	styleWarn = fg(p.warn, rungs.warn)
+	styleAccent = fg(p.accent, rungs.accent)
+	stylePrompt = fg(p.accent, rungs.accent)
 	// Inline markup carries two signals like everything else: strong is
 	// bold on the body colour rather than another accent, so a heading
 	// still outranks it, and a link is the one underlined thing.
 	styleStrong = lipgloss.NewStyle().Bold(true)
 	styleEmph = lipgloss.NewStyle().Italic(true)
-	styleCodeSpan = fg(p.accent2)
-	styleLink = fg(p.info).Underline(true)
+	styleCodeSpan = fg(p.accent2, rungs.accent2)
+	styleLink = fg(p.info, rungs.info).Underline(true)
 	// Reverse video rather than a background token: a selection has to
 	// read as selected on every palette and on a terminal with sixteen
 	// colours, and swapping the cell's own colours always does.

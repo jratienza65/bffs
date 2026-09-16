@@ -44,6 +44,7 @@ func newApp(svc *services) *app {
 	}
 	svc.theme, svc.isDark = name, true
 	p, _ := paletteByName(name)
+	themeProfile = detectProfile()
 	applyTheme(p, true)
 	resolveGlyphs()
 	return &app{svc: svc, ws: newWorkspace(svc), help: h, tracer: openTrace()}
@@ -322,6 +323,9 @@ func (a *app) helpView() string {
 	st := a.help.Styles
 	st.ShortKey, st.ShortDesc, st.ShortSeparator = styleKey, styleDesc, styleDesc
 	st.FullKey, st.FullDesc, st.FullSeparator = styleKey, styleDesc, styleDesc
+	// The bubble's own ellipsis colour downsamples to black, which is
+	// the background of most terminals that have sixteen colours.
+	st.Ellipsis = styleFaint
 	a.help.Styles = st
 	var ks []key.Binding
 	if s := a.top(); s != nil {

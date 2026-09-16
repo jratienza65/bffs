@@ -135,7 +135,8 @@ func TestCursorRowIsOneSurface(t *testing.T) {
 // whole bar — in the other. The golden makes every such change visible
 // in a diff; `make golden` rewrites it.
 func TestSixteenColourRungs(t *testing.T) {
-	t.Cleanup(func() { applyTheme(palettes[0], true) })
+	prev := themeProfile
+	t.Cleanup(func() { themeProfile = prev; applyTheme(palettes[0], true) })
 	var b strings.Builder
 	b.WriteString("token                 truecolour                   256           16\n")
 	for _, p := range palettes {
@@ -144,13 +145,24 @@ func TestSixteenColourRungs(t *testing.T) {
 			if !dark {
 				mode = "light"
 			}
-			applyTheme(p, dark)
 			fmt.Fprintf(&b, "\n[%s %s]\n", p.name, mode)
+			// The 16-colour column is what a terminal with sixteen
+			// colours is *given* — the role's rung — not what the hex
+			// happens to downsample to, which is the whole point of
+			// the rungs.
+			themeProfile = colorprofile.ANSI256
+			applyTheme(p, dark)
+			full := map[string]string{}
+			at256 := map[string]string{}
 			for _, tok := range themeTokens() {
-				full := firstSGR(tok.style.Render("x"))
+				full[tok.name] = firstSGR(tok.style.Render("x"))
+				at256[tok.name] = firstSGR(downsample(tok.style.Render("x"), colorprofile.ANSI256))
+			}
+			themeProfile = colorprofile.ANSI
+			applyTheme(p, dark)
+			for _, tok := range themeTokens() {
 				fmt.Fprintf(&b, "%-20s  %-26s  %-12s  %s\n", tok.name,
-					spellEscapes(full),
-					spellEscapes(firstSGR(downsample(tok.style.Render("x"), colorprofile.ANSI256))),
+					spellEscapes(full[tok.name]), spellEscapes(at256[tok.name]),
 					spellEscapes(firstSGR(downsample(tok.style.Render("x"), colorprofile.ANSI))))
 			}
 		}
@@ -239,4 +251,45 @@ func slicesContains(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// The rungs exist to keep roles apart on a terminal with sixteen
+// colours, where a nearest-colour match collapses them: the golden
+// records what each one became, and this records why they may not be
+// equal.
+func TestRungsKeepRolesApart(t *testing.T) {
+	for _, dark := range []bool{true, false} {
+		mode := "dark"
+		if !dark {
+			mode = "light"
+		}
+		pick := func(r rung) int {
+			if dark {
+				return r.dark
+			}
+			return r.light
+		}
+		roles := map[string]int{
+			"accent": pick(rungs.accent), "accent2": pick(rungs.accent2),
+			"ok": pick(rungs.ok), "warn": pick(rungs.warn), "bad": pick(rungs.bad),
+			"info": pick(rungs.info),
+		}
+		seen := map[int]string{}
+		for name, idx := range roles {
+			if other, ok := seen[idx]; ok {
+				t.Errorf("%s: %s and %s share rung %d — the two states are indistinguishable there", mode, other, name, idx)
+			}
+			seen[idx] = name
+		}
+		if pick(rungs.border) == pick(rungs.muted) {
+			t.Errorf("%s: the frame and the text it frames share rung %d", mode, pick(rungs.border))
+		}
+		// The cursor row paints a background and lets the terminal's
+		// own foreground ride on it, so it may never be the colour that
+		// foreground is written on.
+		bg := pick(rungs.selectionBg)
+		if (dark && bg == 0) || (!dark && (bg == 7 || bg == 15)) {
+			t.Errorf("%s: the cursor row's background is rung %d, which is the terminal's own", mode, bg)
+		}
+	}
 }

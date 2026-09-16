@@ -211,6 +211,9 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, keys.Help):
 		return a.push(newHelpScreen(a.ws.helpGroups()))
 	}
+	// A status message is feedback for the last key; the next one
+	// clears it (an action that has something to say sets a new one).
+	a.status, a.statusErr = "", false
 	return a.ws.handleKey(msg)
 }
 
@@ -265,10 +268,15 @@ func (a *app) View() tea.View {
 	// everything else that is rendered.
 	statusLine := transcripts.Sanitize(a.status)
 	if statusLine == "" {
-		if l, ok := a.top().(loader); ok && l != nil && l.loading() {
+		switch {
+		case a.top() != nil:
+			if l, ok := a.top().(loader); ok && l.loading() {
+				statusLine = "loading…"
+			}
+		case a.ws.previewBusy:
 			statusLine = "loading…"
-		} else if a.top() == nil && a.ws.previewBusy {
-			statusLine = "loading…"
+		default:
+			statusLine = styleFaint.Render(a.ws.hint())
 		}
 	}
 	if a.statusErr {

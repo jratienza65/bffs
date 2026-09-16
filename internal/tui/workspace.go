@@ -30,8 +30,9 @@ const (
 
 // sideAndMainMinWidth is the breakpoint below which the side column and
 // the preview no longer fit together (tui-v2 §2, the floor): the panels
-// take the width and enter shows the preview.
-const sideAndMainMinWidth = 110
+// take the width, enter shows the preview and hint says so. At the
+// breakpoint the side column is 34 cells and the preview 59.
+const sideAndMainMinWidth = 96
 
 // The hard minimum; below it the frame is replaced by a message.
 const (
@@ -144,6 +145,20 @@ func (ws *workspace) sideOnly() bool {
 		return false
 	}
 	return ws.width < sideAndMainMinWidth
+}
+
+// hint is the line the app shows under the frame while nothing else is
+// in the status: how to reach a preview the width has hidden.
+func (ws *workspace) hint() string {
+	switch {
+	case ws.mode == modeSideOnly:
+		return "preview hidden (_ pressed) — enter shows it for one item, _ brings it back"
+	case ws.sideOnly() && !ws.mainFocus:
+		return fmt.Sprintf("preview hidden: the terminal is narrower than %d columns — enter shows it, + keeps it, or widen the window", sideAndMainMinWidth)
+	case ws.mode == modeMainOnly:
+		return "panels hidden (+ pressed) — + brings them back; the keys still move the cursor"
+	}
+	return ""
 }
 
 // mainOnly reports whether only the preview is drawn.

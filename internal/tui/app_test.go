@@ -353,6 +353,7 @@ func TestWorkspaceSingleRoot(t *testing.T) {
 	h.keys("+")
 	wantAll(t, h.view(), "1 accounts", "┬")
 	h.keys("_")
+	wantAll(t, h.view(), "preview hidden (_ pressed)")
 	wantNone(t, h.view(), "┬")
 	h.keys("_")
 	if ws.mode != modeAuto {
@@ -369,8 +370,14 @@ func TestNarrowLayout(t *testing.T) {
 	ws := h.a.ws
 	h.send(tea.WindowSizeMsg{Width: 90, Height: 30})
 	out := h.view()
-	wantAll(t, out, "1 accounts", "2 projects", "3 SESSIONS | memory", "first prompt of one")
+	wantAll(t, out, "1 accounts", "2 projects", "3 SESSIONS | memory", "first prompt of one", "preview hidden: the terminal is narrower than 96 columns — enter shows it")
 	wantNone(t, out, "┬", "ACROSS ROOTS")
+	// At the breakpoint the two fit side by side again.
+	h.send(tea.WindowSizeMsg{Width: 96, Height: 30})
+	out = h.view()
+	wantAll(t, out, "┬", "ACROSS ROOTS")
+	wantNone(t, out, "preview hidden")
+	h.send(tea.WindowSizeMsg{Width: 90, Height: 30})
 	h.keys("3", "enter")
 	if !ws.mainFocus {
 		t.Fatal("enter on a session below the breakpoint should show the preview")

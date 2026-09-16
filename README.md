@@ -61,6 +61,22 @@ account = "personal"
 
 Any `claude` invocation made anywhere inside that tree resolves to `personal`, no matter which account is the global default. This works for both `api_key` and `oauth` accounts — the shim's per-invocation env var injection covers both.
 
+## Directory rules — per-project pinning without a file in the project
+
+If you would rather not have a `bffs.toml` sitting in every repo, keep the same
+mapping in your bffs config instead:
+
+```bash
+bffs path set personal ~/code/oss   # covers the directory and everything under it
+bffs path list                      # '*' marks the rule covering your cwd
+bffs path remove ~/code/oss
+bffs path import ~/code/oss         # turn an existing bffs.toml into a rule
+```
+
+Identical effect, but nothing lands in the working tree. The most specific
+(longest) matching rule wins, matching is on path segments (a rule on `/a/b`
+never captures `/a/bc`), and `bffs.toml` still wins where both exist.
+
 ## Isolation presets (oauth only)
 
 `CLAUDE_CONFIG_DIR` isolates everything in a Claude Code config tree, not just credentials. To control how much actually gets isolated vs shared with your `~/.claude/`, pick a preset at `bffs login`-time (or change later with `bffs reisolate`):
@@ -80,8 +96,9 @@ Highest priority wins:
 
 1. `BFFS_ACCOUNT` env var
 2. The nearest `bffs.toml` walking up from CWD
-3. The global default set by `bffs switch`
-4. Fall through — `claude` runs with its own credentials, untouched
+3. The most specific directory rule from `bffs path set` (`paths.toml`)
+4. The global default set by `bffs switch`
+5. Fall through — `claude` runs with its own credentials, untouched
 
 ## Storage
 

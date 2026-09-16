@@ -1207,6 +1207,11 @@ func (ws *workspace) actions() []menuItem {
 	account := ws.perspectiveAccount()
 	add("i", "receive a bundle over the LAN into "+shortRootLabel(root), func() tea.Cmd { return receiveInto(svc, root, account) })
 	if ws.focus == panelAccounts {
+		// The accounts panel is where the accounts themselves live, so
+		// adding one belongs here rather than in every context.
+		add("n", "add an account to this machine (claude subscription or api key)", func() tea.Cmd {
+			return pushScreen(newNewAccountScreen(svc))
+		})
 		// The accounts panel is the pool: its actions take every project.
 		all := actionTarget{root: root, allProjects: true}
 		add("e", "export "+all.what()+" to a file", func() tea.Cmd { return pushScreen(newExportScreen(svc, all)) })
@@ -1346,7 +1351,7 @@ func (ws *workspace) keys() []key.Binding {
 	var ks []key.Binding
 	switch ws.focus {
 	case panelAccounts:
-		ks = []key.Binding{keys.Filter, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.Wizard}
+		ks = []key.Binding{keys.Filter, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.NewAccount}
 	case panelProjects:
 		ks = []key.Binding{keys.Filter, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "sessions")), keys.Wizard, keys.Trust}
 	case panelItems:
@@ -1371,7 +1376,7 @@ func (ws *workspace) helpGroups() [][]key.Binding {
 	return [][]key.Binding{
 		{keys.Panel1, keys.Panel2, keys.Panel3, keys.NextPanel, keys.PrevPanel, keys.NextTab, keys.PrevTab, keys.Back},
 		{keys.Up, keys.Down, keys.PageUp, keys.PageDn, keys.Open, keys.Select, keys.SelectAll, keys.Activate, keys.Filter},
-		{keys.Wizard, keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
+		{keys.NewAccount, keys.Wizard, keys.Export, keys.Send, keys.Receive, keys.Copy, keys.Rehome, keys.Resume},
 		{keys.Trust, keys.SyncMemory, keys.Diff, keys.Pointer, keys.ScanPaths, keys.Yank},
 		{keys.ScreenMode, keys.ScreenModePrev, keys.Theme, keys.Menu, keys.Help, keys.Quit, reservedKeys},
 		{key.NewBinding(key.WithKeys("mouse"), key.WithHelp("click", "focus a panel and pick a row")), key.NewBinding(key.WithKeys("wheel"), key.WithHelp("wheel", "scroll what is under the pointer")), key.NewBinding(key.WithKeys("drag"), key.WithHelp("drag", "select text; release copies it")), key.NewBinding(key.WithKeys("shift"), key.WithHelp("shift+drag", "the terminal's own selection"))},

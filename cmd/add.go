@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jratienza65/bffs/internal/accounts"
 	"github.com/jratienza65/bffs/internal/store"
 )
 
@@ -65,33 +66,12 @@ func init() {
 	rootCmd.AddCommand(addCmd)
 }
 
-// reservedAccountName is the pseudo-account that stands for ~/.claude.json
-// — the config unmanaged claude and api_key accounts run with. Trust sync
-// addresses it as `home`, so no real account may take the name.
-const reservedAccountName = "home"
+// The name rules live with the engine that creates accounts
+// (internal/accounts), so `add`, `login`, `rename` and the browser
+// cannot drift apart.
+const reservedAccountName = accounts.HomeName
 
-// validateName is the single gate for a new account name: `add`, `login`
-// and `rename` all go through it. The name becomes a directory under
-// sessions/, hence the [A-Za-z0-9_-] charset.
-func validateName(name string) error {
-	if name == "" {
-		return errors.New("name must not be empty")
-	}
-	if name == reservedAccountName {
-		return fmt.Errorf("account name %q is reserved for ~/.claude.json (the unmanaged/api_key home config); choose another name", name)
-	}
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= 'A' && r <= 'Z':
-		case r >= '0' && r <= '9':
-		case r == '-' || r == '_':
-		default:
-			return fmt.Errorf("name %q contains invalid character %q (use letters, digits, - or _)", name, r)
-		}
-	}
-	return nil
-}
+func validateName(name string) error { return accounts.ValidateName(name) }
 
 func resolveSecret(cmd *cobra.Command, flag string) (string, error) {
 	switch flag {

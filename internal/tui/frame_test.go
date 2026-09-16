@@ -403,6 +403,9 @@ func goldenStates() map[string]func(*app) {
 			lines = append(lines, styleFaint.Render(fmt.Sprintf("    %d added, %d removed (there "+glyph.arrow+" here)", stat.Added, stat.Removed)))
 			_ = a.forward(diffLoadedMsg{key: sc.key, lines: append(lines, hunkLines(hunks)...)})
 		},
+		"new-account": func(a *app) {
+			a.stack = append(a.stack, newNewAccountScreen(a.svc))
+		},
 		"trust": func(a *app) {
 			cwd := a.ws.projectCwd()
 			a.stack = append(a.stack, newTrustScreen(a.svc, cwd))

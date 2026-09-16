@@ -42,6 +42,7 @@ type keyMap struct {
 	Pointer    key.Binding
 	Diff       key.Binding
 	Yank       key.Binding
+	NewAccount key.Binding
 
 	// Inside an overlay: the [y/N] answer, cancelling a running
 	// operation, closing a result.
@@ -98,6 +99,7 @@ func newKeyMap() keyMap {
 		Pointer:    key.NewBinding(key.WithKeys("L"), key.WithHelp("L", "last session")),
 		Diff:       key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "diff memory")),
 		Yank:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy the path")),
+		NewAccount: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new account")),
 
 		Yes:    key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("y", "yes")),
 		No:     key.NewBinding(key.WithKeys("n", "N", "esc"), key.WithHelp("n", "no")),

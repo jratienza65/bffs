@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,9 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/jratienza65/bffs/internal/claudejson"
-	"github.com/jratienza65/bffs/internal/sessions"
-	"github.com/jratienza65/bffs/internal/shim"
+	"github.com/jratienza65/bffs/internal/accounts"
 	"github.com/jratienza65/bffs/internal/store"
 )
 
@@ -63,12 +60,7 @@ decline. --no-trust-carry skips that step; see ` + "`bffs trust`" + `.`,
 		}
 		prevActive := state.Active
 
-		out := cmd.OutOrStdout()
-
-		realClaude, err := shim.FindRealClaude(cfgDir)
-		if err != nil {
-			return err
-		}
+		out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
 
 		var name string
 		if len(args) > 0 {
@@ -87,90 +79,32 @@ decline. --no-trust-carry skips that step; see ` + "`bffs trust`" + `.`,
 			return fmt.Errorf("account %q already exists (type=%s); pass --force to overwrite, or pick a different name", name, existing.Type)
 		}
 
-		preset := store.IsolationPreset(loginPreset)
-		if loginPreset != "" && !preset.Valid() {
-			return fmt.Errorf(`invalid --preset %q: must be "partial" or "full"`, loginPreset)
-		}
-		effectivePreset := store.ResolveIsolation(preset, state.Isolation)
-
-		homeClaude, err := defaultHomeClaudeDir()
+		prep, err := accounts.PrepareOAuth(cfgDir, name, store.IsolationPreset(loginPreset), loginConsole, loginSSO, loginEmail)
 		if err != nil {
-			return fmt.Errorf("locate ~/.claude: %w", err)
+			return err
+		}
+		for _, s := range prep.Skipped {
+			fmt.Fprintf(errOut, "warning: %s already exists in %s as a real file; left untouched (won't be shared with ~/.claude)\n", s, prep.SessionDir)
 		}
 
-		sessionDir := sessions.Dir(cfgDir, name)
-		skipped, err := sessions.SyncSymlinks(sessionDir, homeClaude, effectivePreset)
-		if err != nil {
-			return fmt.Errorf("set up session dir %s: %w", sessionDir, err)
-		}
-		for _, s := range skipped {
-			fmt.Fprintf(out, "warning: %s already exists in %s as a real file; left untouched (won't be shared with ~/.claude)\n", s, sessionDir)
-		}
+		fmt.Fprintf(errOut, "Session dir: %s (isolation=%s)\n", prep.SessionDir, prep.Preset)
+		fmt.Fprintf(errOut, "Launching: %s %s\n", prep.Bin, strings.Join(prep.Args, " "))
+		fmt.Fprintln(errOut, "(complete the browser flow; credentials land in this account's session dir)")
+		fmt.Fprintln(errOut)
 
-		// Seed the per-account .claude.json from ~/.claude.json so claude's
-		// first-run wizard (theme, terms, etc.) doesn't fire on the next
-		// interactive invocation. `claude auth login` will populate the
-		// auth/identity fields below. Only ever once: a --force re-login
-		// must not wipe the trust answers already synced into the file.
-		if _, err := seedClaudeJSONOnce(filepath.Join(sessionDir, claudejson.Filename)); err != nil {
-			return fmt.Errorf("seed per-account .claude.json: %w", err)
-		}
-
-		loginArgs := []string{"auth", "login"}
-		if loginConsole {
-			loginArgs = append(loginArgs, "--console")
-		} else {
-			loginArgs = append(loginArgs, "--claudeai")
-		}
-		if loginSSO {
-			loginArgs = append(loginArgs, "--sso")
-		}
-		if loginEmail != "" {
-			loginArgs = append(loginArgs, "--email", loginEmail)
-		}
-
-		fmt.Fprintf(out, "Session dir: %s (isolation=%s)\n", sessionDir, effectivePreset)
-		fmt.Fprintf(out, "Launching: %s %s\n", realClaude, strings.Join(loginArgs, " "))
-		fmt.Fprintln(out, "(complete the browser flow; credentials land in this account's session dir)")
-		fmt.Fprintln(out)
-
-		c := exec.Command(realClaude, loginArgs...)
-		c.Stdin = os.Stdin
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
-		c.Env = withClaudeConfigDir(os.Environ(), sessionDir)
+		c := exec.Command(prep.Bin, prep.Args...)
+		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+		c.Env = prep.Env
 		if err := c.Run(); err != nil {
 			return fmt.Errorf("`claude auth login` failed: %w", err)
 		}
 
-		// Read the per-account .claude.json claude wrote, for display metadata.
-		snap, snapErr := claudejson.ReadFrom(filepath.Join(sessionDir, ".claude.json"))
-		email := loginEmail
-		if email == "" && snapErr == nil {
-			email = snapshotEmail(snap)
-		}
-
-		acc := store.Account{
-			Type:      store.TypeOAuth,
-			Email:     email,
-			Isolation: preset, // empty if not specified — falls back to global default
-		}
-		if snapErr == nil {
-			if len(snap.OAuthAccount) > 0 {
-				acc.OAuthAccountMeta = string(snap.OAuthAccount)
-			}
-			acc.UserID = snap.UserID
-		}
-		accs.Accounts[name] = acc
-		if err := store.SaveAccounts(cfgDir, accs); err != nil {
+		acc, err := accounts.CompleteOAuth(cfgDir, prep, loginEmail, !loginNoSwap)
+		if err != nil {
 			return err
 		}
-		if !loginNoSwap {
-			state.Active = name
-			if err := store.SaveState(cfgDir, state); err != nil {
-				return err
-			}
-		}
+		email := acc.Email
+		accs.Accounts[name] = acc
 
 		fmt.Fprintln(out)
 		fmt.Fprintf(out, "Saved as account %q (type=oauth", name)
@@ -212,19 +146,6 @@ func init() {
 	rootCmd.AddCommand(loginCmd)
 }
 
-// withClaudeConfigDir returns env with CLAUDE_CONFIG_DIR replaced (or appended)
-// to point at sessionDir. Other vars are preserved.
-func withClaudeConfigDir(env []string, sessionDir string) []string {
-	out := make([]string, 0, len(env)+1)
-	for _, kv := range env {
-		if i := strings.IndexByte(kv, '='); i >= 0 && kv[:i] == shim.EnvClaudeCfgDir {
-			continue
-		}
-		out = append(out, kv)
-	}
-	return append(out, shim.EnvClaudeCfgDir+"="+sessionDir)
-}
-
 // defaultHomeClaudeDir returns ~/.claude (the user's shared Claude Code dir
 // that "partial" / "minimal" isolation symlink subpaths back to).
 func defaultHomeClaudeDir() (string, error) {
@@ -233,17 +154,4 @@ func defaultHomeClaudeDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".claude"), nil
-}
-
-// snapshotEmail extracts oauthAccount.emailAddress from a claudejson Snapshot.
-// Returns "" if the field isn't there.
-func snapshotEmail(s claudejson.Snapshot) string {
-	if len(s.OAuthAccount) == 0 {
-		return ""
-	}
-	var x struct {
-		EmailAddress string `json:"emailAddress"`
-	}
-	_ = json.Unmarshal(s.OAuthAccount, &x)
-	return x.EmailAddress
 }

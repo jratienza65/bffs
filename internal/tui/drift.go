@@ -30,6 +30,8 @@ type projectDrift struct {
 	roots        []rootDrift
 	accounts     []accountDrift
 	warnings     []string
+	sessions     int       // on the reference root
+	newest       time.Time // newest transcript on the reference root
 }
 
 // rootDrift is one root's side of the comparison.
@@ -51,7 +53,7 @@ type memFile struct {
 }
 
 // fileDrift is one differing file: "differs (newer here)", "differs
-// (newer there)", "only here" or "only there".
+// (newer there)", "differs", "only here" or "only there".
 type fileDrift struct {
 	name, state string
 }
@@ -167,8 +169,12 @@ func computeDrift(ctx context.Context, svc *services, ref transcripts.Root, slug
 		}
 		rd.sessions = len(ss)
 		if rd.here {
+			d.sessions = len(ss)
 			for _, s := range ss {
 				ids[s.ID] = true
+				if s.LastTS.After(d.newest) {
+					d.newest = s.LastTS
+				}
 			}
 		}
 		if dir := memoryDirFor(root, slug, cwd); dir != "" {
@@ -233,19 +239,28 @@ func computeDrift(ctx context.Context, svc *services, ref transcripts.Root, slug
 	return d
 }
 
-// answerCell renders a trust answer for a table cell.
-func answerCell(a trust.Answer) string {
-	if a == trust.Unset {
-		return "-"
+// answerCell renders a trust answer for a table cell: ✓ accepted,
+// ✗ declined, ✓* inherited from an ancestor, – never answered.
+func answerCell(a trust.Answer, inheritedFrom string) string {
+	switch a {
+	case trust.Accepted:
+		return "✓"
+	case trust.Declined:
+		return "✗"
+	case trust.Inherited:
+		return "✓*"
 	}
-	return strings.ToLower(a.String())
+	if inheritedFrom != "" {
+		return "✓*"
+	}
+	return "–"
 }
 
 const (
-	driftRootW    = 28
-	driftCountW   = 9
-	driftAccountW = 12
-	driftAnswerW  = 10
+	driftRootW    = 26
+	driftCountW   = 8
+	driftAccountW = 11
+	driftAnswerW  = 8
 )
 
 // memoryCell is the MEMORY column of one root.
@@ -255,7 +270,7 @@ func memoryCell(rd rootDrift) string {
 		if rd.files == nil {
 			return "none"
 		}
-		return countNoun(len(rd.files), "file") + " (reference)"
+		return countNoun(len(rd.files), "file")
 	case "differs":
 		parts := make([]string, 0, len(rd.diffs))
 		for _, f := range rd.diffs {
@@ -270,45 +285,76 @@ func memoryCell(rd rootDrift) string {
 	return rd.state
 }
 
-// driftLines renders the two tables and the actions that address them.
-func driftLines(d projectDrift) []string {
-	var lines []string
+// section renders a preview section header.
+func section(title, note string) string {
+	s := styleSection.Render(strings.ToUpper(title))
+	if note != "" {
+		s += "  " + styleFaint.Render(note)
+	}
+	return s
+}
+
+// accountTable renders the per-account rows, marking the perspective
+// account (the one selected in panel 1) with an arrow; thisLabel is
+// appended to a last-session pointer that names the subject ("(this
+// project)", "(this session)").
+func accountTable(accounts []accountDrift, perspective, thisLabel string) []string {
+	lines := []string{"  " + pad("account", driftAccountW) + "   " + pad("trust", driftAnswerW) + " " + pad("external", driftAnswerW) + " last session"}
+	for _, ad := range accounts {
+		last := "–"
+		if ad.lastSession != "" {
+			last = shortID(transcripts.Sanitize(ad.lastSession))
+			if ad.inProject {
+				last += " " + thisLabel
+			}
+		}
+		mark := "  "
+		if ad.status.Account == perspective {
+			mark = "← "
+		}
+		lines = append(lines, "  "+pad(transcripts.Sanitize(ad.status.Account), driftAccountW)+" "+mark+pad(answerCell(ad.status.Folder, ad.status.InheritedFrom), driftAnswerW)+" "+pad(answerCell(ad.status.External, ""), driftAnswerW)+" "+last)
+	}
+	return lines
+}
+
+// driftLines renders the project preview: the headline, a summary,
+// the two tables and the actions that address them.
+func driftLines(d projectDrift, perspective string, now time.Time) []string {
 	label := transcripts.Sanitize(d.slug)
 	if d.cwd != "" {
 		label = transcripts.Sanitize(shortPath(d.cwd))
 	}
-	lines = append(lines, styleHeader.Render("project "+label))
+	lines := []string{styleHeader.Render(label)}
+	summary := countNoun(d.sessions, "session")
+	for _, rd := range d.roots {
+		if rd.here {
+			if rd.files == nil {
+				summary += " · no memory"
+			} else {
+				summary += " · memory " + countNoun(len(rd.files), "file")
+			}
+		}
+	}
+	if !d.newest.IsZero() {
+		summary += " · newest " + humanizeAgo(d.newest, now)
+	}
 	if d.gitRoot != "" && d.gitRoot != d.cwd {
-		lines = append(lines, "git root:   "+transcripts.Sanitize(shortPath(d.gitRoot)))
+		summary += " · git root " + transcripts.Sanitize(shortPath(d.gitRoot))
 	}
-	if d.key != "" {
-		lines = append(lines, "project key: "+transcripts.Sanitize(d.key))
+	if d.cwd != "" && !isDir(d.cwd) {
+		summary += " · directory missing here"
 	}
-	lines = append(lines, "", styleHeader.Render("across roots")+"  (reference: "+shortRootLabel(d.ref)+")",
-		"  "+pad("ROOT", driftRootW)+" "+pad("SESSIONS", driftCountW)+" MEMORY")
+	lines = append(lines, summary, "", section("across roots", "reference: "+shortRootLabel(d.ref)),
+		"  "+pad("root", driftRootW)+" "+pad("sessions", driftCountW)+" memory")
 	for _, rd := range d.roots {
 		lines = append(lines, "  "+pad(shortRootLabel(rd.root), driftRootW)+" "+pad(fmt.Sprint(rd.sessions), driftCountW)+" "+memoryCell(rd))
 	}
+	if len(d.roots) == 1 {
+		lines = append(lines, styleFaint.Render("  one root on this machine: every account reads the same files"))
+	}
 	if len(d.accounts) > 0 {
-		lines = append(lines, "", styleHeader.Render("per account")+"  (what each .claude.json records for the project key)",
-			"  "+pad("ACCOUNT", driftAccountW)+" "+pad("TRUST", driftAnswerW)+" "+pad("EXTERNAL", driftAnswerW)+" LAST-SESSION")
-		for _, ad := range d.accounts {
-			last := "-"
-			if ad.lastSession != "" {
-				last = shortID(transcripts.Sanitize(ad.lastSession))
-				if ad.inProject {
-					last += " (this project)"
-				} else {
-					last += " (not among these sessions)"
-				}
-			}
-			folder := answerCell(ad.status.Folder)
-			if ad.status.InheritedFrom != "" {
-				folder += "*"
-			}
-			lines = append(lines, "  "+pad(transcripts.Sanitize(ad.status.Account), driftAccountW)+" "+pad(folder, driftAnswerW)+" "+pad(answerCell(ad.status.External), driftAnswerW)+" "+last)
-		}
-		lines = append(lines, styleFaint.Render("  * inherited from an ancestor directory"))
+		lines = append(lines, "", section("per account", "what each .claude.json records · ← selected account · ✓* inherited"))
+		lines = append(lines, accountTable(d.accounts, perspective, "(this project)")...)
 	}
 	for _, w := range d.warnings {
 		lines = append(lines, "warning: "+transcripts.Sanitize(w))

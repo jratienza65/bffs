@@ -38,7 +38,6 @@ var (
 
 	sessionsPendingRehome bool
 	sessionsImportsJSON   bool
-	sessionsPlain         bool
 	sessionsRmYes         bool
 )
 
@@ -68,17 +67,11 @@ carry no account identity, so ACCOUNT is bffs's best-effort attribution from
 the launch log, the lastSessionId each account's .claude.json records, and
 import records — never a guess.
 
-` + "`bffs sessions`" + ` on a terminal opens the interactive browser (roots, projects,
-sessions and memory; --plain prints the table instead); elsewhere it lists
-the current project's sessions in the pool of the account claude would use
-here; see ` + "`bffs sessions list --help`" + ` for the filters.`,
+` + "`bffs sessions`" + ` lists the current project's sessions in the pool of the
+account claude would use here; see ` + "`bffs sessions list --help`" + ` for the
+filters. The interactive browser is bare ` + "`bffs`" + `.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !sessionsPlain && tuiSupported() {
-			if err := runTUI(cmdContext(cmd), mustConfigDir(cmd), sessionsClaudeDir, "sessions"); !errors.Is(err, errTUIDisabled) {
-				return err
-			}
-		}
 		return runSessionsList(cmd)
 	},
 }
@@ -129,7 +122,6 @@ refused. Memory directories and history.jsonl are never touched.`,
 
 func init() {
 	addSessionsListFlags(sessionsCmd)
-	sessionsCmd.Flags().BoolVar(&sessionsPlain, "plain", false, "print the table instead of opening the interactive browser")
 	addSessionsListFlags(sessionsListCmd)
 	sessionsShowCmd.Flags().StringVar(&sessionsClaudeDir, "claude-dir", "", "override the shared claude config dir (testing)")
 	_ = sessionsShowCmd.Flags().MarkHidden("claude-dir")

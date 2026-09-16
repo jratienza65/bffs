@@ -40,26 +40,30 @@ func TestCompareMemory(t *testing.T) {
 func TestDriftLines(t *testing.T) {
 	pool := transcripts.Root{Dir: "/x/projects", ConfigDir: "/x", Shared: true, Accounts: []string{"a", "b"}}
 	full := transcripts.Root{Dir: "/y/sessions/w/projects", ConfigDir: "/y/sessions/w", Owner: "w"}
-	d := projectDrift{slug: "-p", cwd: "/p", key: "/p", ref: pool,
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	d := projectDrift{slug: "-p", cwd: "/p", key: "/p", ref: pool, sessions: 3, newest: now.Add(-time.Hour),
 		roots: []rootDrift{
 			{root: pool, here: true, sessions: 3, files: map[string]memFile{"MEMORY.md": {}, "n.md": {}}, state: "here"},
 			{root: full, sessions: 1, files: map[string]memFile{"n.md": {}}, state: "differs", diffs: []fileDrift{{"MEMORY.md", "only here"}, {"n\x1b[2J.md", "differs (newer there)"}}},
 		},
 		accounts: []accountDrift{
 			{status: trust.Status{Account: "a", Folder: trust.Accepted, External: trust.Accepted}, lastSession: "1e005053-380a-4245-a145-52c2715afa73", inProject: true},
+			{status: trust.Status{Account: "b", Folder: trust.Declined}, lastSession: "b19c4e20-1111-4222-8333-444455556666"},
 			{status: trust.Status{Account: "home", Folder: trust.Inherited, InheritedFrom: "/"}},
 		},
 		warnings: []string{"w\x1b[2Jarn"},
 	}
-	out := strings.Join(driftLines(d), "\n")
-	wantAll(t, out, "project /p", "across roots", "reference: shared pool: a, b",
-		"shared pool: a, b", "3", "2 files (reference)",
+	out := strings.Join(driftLines(d, "a", now), "\n")
+	wantAll(t, out, "/p", "3 sessions · memory 2 files · newest 1h ago", "ACROSS ROOTS", "reference: shared pool: a, b",
+		"shared pool: a, b", "3", "2 files",
 		"account: w", "1", "differs — MEMORY.md only here, n.md differs (newer there)",
-		"per account", "a            accepted   accepted   1e005053 (this project)",
-		"home         inherited* -          -", "* inherited from an ancestor", "warning: warn",
+		"PER ACCOUNT", "← selected account",
+		"a           ← ✓        ✓        1e005053 (this project)",
+		"b             ✗        –        b19c4e20",
+		"home          ✓*       –        –", "warning: warn",
 		"t trust sync · L last-session pointer · S sync memory")
-	wantNone(t, out, "\x1b]", "[2J")
-	if answerCell(trust.Unset) != "-" {
-		t.Errorf("unset cell = %q", answerCell(trust.Unset))
+	wantNone(t, out, "\x1b]", "[2J", "(elsewhere)")
+	if answerCell(trust.Unset, "") != "–" || answerCell(trust.Unset, "/") != "✓*" {
+		t.Errorf("unset cells = %q %q", answerCell(trust.Unset, ""), answerCell(trust.Unset, "/"))
 	}
 }

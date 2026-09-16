@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -220,9 +219,9 @@ func (a *app) overlayHelpGroups(s Screen) [][]key.Binding {
 	return [][]key.Binding{s.Keys(), globalKeys(), {reservedKeys}}
 }
 
-// globalKeys are appended to every help line.
+// globalKeys close the ? overlay's listing.
 func globalKeys() []key.Binding {
-	return []key.Binding{keys.Help, keys.Quit}
+	return []key.Binding{keys.Menu, keys.Help, keys.Quit}
 }
 
 func (a *app) helpView() string {
@@ -233,7 +232,7 @@ func (a *app) helpView() string {
 	} else {
 		ks = a.ws.keys()
 	}
-	return a.help.ShortHelpView(append(ks, globalKeys()...))
+	return a.help.ShortHelpView(append(ks, keys.Menu, keys.Help, keys.Quit))
 }
 
 // breadcrumb joins the overlays' titles.
@@ -249,11 +248,8 @@ func (a *app) View() tea.View {
 	if a.quitting {
 		return tea.NewView("")
 	}
-	header := fmt.Sprintf("bffs %s", a.svc.version)
-	if crumb := a.ws.crumb(); crumb != "" {
-		header += "  " + crumb
-	}
-	header = styleHeader.Render(truncate(header, a.width))
+	header := styleHeader.Render("bffs "+a.svc.version) + "  " + styleFaint.Render(a.ws.crumb())
+	header = cell(header, a.width)
 
 	var main []string
 	var mainTitle string
@@ -283,6 +279,6 @@ func (a *app) View() tea.View {
 
 	v := tea.NewView(strings.Join([]string{header, body, statusLine, truncate(a.helpView(), a.width)}, "\n"))
 	v.AltScreen = true
-	v.WindowTitle = "bffs " + a.svc.start
+	v.WindowTitle = "bffs"
 	return v
 }

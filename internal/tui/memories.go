@@ -26,43 +26,24 @@ type memoryFileRow struct {
 func (r *memoryFileRow) FilterValue() string { return r.f.Name }
 
 const (
-	memorySizeW   = 8
-	memoryAgeW    = 9
-	memoryPinnedW = 6
-	memoryPathsW  = 7
-	memoryRefsW   = 7
-	memoryFixedW  = 2 + 1 + memorySizeW + 1 + memoryAgeW + 1 + memoryPinnedW + 1 + memoryPathsW + 1 + memoryRefsW
+	memorySizeW = 7
+	memoryAgeW  = 8
 )
 
+// render lays the row out for the side column: the name, the size, the
+// age and a "pin" tag for a pinned file.
 func (r *memoryFileRow) render(width int) string {
-	nameW := width - memoryFixedW
+	pin := "   "
+	if r.f.Pinned {
+		pin = "pin"
+	}
+	right := pad(formatSize(r.f.Size), memorySizeW) + " " + pad(humanizeAgo(r.f.ModTime, r.svc.now()), memoryAgeW) + " " + pin
+	nameW := width - 1 - len([]rune(right))
 	name := transcripts.Sanitize(r.f.Name)
-	if nameW < 12 {
+	if nameW < 8 {
 		return truncate(name, width)
 	}
-	paths := ""
-	if n := len(r.f.AbsolutePaths); n > 0 {
-		paths = fmt.Sprintf("paths %d", n)
-	}
-	refs := ""
-	if n := len(r.f.AtRefs); n > 0 {
-		refs = fmt.Sprintf("@refs %d", n)
-	}
-	pinned := ""
-	if r.f.Pinned {
-		pinned = "pinned"
-	}
-	return "  " + pad(name, nameW) + " " + pad(formatSize(r.f.Size), memorySizeW) + " " + pad(humanizeAgo(r.f.ModTime, r.svc.now()), memoryAgeW) +
-		" " + pad(pinned, memoryPinnedW) + " " + pad(paths, memoryPathsW) + " " + pad(refs, memoryRefsW)
-}
-
-func memoriesHeader(width int) string {
-	nameW := width - memoryFixedW
-	if nameW < 12 {
-		return "NAME"
-	}
-	return "  " + pad("NAME", nameW) + " " + pad("SIZE", memorySizeW) + " " + pad("MODIFIED", memoryAgeW) +
-		" " + pad("PINNED", memoryPinnedW) + " " + pad("PATHS", memoryPathsW) + " " + pad("@REFS", memoryRefsW)
+	return pad(name, nameW) + " " + right
 }
 
 // loadMemories catalogs every memory directory of root once; the app

@@ -299,15 +299,15 @@ new account's `.claude.json` from `~/.claude.json` once — never again on a
 previously active account's answers over for every project whose directory
 still exists (`--no-trust-carry` skips that).
 
-## Browse sessions and memory
+## The browser: bare `bffs`
 
-`bffs sessions` and `bffs memory` without a subcommand open a browser in the terminal (add `--plain` for the table). It is laid out like lazygit: four stacked panels on the left — roots, projects, sessions or memory (`[` `]` switch), and the files of the selected item — and a preview on the right for whatever the focused panel points at.
+`bffs` with no arguments opens the browser in the terminal (elsewhere, and in a `bffs_notui` build, it prints the help; `bffs sessions` and `bffs memory` print their tables). It is laid out like lazygit: three stacked panels on the left and a preview on the right.
 
-- A **project** previews its drift: how many sessions each root holds, whether its memory files are the same on the other roots (by checksum), and what each account's `.claude.json` records for it — folder trust, the external-imports answer and the last-session pointer. Under partial isolation every account reads the same pool, so memory cannot drift between those accounts; drift appears against a full-isolation account or a machine you imported from.
-- A **session** previews its facts, the account it is attributed to (and any rival claimant), the per-account row, the resume command and an excerpt. `enter` opens the full transcript.
-- A **memory file** previews who reads it, how the same file compares on the other roots, and its contents.
+- **1 accounts** is the perspective: selecting an account browses the pool it reads (under partial isolation that is the shared `~/.claude/projects`, so several accounts share one pool) and marks its column in the per-account tables. The active account is marked; `space` makes another one active, the way `bffs switch` does.
+- **2 projects** lists the pool's projects with their session count, a `mem` tag and the newest age. Its preview is the project's drift: sessions per root, whether the memory files are the same on the other roots (by checksum), and what each account's `.claude.json` records for it — folder trust, the external-imports answer and the last-session pointer.
+- **3 sessions | memory** (`[` `]` switch) lists the project's sessions (a `●` for live, `↓` for imported, `!` for a missing directory) or its memory files. A session previews its title, a one-line summary, the resume command and an excerpt, then the per-account row, the files Claude keeps for it and the identifiers; `enter` opens the full transcript. A memory file previews who reads it, how the same file compares on the other roots, its path references and its contents.
 
-Keys: `1`–`4` or `tab`/`h`/`l` move between panels, `/` filters, `+`/`_` change the screen mode, `x` opens the action menu and `?` lists every key. Actions run the same engines as the commands: `e` export to a file, `s` send over the LAN, `i` receive, `c` copy to another account, `r` rehome, `R` resume in claude, `t` trust matrix, `S` sync the project's memory into a full-isolation account, `L` point an account's last session at the selected one, `p` scan memory paths. Nothing in the browser deletes; that stays `bffs sessions rm`.
+Below 110 columns the panels take the width and `enter` shows the preview; `esc` always goes back. Keys: `1`–`3` or `tab`/`h`/`l` move between panels, `/` filters, `x` opens the action menu, `?` lists every key, `+`/`_` force the preview or the panels. Actions run the same engines as the commands: `e` export to a file, `s` send over the LAN, `i` receive, `c` copy to another account, `r` rehome, `R` resume in claude, `t` trust matrix, `S` sync the project's memory into a full-isolation account, `L` point an account's last session at the selected one, `p` scan memory paths. Nothing in the browser deletes; that stays `bffs sessions rm`.
 
 ## Export & import
 

@@ -207,6 +207,9 @@ func TestWizardReceiveFromFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundlePath = carried
+	// Windows refuses to rename the process's own working directory,
+	// and the fixture chdir'd into the project.
+	t.Chdir(t.TempDir())
 	if err := os.Rename(a.project, a.project+"-moved"); err != nil {
 		t.Fatal(err)
 	}

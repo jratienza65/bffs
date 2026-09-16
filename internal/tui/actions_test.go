@@ -19,6 +19,7 @@ import (
 
 	"github.com/jratienza65/bffs/internal/bundle"
 	"github.com/jratienza65/bffs/internal/porter"
+	"github.com/jratienza65/bffs/internal/rehome"
 	"github.com/jratienza65/bffs/internal/store"
 	"github.com/jratienza65/bffs/internal/transcripts"
 	"github.com/jratienza65/bffs/internal/transfer"
@@ -350,16 +351,21 @@ func TestRehomeScreen(t *testing.T) {
 	if !ok || rs.err != nil {
 		t.Fatalf("y should end on a clean result, got %T err=%v:\n%s", h.a.top(), rs.err, h.view())
 	}
-	wantAll(t, h.view(), "moved 1 session → projects/"+f.slug, "verify: cd "+f.project+" && claude --resume "+sid1)
+	wantAll(t, h.view(), "moved 1 session → projects/"+f.slug, "verify: cd "+rehome.ShellQuote(f.project)+" && claude --resume "+sid1)
 	moved := filepath.Join(f.claudeDir, "projects", f.slug, sid1+".jsonl")
 	body, err := os.ReadFile(moved)
 	if err != nil {
 		t.Fatalf("transcript not moved: %v", err)
 	}
 	lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
-	last := lines[len(lines)-1]
-	if len(lines) != 3 || !strings.Contains(last, "relocated") || !strings.Contains(last, f.project) {
-		t.Errorf("stamp not appended:\n%s", body)
+	var stamp struct {
+		Type         string `json:"type"`
+		RelocatedCwd string `json:"relocatedCwd"`
+	}
+	// The record is JSON: a Windows path is escaped inside it, so decode
+	// rather than search the bytes.
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &stamp); err != nil || len(lines) != 3 || stamp.Type != "relocated" || stamp.RelocatedCwd != f.project {
+		t.Errorf("stamp not appended (%v):\n%s", err, body)
 	}
 	if _, err := os.Stat(filepath.Join(f.claudeDir, "projects", oldSlug, sid1+".jsonl")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("old transcript still there: %v", err)

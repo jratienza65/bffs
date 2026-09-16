@@ -171,7 +171,7 @@ func runCopy(cmd *cobra.Command, dir string, pr *prompter, req copyRequest, tty 
 	}
 
 	ctx := cmdContext(cmd)
-	live, err := transcripts.Live(ctx, env.configDirs())
+	live, err := liveScan(ctx, env.configDirs())
 	if err != nil {
 		if req.Move {
 			return fmt.Errorf("cannot tell which sessions are open in a running claude: %w; nothing was moved", err)

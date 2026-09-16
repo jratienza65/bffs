@@ -299,7 +299,7 @@ func runRehome(cmd *cobra.Command, dir string, pr *prompter, req rehomeRequest, 
 	ctx := cmdContext(cmd)
 	// A rehome moves transcripts; without knowing which sessions a
 	// running claude owns nothing may move (plan §9.5).
-	live, err := transcripts.Live(ctx, env.configDirs())
+	live, err := liveScan(ctx, env.configDirs())
 	if err != nil {
 		return fmt.Errorf("cannot tell which sessions are open in a running claude: %w; nothing was moved", err)
 	}

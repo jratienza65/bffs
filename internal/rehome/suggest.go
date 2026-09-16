@@ -147,7 +147,10 @@ func scanDirs(roots []string) dirScan {
 	deadline := time.Now().Add(suggestBudget)
 	var walk func(dir string, depth int) bool
 	walk = func(dir string, depth int) bool {
-		if time.Now().After(deadline) {
+		// Not After: on a coarse clock (Windows ticks every ~15 ms) the
+		// first call can land on the same instant as the deadline, and a
+		// zero budget has to stop rather than walk a level.
+		if !time.Now().Before(deadline) {
 			return false
 		}
 		entries, err := os.ReadDir(dir)

@@ -378,10 +378,10 @@ func TestWorkspaceSingleRoot(t *testing.T) {
 	h.keys("+")
 	wantNone(t, h.view(), "1 accounts")
 	h.keys("+")
-	wantAll(t, h.view(), "1 accounts", "┬")
+	wantAll(t, h.view(), "1 accounts", "┐ ┌")
 	h.keys("_")
 	wantAll(t, h.view(), "preview hidden (_ pressed)")
-	wantNone(t, h.view(), "┬")
+	wantNone(t, h.view(), "┐ ┌")
 	h.keys("_")
 	if ws.mode != modeAuto {
 		t.Errorf("mode = %d, want auto", ws.mode)
@@ -398,11 +398,12 @@ func TestNarrowLayout(t *testing.T) {
 	h.send(tea.WindowSizeMsg{Width: 90, Height: 30})
 	out := h.view()
 	wantAll(t, out, "1 accounts", "2 projects", "3 SESSIONS | memory", "first prompt of one", "preview hidden: the terminal is narrower than 96 columns — enter shows it")
-	wantNone(t, out, "┬", "ACROSS ROOTS")
-	// At the breakpoint the two fit side by side again.
+	wantNone(t, out, "┐ ┌", "ACROSS ROOTS")
+	// At the breakpoint the two fit side by side again, with a gutter
+	// between the boxes and padding inside them.
 	h.send(tea.WindowSizeMsg{Width: 96, Height: 30})
 	out = h.view()
-	wantAll(t, out, "┬", "ACROSS ROOTS")
+	wantAll(t, out, "┐ ┌", "ACROSS ROOTS", "│ 1 project in")
 	wantNone(t, out, "preview hidden")
 	h.send(tea.WindowSizeMsg{Width: 90, Height: 30})
 	h.keys("3", "enter")

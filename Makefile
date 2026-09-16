@@ -36,7 +36,7 @@ install: build
 # prefix if you have goreleaser on PATH.
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@latest
 
-.PHONY: build install release-check snapshot clean-dist hooks fmt lint fuzz skill-validate
+.PHONY: build install release-check snapshot clean-dist hooks fmt lint fuzz skill-validate bench-shim
 
 release-check:
 	$(GORELEASER) check
@@ -70,6 +70,23 @@ FUZZTIME ?= 30s
 fuzz:
 	go test ./internal/bundle -run '^$$' -fuzz FuzzUnpack -fuzztime $(FUZZTIME) -fuzzminimizetime 0
 	go test ./internal/bundle -run '^$$' -fuzz FuzzValidateEntryName -fuzztime $(FUZZTIME) -fuzzminimizetime 0
+
+# Shim init-cost guard (plan §11). The same binary is the `claude` shim,
+# so every package it links runs its init on every launch — the TUI stack
+# included, even though only cmd/ imports it. This times the shim path
+# alone (bffs init + account resolution + exec of /usr/bin/true) through
+# the shim `bffs init` installed on PATH. Requires hyperfine (brew install
+# hyperfine). Run it before and after a change that links new packages and
+# compare p50: the budget is +10 % or +5 ms, whichever is larger; beyond
+# it, bffs_notui becomes the default build until the init cost is gone.
+# The shim execs the installed binary, so `make install` between the two
+# runs. BFFS_HOME points at a throwaway store so the 300 launches neither
+# read the real accounts nor land in the real launch log.
+bench-shim:
+	@command -v hyperfine >/dev/null 2>&1 || { echo "  >  hyperfine not on PATH (brew install hyperfine)"; exit 1; }
+	@command -v claude >/dev/null 2>&1 || { echo "  >  no claude shim on PATH (run bffs init)"; exit 1; }
+	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+	BFFS_HOME="$$tmp" BFFS_REAL_CLAUDE=/usr/bin/true hyperfine -N --runs 300 'claude --version'
 
 # Same checks the pre-commit hook and ci.yml run.
 lint:

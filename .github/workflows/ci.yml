@@ -58,8 +58,12 @@ jobs:
             exit 1
           fi
 
+      # The bffs_notui build drops the interactive browser (cmd/tui_disabled.go);
+      # vetting it too keeps that path from rotting.
       - name: Vet
-        run: go vet ./...
+        run: |
+          go vet ./...
+          go vet -tags bffs_notui ./...
 
       - name: Test
         run: go test -race ./...
@@ -77,6 +81,22 @@ jobs:
         run: |
           go test ./internal/bundle -run '^$' -fuzz FuzzUnpack -fuzztime 20s -fuzzminimizetime 0
           go test ./internal/bundle -run '^$' -fuzz FuzzValidateEntryName -fuzztime 20s -fuzzminimizetime 0
+
+      # Non-gating shim init-cost guard (plan §11): the same binary is the
+      # `claude` shim, so every linked package's init runs on each launch.
+      # Times the shim path alone (bffs init + resolution + exec of
+      # /usr/bin/true) through a temp symlink named claude; compare p50 with
+      # the previous run by hand — the budget is +10 % or +5 ms. The same
+      # command is `make bench-shim` against an installed shim.
+      - name: Shim latency
+        if: matrix.os == 'macos-latest'
+        continue-on-error: true
+        run: |
+          brew install hyperfine
+          go build -o bffs .
+          tmp="$(mktemp -d)"
+          ln -s "$PWD/bffs" "$tmp/claude"
+          BFFS_HOME="$tmp/home" BFFS_REAL_CLAUDE=/usr/bin/true PATH="$tmp:$PATH" hyperfine -N --runs 300 'claude --version'
 
       # Only writes when the exact key is absent, so this is one save per
       # (os, arch, job, go.sum) rather than a new copy every commit.

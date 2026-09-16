@@ -101,20 +101,6 @@ func listKeyMap() list.KeyMap {
 	}
 }
 
-// visibleRange is the slice of the list's visible items on the current
-// page ±1 — what the lazy title loader resolves.
-func visibleRange(l list.Model) (items []list.Item, start, end int) {
-	items = l.VisibleItems()
-	per := max(1, l.Paginator.PerPage)
-	page := l.Paginator.Page
-	start = max(0, (page-1)*per)
-	end = min(len(items), (page+2)*per)
-	if start > end {
-		start = end
-	}
-	return items, start, end
-}
-
 // filterKeys is the help entry a list screen adds while a filter is
 // applied: esc then clears it instead of going back.
 func filterKeys(l list.Model) []key.Binding {

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -31,6 +30,14 @@ type panel struct {
 	empty   string // shown when there is nothing to list
 	loading bool
 	width   int // inner width
+
+	// The view is scrolled independently of the selection (the wheel
+	// moves it, the cursor only drags it along when it would leave the
+	// screen): offset is the first row drawn, rowsH the rows the last
+	// render had room for, lastIndex the selection it was drawn with.
+	offset    int
+	rowsH     int
+	lastIndex int
 }
 
 func newPanel(id panelID, name, singular, plural, empty string) *panel {
@@ -84,6 +91,9 @@ func (p *panel) count() string {
 // setSize gives the list its inner width and the rows it may draw.
 func (p *panel) setSize(width, height int) {
 	p.width = width
+	// A conservative row count for the loaders that run before the
+	// next render (the status row may take one); body refines it.
+	p.rowsH = max(1, height-1)
 	p.list.SetSize(width, max(1, height))
 	p.list.Title = truncate(p.status, max(0, width-2))
 }
@@ -115,38 +125,103 @@ func (p *panel) counter() string {
 	return p.count()
 }
 
-// body draws height lines of width cells: the list when focused, else
-// the rows from the cursor down with the selection muted.
+// titleRow is the panel's status line: the filter input while one is
+// being typed, the filter's result while one is applied, else the
+// one-line status the workspace set.
+func (p *panel) titleRow(width int) string {
+	if p.list.SettingFilter() {
+		return truncate(p.list.FilterInput.View(), width)
+	}
+	if p.list.FilterState() == list.FilterApplied {
+		return styleTitle.Render(truncate(fmt.Sprintf("“%s” · %d of %d", p.list.FilterValue(), len(p.list.VisibleItems()), len(p.list.Items())), width))
+	}
+	return styleTitle.Render(truncate(p.status, width))
+}
+
+// clampOffset keeps the view inside the rows.
+func (p *panel) clampOffset(rows, height int) {
+	if p.offset > rows-height {
+		p.offset = rows - height
+	}
+	if p.offset < 0 {
+		p.offset = 0
+	}
+}
+
+// follow scrolls just enough for the selection to be on screen; the
+// keyboard drags the view this way, the wheel never does.
+func (p *panel) follow(height int) {
+	i := p.list.Index()
+	switch {
+	case i < p.offset:
+		p.offset = i
+	case i >= p.offset+height:
+		p.offset = i - height + 1
+	}
+}
+
+// scroll moves the view by n rows, leaving the selection where it is.
+func (p *panel) scroll(n int) {
+	p.offset += n
+	p.clampOffset(len(p.list.VisibleItems()), max(1, p.rowsH))
+}
+
+// window is the rows on screen plus a screen of look-ahead either way —
+// what the lazy title loader resolves.
+func (p *panel) window() (start, end int) {
+	n := len(p.list.VisibleItems())
+	h := max(1, p.rowsH)
+	return max(0, p.offset-h), min(n, p.offset+2*h)
+}
+
+// body draws height lines of width cells: the focused panel leads with
+// its status row and shows the cursor, an unfocused one mutes it.
 func (p *panel) body(width, height int, focused bool) []string {
 	if height <= 0 {
 		return nil
 	}
+	lines := make([]string, 0, height)
+	rows := height
+	if focused {
+		rows--
+		lines = append(lines, p.titleRow(width))
+	}
+	p.rowsH = max(1, rows)
 	items := p.list.VisibleItems()
 	if len(items) == 0 {
 		text := p.empty
 		if p.loading {
 			text = "loading…"
 		}
-		return fill([]string{styleFaint.Render(truncate(text, width))}, height)
+		return fill(append(lines, styleFaint.Render(truncate(text, width))), height)
 	}
-	if focused {
-		p.list.Styles.Title = styleTitle
-		return fill(strings.Split(p.list.View(), "\n"), height)
+	// The selection drags the view along when it moves off screen, and
+	// an unfocused panel always shows it — it is the context for the
+	// panels below.
+	if idx := p.list.Index(); idx != p.lastIndex || !focused {
+		p.lastIndex = idx
+		p.follow(p.rowsH)
 	}
-	lines := make([]string, 0, height)
-	start := max(0, p.list.Index())
-	for i := start; i < len(items) && len(lines) < height; i++ {
+	p.clampOffset(len(items), p.rowsH)
+	for i := p.offset; i < len(items) && len(lines) < height; i++ {
 		r, ok := items[i].(row)
 		if !ok {
 			continue
 		}
-		line := pad("  "+r.render(width-2), width)
-		if i == p.list.Index() {
-			line = styleMuted.Render(line)
-		} else {
-			line = styleFaint.Render(line)
+		switch {
+		case i == p.list.Index() && focused:
+			lines = append(lines, styleCursor.Render("> "+pad(r.render(width-2), width-2)))
+		case i == p.list.Index():
+			lines = append(lines, styleMuted.Render(pad("  "+r.render(width-2), width)))
+		case !focused:
+			lines = append(lines, styleFaint.Render(pad("  "+r.render(width-2), width)))
+		default:
+			if sr, ok := items[i].(styledRow); ok {
+				lines = append(lines, "  "+cell(sr.renderStyled(width-2), width-2))
+			} else {
+				lines = append(lines, "  "+pad(r.render(width-2), width-2))
+			}
 		}
-		lines = append(lines, line)
 	}
 	return fill(lines, height)
 }

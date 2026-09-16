@@ -9,18 +9,18 @@ bffs test  alpha › /home/d/build/projects/bffs › memory
 │     /home/d/build/si…   4     1d ago   │ │   @~/notes.md  (missing)                                                  │
 │   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
 │                                        │ │ CONTENT                                                                   │
-├─ 3 sessions | MEMORY ──────────── 1/2 ─┤ │ # MEMORY.md                                                               │
+├─ 3 sessions | MEMORY ──────────── 1/2 ─┤ │ MEMORY.MD                                                                 │
 │ 2 files · 1 pinned · /home/d/.claude/… │ │                                                                           │
-│ > MEMORY.md       2 KB    2h ago       │ │ - the fixture's content is two lines long so the golden stays             │
-│   notes.md        1 KB    1d ago   pin │ │   about the frame rather than about a file on disk                        │
+│ > MEMORY.md       2 KB    2h ago       │ │ What this project is, in a sentence that has to wrap.                     │
+│   notes.md        1 KB    1d ago   pin │ │                                                                           │
+│                                        │ │ Decisions                                                                 │
 │                                        │ │                                                                           │
+│                                        │ │ • memory is per root, never per account                                   │
+│                                        │ │ • bffs copy never moves                                                   │
 │                                        │ │                                                                           │
-│                                        │ │                                                                           │
-│                                        │ │                                                                           │
-│                                        │ │                                                                           │
-│                                        │ │                                                                           │
-│                                        │ │                                                                           │
-│                                        │ │                                                                           │
+│                                        │ │ ┌─ bash ────────────────────────────────────────────────────────────────┐ │
+│                                        │ │ │ bffs export --out ~/bffs-mac-a.bffs                                   │ │
+│                                        │ │ └───────────────────────────────────────────────────────────────────────┘ │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │

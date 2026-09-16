@@ -136,9 +136,18 @@ func (ws *workspace) applyTab() {
 
 // --- layout -----------------------------------------------------------
 
-func (ws *workspace) setSize(width, height int) {
+func (ws *workspace) setSize(width, height int) tea.Cmd {
+	prev := ws.mainInner()
 	ws.width, ws.height = width, height
 	ws.layout()
+	// A rendered document is laid out for the pane it was rendered
+	// for, so a change of pane width rebuilds the preview — through
+	// the loader, which is a command, not this path.
+	if ws.mainInner() != prev && strings.HasPrefix(ws.previewKey, "memfile:") {
+		ws.previewKey = ""
+		return ws.sync()
+	}
+	return nil
 }
 
 // tooSmall reports whether the frame cannot be drawn honestly.
@@ -570,8 +579,12 @@ func (ws *workspace) previewFor() (string, tea.Cmd) {
 			return k, previewCmd(k, ws.gen, sessionPreview(ws.svc, r.s, r.resolved, ws.account))
 		}
 		if r := ws.selectedMemFile(); r != nil {
-			k := "memfile:" + joinName(r.dir, r.f.Name)
-			return k, previewCmd(k, ws.gen, memoryFilePreview(ws.svc, ws.root, ws.projectSlug(), ws.projectCwd(), r.dir, r.f.Name))
+			// The width is part of the key: a Markdown document is
+			// rendered for the pane it is drawn in, so a resize has to
+			// rebuild it — and nothing else must.
+			w := ws.mainInner()
+			k := fmt.Sprintf("memfile:%s\x00%d", joinName(r.dir, r.f.Name), w)
+			return k, previewCmd(k, ws.gen, memoryFilePreview(ws.svc, ws.root, ws.projectSlug(), ws.projectCwd(), r.dir, r.f.Name, w))
 		}
 		if ws.tab == tabMemory && ws.project != nil && ws.memLoadedFor == ws.projectKey && ws.mem == nil {
 			k := "nomem:" + ws.projectKey

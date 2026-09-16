@@ -35,4 +35,10 @@ var (
 	styleWarn     = lipgloss.NewStyle()
 	styleAccent   = lipgloss.NewStyle().Bold(true)
 	stylePrompt   = lipgloss.NewStyle().Bold(true)
+
+	// Markdown (markdown.go): a memory file's inline markup.
+	styleStrong   = lipgloss.NewStyle().Bold(true)
+	styleEmph     = lipgloss.NewStyle().Italic(true)
+	styleCodeSpan = lipgloss.NewStyle()
+	styleLink     = lipgloss.NewStyle().Underline(true)
 )

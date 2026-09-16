@@ -260,11 +260,17 @@ func goldenMemoryLines(r *memoryFileRow) []string {
 			lines = append(lines, "  "+ref+"  (missing)")
 		}
 	}
-	return append(lines, "", section("content", ""),
-		"# "+r.f.Name, "",
-		"- the fixture's content is two lines long so the golden stays",
-		"  about the frame rather than about a file on disk")
+	// The content goes through the real renderer, so the golden shows
+	// what a memory file actually looks like in the pane.
+	doc := "# " + r.f.Name + "\n\nWhat this project is, in a sentence that has to wrap.\n\n" +
+		"## Decisions\n\n- memory is per root, never per account\n- `bffs copy` never moves\n\n" +
+		"```bash\nbffs export --out ~/bffs-mac-a.bffs\n```\n"
+	return append(append(lines, "", section("content", "")), renderMarkdown(doc, goldenPreviewWidth)...)
 }
+
+// goldenPreviewWidth is the main pane's content width at 120 columns,
+// which is what the memory golden is rendered for.
+const goldenPreviewWidth = 73
 
 // goldenAccountLines mirrors accountPreview without reading .claude.json.
 func goldenAccountLines(r *accountRow) []string {

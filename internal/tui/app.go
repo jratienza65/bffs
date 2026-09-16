@@ -41,6 +41,7 @@ func newApp(svc *services) *app {
 	svc.theme, svc.isDark = name, true
 	p, _ := paletteByName(name)
 	applyTheme(p, true)
+	resolveGlyphs()
 	return &app{svc: svc, ws: newWorkspace(svc), help: h, tracer: openTrace()}
 }
 
@@ -112,8 +113,8 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.width, a.height = msg.Width, msg.Height
 		a.help.SetWidth(msg.Width)
-		a.ws.setSize(msg.Width, a.contentHeight())
-		return a, a.forward(a.mainSize())
+		cmd := a.ws.setSize(msg.Width, a.contentHeight())
+		return a, tea.Batch(cmd, a.forward(a.mainSize()))
 
 	case tea.BackgroundColorMsg:
 		if dark := msg.IsDark(); dark != a.svc.isDark {

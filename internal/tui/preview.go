@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -250,7 +251,7 @@ func excerptLines(head transcripts.Head, tail transcripts.Tail) []string {
 
 // memoryFilePreview is one memory file: who reads it, how the same file
 // compares on the other roots, its path references, then its contents.
-func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, name string) func() ([]string, error) {
+func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, name string, width int) func() ([]string, error) {
 	path := joinName(dir, name)
 	return func() ([]string, error) {
 		lines := []string{styleHeader.Render(transcripts.Sanitize(name)) + "  " + styleFaint.Render(shortPath(path)), kvLine("read by", memoryVisibility(root))}
@@ -292,7 +293,14 @@ func memoryFilePreview(svc *services, root transcripts.Root, slug, cwd, dir, nam
 		if msg.err != nil {
 			return lines, msg.err
 		}
-		lines = append(lines, msg.lines...)
+		// Memory files are Markdown. loadFile has already sanitised
+		// every line, which is the right order: the renderer's output
+		// is styled, so sanitising after it would strip the styling.
+		if strings.EqualFold(filepath.Ext(name), ".md") {
+			lines = append(lines, renderMarkdown(strings.Join(msg.lines, "\n"), width)...)
+		} else {
+			lines = append(lines, msg.lines...)
+		}
 		if msg.truncated {
 			lines = append(lines, styleFaint.Render("… (first 1 MB)"))
 		}

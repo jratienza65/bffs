@@ -612,7 +612,10 @@ func TestMemoryTab(t *testing.T) {
 		"MEMORY.md", "notes.md", "pin",
 		// the preview of the cursor's file: who reads it, drift, references, contents
 		"memory MEMORY.md", "read by      shared pool — visible to: work", "drift        no other root on this machine",
-		"REFERENCES", "@ref 2     @~/notes.md", "CONTENT", "# Memory", "- [Notes](notes.md) — see @~/notes.md")
+		// the file is Markdown and is rendered as such: the heading is
+		// upper-cased, the item takes a bullet, and the link's target
+		// follows its text.
+		"REFERENCES", "@ref 2     @~/notes.md", "CONTENT", "MEMORY", "• Notes (notes.md) — see @~/notes.md")
 
 	// [ flips to sessions and ] back; the selection chain survives.
 	h.keys("[")

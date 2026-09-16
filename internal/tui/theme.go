@@ -125,6 +125,8 @@ func applyTheme(p palette, isDark bool) {
 		styleLive, styleImported, styleMissing, styleMark, stylePin = lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle().Bold(true), lipgloss.NewStyle()
 		styleOK, styleBad, styleWarn, styleAccent = lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle().Bold(true)
 		stylePrompt = lipgloss.NewStyle().Bold(true)
+		styleStrong, styleEmph = lipgloss.NewStyle().Bold(true), lipgloss.NewStyle().Italic(true)
+		styleCodeSpan, styleLink = lipgloss.NewStyle(), lipgloss.NewStyle().Underline(true)
 		return
 	}
 	ld := lipgloss.LightDark(isDark)
@@ -154,6 +156,13 @@ func applyTheme(p palette, isDark bool) {
 	styleWarn = fg(p.warn)
 	styleAccent = fg(p.accent)
 	stylePrompt = fg(p.accent)
+	// Inline markup carries two signals like everything else: strong is
+	// bold on the body colour rather than another accent, so a heading
+	// still outranks it, and a link is the one underlined thing.
+	styleStrong = lipgloss.NewStyle().Bold(true)
+	styleEmph = lipgloss.NewStyle().Italic(true)
+	styleCodeSpan = fg(p.accent2)
+	styleLink = fg(p.info).Underline(true)
 }
 
 // osEnv is the environment lookup resolveThemeName uses at runtime.

@@ -299,6 +299,82 @@ new account's `.claude.json` from `~/.claude.json` once — never again on a
 previously active account's answers over for every project whose directory
 still exists (`--no-trust-carry` skips that).
 
+## Export & import
+
+`bffs export` packs Claude Code sessions and auto-memory into one `.bffs`
+file; `bffs import` lands that file in a Claude config dir on another machine
+(or under another account here). The bundle is a plain tar stream with a
+manifest first, so the same bytes work on disk, on stdout and over ssh.
+
+```bash
+bffs export --out ~/Desktop/mac-a.bffs             # the current project: sessions + memory, from the pool claude would use here
+bffs export --all-projects --since 30d --out auto  # every project touched in 30 days → bffs-<host>-<date>.bffs in the cwd
+bffs import --from ~/Desktop/mac-a.bffs --dry-run  # show the plan; nothing is written
+bffs import --from ~/Desktop/mac-a.bffs            # confirm, then import into the account claude would use here
+bffs sessions imports                              # every import: bundle, source, account, sessions, pending, memory
+bffs sessions list --pending-rehome                # imported sessions whose directory does not exist on this machine yet
+```
+
+No shared disk? Stream it: `bffs export --project . --out - | ssh b 'bffs import --from - -y --as-is'`
+(the bundle goes to stdout, everything else to stderr; `-y` is required on the
+receiving side because stdin carries the bundle, not your answer).
+
+**What a bundle holds.** Per session: the transcript, its sidecar directory
+(subagents, workflows, tool results), the `file-history/` backups, plan files
+and the session's `history.jsonl` lines; per project: the auto-memory
+directory (`MEMORY.md`, topic files, `logs/`). `--no-tool-results`,
+`--no-file-history`, `--no-history` and `--no-plans` leave parts out —
+the export summary prints the size of the three parts that can carry pasted
+secrets before asking to proceed — and `--with-tasks` adds task lists. Never
+exported: `.claude.json`, credentials, Keychain entries, Claude's runtime
+`sessions/` files, `session-env/`, `shell-snapshots/`, `debug/`, `telemetry/`,
+`stats-cache.json`, `todos/`, `scratch/`, `tiny_memory/`, `memory/proposals/`,
+index caches, `allowedTools` or MCP approvals.
+
+**Where sessions land.** A session whose original directory exists on this
+machine is placed by identity — same directory, nothing rewritten, `claude
+--resume` sees it exactly as before. Every other session (and everything with
+`--as-is`) lands under its original slug and is flagged *pending*:
+`claude --resume <id>` still finds it from any directory, and a later
+`bffs rehome` moves it to the right one. The destination is the pool of the
+account claude would use in the current directory (the shared
+`~/.claude/projects` under partial isolation), else the active account's;
+`--account <name>` overrides and `home` means `~/.claude`.
+
+**Conflicts.** A session that already exists under the target project is
+skipped by default; `--on-conflict overwrite` sets the existing transcript
+and sidecar aside as `<name>.bffs-replaced-<time>` (never deleted) and is
+refused while a running claude has the session open. A session with the same
+id under a *different* project directory is always refused, because two
+copies would make `claude --resume <id>` ambiguous. Every file is verified
+against the manifest's sha256 in a staging directory first, and each session
+lands transactionally — its transcript is the last file to appear — so an
+interrupted import leaves a whole session or none; the next import repairs
+what was in flight and lists leftover staging directories (`--clean-staging`
+removes them).
+
+**Memory is prompt content.** Imported memory files are loaded into every
+future claude session for that project, so the import says so before asking,
+writes them only when the project has no memory directory yet (`--memory
+overwrite` sets the existing one aside), keeps `MEMORY.md` untouched and
+lands topic files as `<name>.imported-<bundle>.md`, and rewrites `pinned:`
+frontmatter to `pinned-imported:` so nothing arrives pinned into every
+session — `--trust-memory` keeps the pins.
+
+**Retention.** Claude deletes any transcript not touched within
+`cleanupPeriodDays` (30 by default); an import raises old transcripts to
+half that window and prints the date they will be swept unless resumed, while
+keeping their relative order so `claude --continue` still picks the right
+one. Sidecar, file-history and plan files get a fresh mtime
+(`--preserve-mtimes` keeps the source's; Claude then sweeps the old ones).
+
+Every import ends with the command that verifies it (`cd <dir> && claude
+--resume <id>`) and writes a record under `<config>/imports/`, which
+`bffs usage` uses to attribute the imported sessions to the account chosen
+at import time. Receiving directly from another machine on the LAN
+(`bffs export --serve` / `bffs import --from <host>`) arrives in the next
+milestone.
+
 ## Account resolution order
 
 Highest priority wins:

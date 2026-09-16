@@ -35,6 +35,9 @@ var (
 	sessionsJSON      bool
 	sessionsLimit     int
 	sessionsClaudeDir string
+
+	sessionsPendingRehome bool
+	sessionsImportsJSON   bool
 )
 
 const (
@@ -89,12 +92,27 @@ var sessionsShowCmd = &cobra.Command{
 	},
 }
 
+var sessionsImportsCmd = &cobra.Command{
+	Use:   "imports",
+	Short: "List import records: which bundles landed where, and what is still pending",
+	Long: `Every ` + "`bffs import`" + ` leaves a record under <config>/imports/<bundle-id>.json:
+where the bundle came from, the account it was placed under, and the status
+of every session and memory directory in it. This table lists them, newest
+first; ` + "`bffs sessions list --pending-rehome`" + ` lists the sessions whose directory
+does not exist on this machine yet.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSessionsImports(cmd)
+	},
+}
+
 func init() {
 	addSessionsListFlags(sessionsCmd)
 	addSessionsListFlags(sessionsListCmd)
 	sessionsShowCmd.Flags().StringVar(&sessionsClaudeDir, "claude-dir", "", "override the shared claude config dir (testing)")
 	_ = sessionsShowCmd.Flags().MarkHidden("claude-dir")
-	sessionsCmd.AddCommand(sessionsListCmd, sessionsShowCmd)
+	sessionsImportsCmd.Flags().BoolVar(&sessionsImportsJSON, "json", false, "emit the import records as a JSON array instead of the table")
+	sessionsCmd.AddCommand(sessionsListCmd, sessionsShowCmd, sessionsImportsCmd)
 	rootCmd.AddCommand(sessionsCmd)
 }
 
@@ -107,6 +125,7 @@ func addSessionsListFlags(c *cobra.Command) {
 	f.StringVar(&sessionsProject, "project", "", "project directory (default: the current directory; --project \"\" = every project)")
 	f.StringVar(&sessionsSince, "since", sessionsDefaultSince, "only sessions modified since: 30d, 2w, 12h (0 = no limit)")
 	f.BoolVar(&sessionsLive, "live", false, "only sessions open in a running claude")
+	f.BoolVar(&sessionsPendingRehome, "pending-rehome", false, "only imported sessions whose directory does not exist on this machine yet")
 	f.BoolVar(&sessionsJSON, "json", false, "emit a JSON array instead of the table")
 	f.IntVar(&sessionsLimit, "limit", 50, "newest N sessions per root (0 = all)")
 	f.StringVar(&sessionsClaudeDir, "claude-dir", "", "override the shared claude config dir (testing)")
@@ -264,6 +283,7 @@ type sessionsQuery struct {
 	Env        []string // the environment claude launches with (ProjectDirFor)
 	Since      time.Duration
 	Live       bool
+	Pending    bool // only imported sessions whose cwd is missing here (--pending-rehome)
 	Limit      int
 	Now        time.Time
 	Attributor transcripts.Attributor
@@ -323,6 +343,7 @@ func runSessionsList(cmd *cobra.Command) error {
 		Env:     os.Environ(),
 		Since:   since,
 		Live:    sessionsLive,
+		Pending: sessionsPendingRehome,
 		Limit:   sessionsLimit,
 		Now:     time.Now(),
 	}
@@ -358,7 +379,9 @@ func runSessionsList(cmd *cobra.Command) error {
 // projects/<slug> directory is located the way Claude does (ProjectDirFor)
 // and only that slug is listed; a root that has no directory for it yields
 // an empty block. --live runs the fast path first and reads titles only
-// for the sessions that are live.
+// for the sessions that are live. --pending-rehome keeps only imported
+// sessions whose directory is missing here, applying the limit after the
+// filter.
 func listSessionBlocks(ctx context.Context, q sessionsQuery) ([]sessionBlock, error) {
 	var blocks []sessionBlock
 	for _, root := range q.Roots {
@@ -373,6 +396,9 @@ func listSessionBlocks(ctx context.Context, q sessionsQuery) ([]sessionBlock, er
 		}
 		if q.Since > 0 {
 			opts.Since = q.Now.Add(-q.Since)
+		}
+		if q.Pending {
+			opts.Limit = 0
 		}
 		if q.Project != "" {
 			pd, err := transcripts.ProjectDirFor(root, q.Project, q.Env)
@@ -411,10 +437,30 @@ func listSessionBlocks(ctx context.Context, q sessionsQuery) ([]sessionBlock, er
 		if err != nil {
 			return nil, err
 		}
+		if q.Pending {
+			ss = pendingRehome(ss, q.Limit)
+		}
 		b.Sessions = ss
 		blocks = append(blocks, b)
 	}
 	return blocks, nil
+}
+
+// pendingRehome keeps the sessions an import record knows whose directory
+// does not exist on this machine — the ones `bffs rehome` is for — at
+// most limit of them (0 = all).
+func pendingRehome(ss []transcripts.Session, limit int) []transcripts.Session {
+	var out []transcripts.Session
+	for _, s := range ss {
+		if s.Import == nil || s.CwdExists {
+			continue
+		}
+		out = append(out, s)
+		if limit > 0 && len(out) == limit {
+			break
+		}
+	}
+	return out
 }
 
 // sessionGroup is one project's rows inside a block: sessions of one
@@ -935,4 +981,96 @@ func dirSize(dir string) (total int64, ok bool) {
 		return nil
 	})
 	return total, true
+}
+
+func runSessionsImports(cmd *cobra.Command) error {
+	dir := mustConfigDir(cmd)
+	recs, skipped, err := imports.LoadAll(dir)
+	if err != nil {
+		return err
+	}
+	for _, sk := range skipped {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: import record %s skipped: %v\n", short(sk.Path), sk.Err)
+	}
+	if sessionsImportsJSON {
+		return writeImportsJSON(cmd.OutOrStdout(), recs)
+	}
+	return renderImportsTable(cmd.OutOrStdout(), dir, recs, time.Now())
+}
+
+// importsTally counts a record's rows by status: sessions that landed
+// (placed, rehomed or pending), the pending subset, sessions skipped, and
+// memory directories written.
+type importsTally struct {
+	Landed, Pending, Skipped, Memory int
+}
+
+func tallyImport(r imports.Record) importsTally {
+	var t importsTally
+	for _, s := range r.Sessions {
+		switch s.Status {
+		case imports.StatusSkipped:
+			t.Skipped++
+		case imports.StatusPending:
+			t.Landed++
+			t.Pending++
+		default:
+			t.Landed++
+		}
+	}
+	for _, m := range r.Memories {
+		if m.Status != imports.StatusSkipped {
+			t.Memory++
+		}
+	}
+	return t
+}
+
+// renderImportsTable prints one row per import record, newest first.
+// Every source-derived string passes through Sanitize.
+func renderImportsTable(w io.Writer, cfgDir string, recs []imports.Record, now time.Time) error {
+	if len(recs) == 0 {
+		fmt.Fprintln(w, "no imports recorded (bffs import --from <file.bffs>)")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "BUNDLE\tFROM\tACCOUNT\tIMPORTED\tSESSIONS\tPENDING\tMEMORY")
+	for i := len(recs) - 1; i >= 0; i-- {
+		r := recs[i]
+		t := tallyImport(r)
+		from := transcripts.Sanitize(r.Source.Hostname)
+		if u := transcripts.Sanitize(r.Source.User); u != "" {
+			from += " (" + u + ")"
+		}
+		account := r.Account
+		if account == "" {
+			account = transcripts.HomeName
+		}
+		sessionsCell := strconv.Itoa(t.Landed)
+		if t.Skipped > 0 {
+			sessionsCell += fmt.Sprintf(" (+%d skipped)", t.Skipped)
+		}
+		imported := "-"
+		if !r.ImportedAt.IsZero() {
+			imported = fmt.Sprintf("%s (%s)", r.ImportedAt.Local().Format("2006-01-02"), humanizeAgo(r.ImportedAt, now))
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d\t%d\n",
+			shortID(transcripts.Sanitize(r.BundleID)), dashIfEmpty(from), transcripts.Sanitize(account), imported, sessionsCell, t.Pending, t.Memory)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "%s under %s. PENDING sessions wait for their directory: bffs sessions list --pending-rehome.\n", countNoun(len(recs), "import"), short(filepath.Join(cfgDir, imports.Subdir)))
+	return nil
+}
+
+// writeImportsJSON emits the records as one array (never null), with the
+// snake_case fields of the files themselves.
+func writeImportsJSON(w io.Writer, recs []imports.Record) error {
+	if recs == nil {
+		recs = []imports.Record{}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(recs)
 }

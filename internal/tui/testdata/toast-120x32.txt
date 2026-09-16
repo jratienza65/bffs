@@ -24,9 +24,9 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 ├─ 3 SESSIONS | memory ──────────── 1/3 ─┤ │                                                                           │
 │    ● Session and memory impo… 1h ago   │ │                                                                           │
-│      Plan: session export     4h ago   │ │                                                                           │
-│    ↓ prompt from the other m… 9d ago   │ │                                                                           │
-│                                        │ │                                                                           │
+│      Plan: session export     4h ago   │ │                       │ export finished                                   │
+│    ↓ prompt from the other m… 9d ago   │ │                       │ wrote ~/bffs-mac-a.bffs — 5.2 MB, 3 sessions, 2   │
+│                                        │ │                       │ memory files                                      │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
-✗ refusing to pair with 203.0.113.5: not on a local network of this machine
+
 enter sessions · w transfer wizard · e export · c copy · t trust · x more · ? keys · q quit

@@ -28,5 +28,5 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │    ↓ prompt from the other m… 9d ago   │ │                                                                           │
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
-✗ refusing to pair with 203.0.113.5: not on a local network of this machine
+✓ copied the transcript path: ~/.claude/projects/-home-d-build-projects-bffs/1e005053.jsonl
 enter sessions · w transfer wizard · e export · c copy · t trust · x more · ? keys · q quit

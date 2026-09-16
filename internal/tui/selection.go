@@ -151,7 +151,7 @@ func (d *dragSelect) copy(vp *viewport.Model) tea.Cmd {
 		return nil
 	}
 	// OSC 52 reaches the local clipboard even over SSH.
-	return tea.Batch(tea.SetClipboard(text), status(copiedNote(text)))
+	return tea.Batch(tea.SetClipboard(text), statusDone(copiedNote(text)))
 }
 
 func (d *dragSelect) clear() { d.sel = selection{} }

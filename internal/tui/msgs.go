@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/jratienza65/bffs/internal/bundle"
@@ -18,7 +20,19 @@ type (
 	replaceScreenMsg struct{ screen Screen } // the sessions⇄memories tab
 	statusMsg        struct {
 		text string
+		kind noteKind
 		err  error
+	}
+	// statusOutMsg expires a note posted at that time.
+	statusOutMsg struct{ at time.Time }
+	// toastOutMsg takes down the toast of that sequence.
+	toastOutMsg struct{ seq int }
+	// toastMsg asks the root for a floating notice: a screen or the
+	// workspace has a verdict the reader may not be looking for.
+	toastMsg struct {
+		kind  noteKind
+		title string
+		body  []string
 	}
 	// refreshMsg asks a list screen to reload its data.
 	refreshMsg struct{}
@@ -130,5 +144,22 @@ func popScreen() tea.Cmd             { return func() tea.Msg { return popScreenM
 func popRefresh() tea.Cmd            { return func() tea.Msg { return popScreenMsg{refresh: true} } }
 func replaceScreen(s Screen) tea.Cmd { return func() tea.Msg { return replaceScreenMsg{screen: s} } }
 func status(text string) tea.Cmd     { return func() tea.Msg { return statusMsg{text: text} } }
-func statusError(err error) tea.Cmd  { return func() tea.Msg { return statusMsg{err: err} } }
-func quit() tea.Cmd                  { return func() tea.Msg { return quitMsg{} } }
+func statusError(err error) tea.Cmd {
+	return func() tea.Msg { return statusMsg{err: err, kind: noteBad} }
+}
+
+// statusDone reports work that happened; statusWarn a refusal — the act
+// did not happen, and why. One tone for both would paint "nothing here
+// to copy" as a success, which is the opposite of what it says.
+func statusDone(text string) tea.Cmd {
+	return func() tea.Msg { return statusMsg{text: text, kind: noteDone} }
+}
+func statusWarn(text string) tea.Cmd {
+	return func() tea.Msg { return statusMsg{text: text, kind: noteWarn} }
+}
+
+// toastNote asks the root to float a notice over the frame.
+func toastNote(kind noteKind, title string, body ...string) tea.Cmd {
+	return func() tea.Msg { return toastMsg{kind: kind, title: title, body: body} }
+}
+func quit() tea.Cmd { return func() tea.Msg { return quitMsg{} } }

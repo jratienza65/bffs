@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -24,11 +25,14 @@ type app struct {
 	width  int
 	height int
 
-	status    string
-	statusErr bool
-	help      help.Model
-	quitting  bool
-	tracer    *os.File // BFFS_DEBUG, nil when unset (trace.go)
+	status     string
+	statusKind noteKind
+	statusAt   time.Time
+	toast      toast
+	toastSeq   int
+	help       help.Model
+	quitting   bool
+	tracer     *os.File // BFFS_DEBUG, nil when unset (trace.go)
 }
 
 func newApp(svc *services) *app {
@@ -95,7 +99,7 @@ func (a *app) forward(msg tea.Msg) tea.Cmd {
 // push puts s on top, tells it the size and runs its Init.
 func (a *app) push(s Screen) tea.Cmd {
 	a.stack = append(a.stack, s)
-	a.status, a.statusErr = "", false
+	a.clearNote()
 	init := s.Init()
 	if a.width > 0 {
 		return tea.Batch(init, a.forward(a.mainSize()))
@@ -153,7 +157,7 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.stack = a.stack[:len(a.stack)-1]
-		a.status, a.statusErr = "", false
+		a.clearNote()
 		cmd := a.forward(a.mainSize())
 		if msg.refresh {
 			cmd = tea.Batch(cmd, a.ws.Update(refreshMsg{}))
@@ -169,17 +173,33 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusMsg:
 		if msg.err != nil {
-			a.status, a.statusErr = msg.err.Error(), true
-		} else {
-			a.status, a.statusErr = msg.text, false
+			return a, a.post(noteBad, msg.err.Error())
+		}
+		return a, a.post(msg.kind, msg.text)
+
+	case statusOutMsg:
+		// Only the note this timer was started for: a newer one has a
+		// later timestamp and its own tick.
+		if msg.at.Equal(a.statusAt) {
+			a.clearNote()
+		}
+		return a, nil
+
+	case toastMsg:
+		return a, a.notify(msg.kind, msg.title, msg.body...)
+
+	case toastOutMsg:
+		if msg.seq == a.toast.seq {
+			a.toast = toast{}
 		}
 		return a, nil
 
 	case opDoneMsg:
+		var note tea.Cmd
 		if msg.err != nil {
-			a.status, a.statusErr = msg.err.Error(), true
+			note = a.post(noteBad, msg.err.Error())
 		}
-		return a, a.forward(msg)
+		return a, tea.Batch(note, a.forward(msg))
 
 	case quitMsg:
 		a.quitting = true
@@ -198,6 +218,22 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Data messages: the workspace's and the overlay's are disjoint
 	// types, so both see everything else.
 	return a, tea.Batch(a.ws.Update(msg), a.forward(msg))
+}
+
+// post puts a note on the status line and starts the timer that takes
+// it down: a note left standing is read as the answer to the next key.
+func (a *app) post(kind noteKind, text string) tea.Cmd {
+	a.status, a.statusKind, a.statusAt = text, kind, time.Now()
+	if text == "" {
+		return nil
+	}
+	return expireNote(a.statusAt)
+}
+
+// clearNote drops the note now (a key was pressed, an overlay opened or
+// closed) without disturbing a later note's timer.
+func (a *app) clearNote() {
+	a.status, a.statusKind, a.statusAt = "", noteInfo, time.Time{}
 }
 
 // handleKey is the key policy: while an operation runs every key is the
@@ -232,7 +268,7 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		case key.Matches(msg, keys.Back) && !key.Matches(msg, screenKeys...):
 			return popScreen()
 		case key.Matches(msg, reservedKeys) && !key.Matches(msg, screenKeys...):
-			return status(reservedHint)
+			return statusWarn(reservedHint)
 		}
 		return a.forward(msg)
 	}
@@ -248,7 +284,7 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	// A status message is feedback for the last key; the next one
 	// clears it (an action that has something to say sets a new one).
-	a.status, a.statusErr = "", false
+	a.clearNote()
 	return a.ws.handleKey(msg)
 }
 
@@ -332,23 +368,30 @@ func (a *app) View() tea.View {
 	body = fitLines(body, a.width, a.contentHeight())
 
 	// Errors reach the status line from every engine; sanitised like
-	// everything else that is rendered.
+	// everything else that is rendered. A note leads with the glyph of
+	// its kind, so a refusal does not read as a success on a terminal
+	// without colour.
 	text := transcripts.Sanitize(a.status)
-	style := styleStatus
+	style := a.statusKind.style()
+	mark := ""
 	switch {
-	case a.statusErr:
-		style = styleError
 	case text != "":
+		mark = a.statusKind.mark()
 	case a.top() != nil:
 		if l, ok := a.top().(loader); ok && l.loading() {
-			text = "loading…"
+			text, style = "loading"+glyph.ellipsis, styleStatus
 		}
 	case a.ws.previewBusy:
-		text = "loading…"
+		text, style = "loading"+glyph.ellipsis, styleStatus
 	default:
 		text, style = a.ws.hint(), styleFaint
 	}
-	statusLine := style.Render(truncate(text, a.width))
+	statusLine := style.Render(truncate(mark+text, a.width))
+
+	if a.toast.title != "" {
+		bodyLines := strings.Split(body, "\n")
+		body = strings.Join(placeToast(bodyLines, a.toastBox(a.width), a.width), "\n")
+	}
 
 	v := tea.NewView(strings.Join([]string{header, body, statusLine, truncate(a.helpView(), a.width)}, "\n"))
 	v.AltScreen = true

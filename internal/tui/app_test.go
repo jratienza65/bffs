@@ -52,6 +52,13 @@ func newFixture(t *testing.T) *fixture {
 	for _, k := range []string{"BFFS_ACCOUNT", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PROJECT_DIR_NAME", "CLAUDE_CODE_REMOTE_MEMORY_DIR", "CLAUDE_COWORK_MEMORY_PATH_OVERRIDE", "TERM"} {
 		t.Setenv(k, "")
 	}
+	// A note's expiry is a tea.Tick and the harness runs commands where
+	// they are returned, so the timers are off here; the test that is
+	// about expiry sends statusOutMsg itself.
+	prevNote, prevToast := expireNote, expireToast
+	expireNote = func(time.Time) tea.Cmd { return nil }
+	expireToast = func(int) tea.Cmd { return nil }
+	t.Cleanup(func() { expireNote, expireToast = prevNote, prevToast })
 	f := &fixture{t: t, home: home, cfgDir: filepath.Join(home, "bffs"), claudeDir: filepath.Join(home, ".claude")}
 	f.accounts = store.Accounts{Accounts: map[string]store.Account{"work": {Type: store.TypeOAuth}}}
 	f.project = filepath.Join(home, "build", "proj")
@@ -808,7 +815,7 @@ func TestListingNeverOpensTranscripts(t *testing.T) {
 	h := f.start("sessions")
 	wantAll(t, h.view(), f.slug, "  1     1h ago")
 	h.keys("3")
-	if h.a.statusErr {
+	if h.a.statusKind == noteBad {
 		t.Errorf("status shows an error: %q", h.a.status)
 	}
 	wantCounter(t, h.view(), "3 SESSIONS | memory", "1/1")

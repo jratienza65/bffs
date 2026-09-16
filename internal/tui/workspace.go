@@ -749,7 +749,7 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 		}
 		ws.svc.state.Active = msg.account
 		ws.previewKey = ""
-		return tea.Batch(ws.reloadAccounts(), ws.sync(), status(fmt.Sprintf("active account is now %s — claude uses it from its next launch", transcripts.Sanitize(msg.account))))
+		return tea.Batch(ws.reloadAccounts(), ws.sync(), statusDone(fmt.Sprintf("active account is now %s — claude uses it from its next launch", transcripts.Sanitize(msg.account))))
 
 	case refreshMsg:
 		return ws.refresh()
@@ -758,9 +758,12 @@ func (ws *workspace) Update(msg tea.Msg) tea.Cmd {
 		return ws.drag.step(&ws.vp, msg)
 
 	case resumeDoneMsg:
-		note := status("claude exited; listing again")
+		// The reader was inside claude, not in the browser: the verdict
+		// floats rather than waiting on a status line they were not
+		// watching.
+		note := toastNote(noteDone, "claude exited", "resumed "+shortID(msg.id)+"; the listing is being reloaded")
 		if msg.err != nil {
-			note = statusError(fmt.Errorf("claude --resume %s: %w", shortID(msg.id), msg.err))
+			note = toastNote(noteBad, "claude --resume "+shortID(msg.id)+" failed", transcripts.Sanitize(msg.err.Error()))
 		}
 		return tea.Batch(note, ws.refresh())
 
@@ -1073,7 +1076,7 @@ func (ws *workspace) perspectiveAccount() string {
 // openWizard pushes the transfer wizard for the current selection.
 func (ws *workspace) openWizard() tea.Cmd {
 	if ws.rootKey == "" {
-		return status("no pool to work in yet")
+		return statusWarn("no pool to work in yet")
 	}
 	var projects []*projectRow
 	for _, r := range ws.panels[panelProjects].rows() {
@@ -1293,9 +1296,9 @@ func (ws *workspace) yank() tea.Cmd {
 		}
 	}
 	if path == "" {
-		return status("nothing here to copy")
+		return statusWarn("nothing here to copy")
 	}
-	return tea.Batch(tea.SetClipboard(path), status("copied the "+what+" path: "+shortPath(path)))
+	return tea.Batch(tea.SetClipboard(path), statusDone("copied the "+what+" path: "+shortPath(path)))
 }
 
 // actionHints explain a refused action key.
@@ -1318,7 +1321,7 @@ func (ws *workspace) action(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 	}
 	if hint, ok := actionHints[k]; ok {
-		return status(hint), true
+		return statusWarn(hint), true
 	}
 	return nil, false
 }

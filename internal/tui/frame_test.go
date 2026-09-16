@@ -372,8 +372,14 @@ func goldenStates() map[string]func(*app) {
 		"result": func(a *app) {
 			a.stack = append(a.stack, newResultScreen("export", []string{"wrote ~/bffs-mac-a.bffs (5.2 MB, 3 sessions, 2 memory files, bundle 6f1e2c0a)", "", "On the other machine: bffs import --from bffs-mac-a.bffs"}, nil))
 		},
+		"toast": func(a *app) {
+			_ = a.notify(noteDone, "export finished", "wrote ~/bffs-mac-a.bffs — 5.2 MB, 3 sessions, 2 memory files")
+		},
+		"status-done": func(a *app) {
+			a.status, a.statusKind = "copied the transcript path: ~/.claude/projects/-home-d-build-projects-bffs/1e005053.jsonl", noteDone
+		},
 		"status-error": func(a *app) {
-			a.status, a.statusErr = "refusing to pair with 203.0.113.5: not on a local network of this machine", true
+			a.status, a.statusKind = "refusing to pair with 203.0.113.5: not on a local network of this machine", noteBad
 		},
 		// The action overlays: the screens most likely to overflow, each
 		// drawn over the workspace at the step it opens on.

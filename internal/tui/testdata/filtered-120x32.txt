@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 
-enter transcript · space mark · R resume · e export · ] memory tab · x more · ? keys · q quit
+FILTER  enter apply the filter · esc cancel · x more · ? keys · q quit

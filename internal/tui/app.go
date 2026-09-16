@@ -224,6 +224,43 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, tea.Batch(a.ws.Update(msg), a.forward(msg))
 }
 
+// modeLabel leads the footer with the mode the keys are in. The one
+// question a key press asks is whether letters act or type, and only
+// the mode answers it: the same letter exports a bundle in the browser
+// and lands in a filename in an input. The second return says which,
+// so the label can be painted accordingly.
+func (a *app) modeLabel() (string, bool) {
+	if a.busy() {
+		return "RUNNING", false
+	}
+	if s := a.top(); s != nil {
+		if c, ok := s.(inputCapturer); ok && c.capturingInput() {
+			return "TYPE", true
+		}
+		switch s.(type) {
+		case *helpScreen:
+			return "KEYS", false
+		case *menuScreen:
+			return "MENU", false
+		case *transcriptScreen:
+			return "READ", false
+		case *driftScreen:
+			return "DIFF", false
+		}
+		if l, ok := s.(loader); ok && l.loading() {
+			return "LOADING", false
+		}
+		return "ACTION", false
+	}
+	if a.ws.panels[a.ws.focus].filtering() {
+		return "FILTER", true
+	}
+	if a.ws.mainFocus {
+		return "READ", false
+	}
+	return "BROWSE", false
+}
+
 // post puts a note on the status line and starts the timer that takes
 // it down: a note left standing is read as the answer to the next key.
 func (a *app) post(kind noteKind, text string) tea.Cmd {
@@ -400,7 +437,14 @@ func (a *app) View() tea.View {
 		body = strings.Join(placeToast(bodyLines, a.toastBox(a.width), a.width), "\n")
 	}
 
-	v := tea.NewView(strings.Join([]string{header, body, statusLine, truncate(a.helpView(), a.width)}, "\n"))
+	label, typing := a.modeLabel()
+	labelStyle := styleFaint
+	if typing {
+		labelStyle = styleAccent.Bold(true)
+	}
+	footer := labelStyle.Render(label) + "  " + a.helpView()
+
+	v := tea.NewView(strings.Join([]string{header, body, statusLine, truncate(footer, a.width)}, "\n"))
 	v.AltScreen = true
 	// Clicking focuses a panel and picks a row, the wheel scrolls what
 	// is under the pointer; hold shift for the terminal's own text

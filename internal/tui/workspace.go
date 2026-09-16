@@ -1335,25 +1335,33 @@ func (ws *workspace) keys() []key.Binding {
 		}
 		return append(ks, key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back to panels")))
 	}
+	// While a filter is being typed the letters type: the footer says
+	// how to end it, not how to start it.
+	if ws.panels[ws.focus].filtering() {
+		return []key.Binding{
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "apply the filter")),
+			key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
+		}
+	}
 	var ks []key.Binding
 	switch ws.focus {
 	case panelAccounts:
-		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.Wizard, key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "export the pool"))}
+		ks = []key.Binding{keys.Filter, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "projects")), keys.Activate, keys.Wizard}
 	case panelProjects:
-		ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "sessions")), keys.Wizard, keys.Export, keys.Copy, keys.Trust}
+		ks = []key.Binding{keys.Filter, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "sessions")), keys.Wizard, keys.Trust}
 	case panelItems:
 		if ws.tab == tabSessions {
 			open := "transcript"
 			if ws.sideOnly() {
 				open = "preview"
 			}
-			ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", open)), keys.Select, keys.Resume, keys.Export, keys.NextTab}
+			ks = []key.Binding{keys.Filter, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", open)), keys.Select, keys.Resume, keys.NextTab}
 		} else {
-			ks = []key.Binding{key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")), keys.Diff, keys.SyncMemory, keys.ScanPaths, keys.PrevTab}
+			ks = []key.Binding{keys.Filter, key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "read")), keys.Diff, keys.SyncMemory, keys.PrevTab}
 		}
 	}
 	if ws.panels[ws.focus].list.FilterState() == list.FilterApplied {
-		ks = append(ks, keys.ClearFilter)
+		ks = append(ks[1:], keys.ClearFilter) // the filter is on: esc clears it
 	}
 	return ks
 }

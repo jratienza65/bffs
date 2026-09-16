@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 
-↑/k up · ↓/j down · enter choose · letter run that action · esc cancel · x more · ? keys · q quit
+MENU  ↑/k up · ↓/j down · enter choose · letter run that action · esc cancel · x more · ? keys · q quit

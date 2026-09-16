@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 ✓ copied the transcript path: ~/.claude/projects/-home-d-build-projects-bffs/1e005053.jsonl
-enter sessions · w transfer wizard · e export · c copy · t trust · x more · ? keys · q quit
+BROWSE  / filter · enter sessions · w transfer wizard · t trust · x more · ? keys · q quit

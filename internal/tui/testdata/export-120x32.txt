@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 
-enter export here · esc cancel · x more · ? keys · q quit
+TYPE  enter export here · esc cancel · x more · ? keys · q quit

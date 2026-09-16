@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 
-enter projects · space switch to account · w transfer wizard · e export the pool · x more · ? keys · q quit
+BROWSE  / filter · enter projects · space switch to account · w transfer wizard · x more · ? keys · q quit

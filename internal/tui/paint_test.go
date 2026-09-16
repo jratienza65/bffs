@@ -313,3 +313,47 @@ func TestAsciiModeDrawsOnlyAscii(t *testing.T) {
 		})
 	}
 }
+
+// The footer leads with the mode, because the one question a key press
+// asks is whether letters act or type.
+func TestFooterNamesTheMode(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		tweak      func(*app)
+	}{
+		{"browse", "BROWSE", nil},
+		{"preview", "READ", func(a *app) { a.ws.mainFocus = true }},
+		{"filter", "FILTER", func(a *app) {
+			p := a.ws.panels[panelItems]
+			_ = a.ws.setFocus(panelItems)
+			p.list.SetFilterState(1)
+		}},
+		{"keys", "KEYS", func(a *app) { a.stack = append(a.stack, newHelpScreen(a.ws.helpGroups())) }},
+		{"menu", "MENU", func(a *app) { a.stack = append(a.stack, newMenuScreen(a.ws.menuTitle(), a.ws.actions())) }},
+		{"transcript", "READ", func(a *app) {
+			a.stack = append(a.stack, newTranscriptScreen(a.svc, a.ws.sessRows[0].s))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := strings.Split(frameAt(t, 120, 32, tc.tweak), "\n")
+			footer := lines[len(lines)-1]
+			if !strings.HasPrefix(footer, tc.want) {
+				t.Errorf("footer = %q, want it to lead with %q", footer, tc.want)
+			}
+		})
+	}
+	// A mode where letters type is painted differently from one where
+	// they act — that is what the label is for.
+	typing := painted(t, 120, 32, func(a *app) {
+		_ = a.ws.setFocus(panelItems)
+		a.ws.panels[panelItems].list.SetFilterState(1)
+	})
+	acting := painted(t, 120, 32, nil)
+	lead := func(frame string) string {
+		lines := strings.Split(frame, "\n")
+		return sgrRuns(lines[len(lines)-1])[0].sgr
+	}
+	if lead(typing) == lead(acting) {
+		t.Errorf("FILTER and BROWSE are painted the same: %q", spellEscapes(lead(typing)))
+	}
+}

@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 
-↑/k up · ↓/j down · enter/y carry answers to this account · esc back · x more · ? keys · q quit
+ACTION  ↑/k up · ↓/j down · enter/y carry answers to this account · esc back · x more · ? keys · q quit

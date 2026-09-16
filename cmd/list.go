@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -26,15 +27,17 @@ var listCmd = &cobra.Command{
 			fmt.Fprintln(cmd.OutOrStdout(), "No accounts configured. Try `bffs add <name>`.")
 			return nil
 		}
+		lastUsed := lastUsedByAccount(dir)
+		now := time.Now()
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ACTIVE\tNAME\tTYPE\tEMAIL\tDETAIL")
+		fmt.Fprintln(w, "ACTIVE\tNAME\tTYPE\tEMAIL\tLAST-USED\tDETAIL")
 		for _, name := range accs.Names() {
 			acc := accs.Accounts[name]
 			active := " "
 			if name == state.Active {
 				active = "*"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", active, name, acc.Type, dashIfEmpty(acc.Email), accountDetail(acc, state.Isolation))
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", active, name, acc.Type, dashIfEmpty(acc.Email), humanizeAgo(lastUsed[name], now), accountDetail(acc, state.Isolation))
 		}
 		return w.Flush()
 	},

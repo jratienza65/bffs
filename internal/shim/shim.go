@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/jratienza65/bffs/internal/resolver"
 	"github.com/jratienza65/bffs/internal/sessions"
 	"github.com/jratienza65/bffs/internal/store"
+	"github.com/jratienza65/bffs/internal/usagelog"
 )
 
 const (
@@ -40,9 +42,9 @@ func Run(args []string) (int, error) {
 
 	env := os.Environ()
 	if r.Source != resolver.SourceNone {
-		env = applyAccount(env, r.Account, cfgDir)
+		env = AccountEnv(env, r.Account, cfgDir)
 		if r.Account.Type == store.TypeOAuth {
-			syncOAuthSessionDir(cfgDir, r.Account)
+			SyncOAuthSessionDir(cfgDir, r.Account)
 		}
 	}
 
@@ -51,18 +53,41 @@ func Run(args []string) (int, error) {
 		return 1, err
 	}
 
+	// After FindRealClaude: only launches that will actually exec count as usage.
+	logLaunch(cfgDir, r, cwd)
+
 	return execProcess(realPath, args, env)
 }
 
-// syncOAuthSessionDir reconciles symlinks in the per-account session dir so
+// logLaunch appends a launch event to <cfgDir>/launches.jsonl so `bffs usage`
+// can attribute the resulting claude session to an account (transcripts carry
+// no account identity). Best-effort and silent, like syncOAuthSessionDir: the
+// shim must never fail or chat on the way to exec'ing claude. Users opt out
+// with BFFS_NO_USAGE_LOG. SourceNone launches are recorded too (with an empty
+// account) — the analyzer needs them to spot ambiguous attribution.
+func logLaunch(cfgDir string, r resolver.Result, cwd string) {
+	if usagelog.Disabled() {
+		return
+	}
+	e := usagelog.Event{TS: time.Now().UTC(), Source: string(r.Source), Cwd: cwd}
+	if r.Source != resolver.SourceNone {
+		e.Account = r.Account.Name
+		e.Type = string(r.Account.Type)
+	}
+	_ = usagelog.Append(cfgDir, e)
+}
+
+// SyncOAuthSessionDir reconciles symlinks in the per-account session dir so
 // new entries claude added under ~/.claude after `bffs login` show up here
-// too — keeping the partial preset's drop-in feel intact over time.
+// too — keeping the partial preset's drop-in feel intact over time. Called
+// by the shim on every oauth launch and by internal/runner before spawning
+// a delegated child.
 //
 // Best-effort and silent: failures and skipped-conflict paths are not logged
 // (the user discovers them via `bffs reisolate <name>` or `bffs show`, where
 // they're surfaced explicitly). The shim's job is to not interfere with the
 // claude UX; per-account sync drift is a non-fatal config issue.
-func syncOAuthSessionDir(cfgDir string, acc store.Account) {
+func SyncOAuthSessionDir(cfgDir string, acc store.Account) {
 	state, err := store.LoadState(cfgDir)
 	if err != nil {
 		return
@@ -77,9 +102,9 @@ func syncOAuthSessionDir(cfgDir string, acc store.Account) {
 	_, _ = sessions.SyncSymlinks(sessions.Dir(cfgDir, acc.Name), homeClaude, preset)
 }
 
-// applyAccount strips conflicting env vars and installs the ones the resolved
-// account needs. Both account types are now per-invocation; no global state
-// is touched.
+// AccountEnv strips conflicting env vars and installs the ones the resolved
+// account needs. Both account types are per-invocation; no global state
+// is touched. Shared by the shim and internal/runner (delegated runs).
 //
 //   - api_key: sets ANTHROPIC_API_KEY to the secret.
 //   - oauth:   sets CLAUDE_CONFIG_DIR to the per-account session dir under
@@ -93,7 +118,7 @@ func syncOAuthSessionDir(cfgDir string, acc store.Account) {
 // Stale ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, and CLAUDE_CONFIG_DIR
 // values from the user's shell are dropped first so they can't override the
 // resolved account.
-func applyAccount(env []string, acc store.Account, cfgDir string) []string {
+func AccountEnv(env []string, acc store.Account, cfgDir string) []string {
 	cleaned := env[:0]
 	for _, kv := range env {
 		k := kvKey(kv)

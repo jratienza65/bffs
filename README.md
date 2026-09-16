@@ -11,6 +11,22 @@ A small Go CLI for using the [Claude Code](https://claude.com/claude-code) `clau
 
 For oauth accounts, isolation works via Claude Code's own `CLAUDE_CONFIG_DIR` mechanism: each account gets its own session dir under `<bffs-config>/sessions/<name>/`, with its own `.claude.json`, its own `.credentials.json` (or hashed-suffix Keychain entry on macOS), and — depending on the chosen isolation preset — its own or shared settings/skills/plugins. Concurrent `claude` sessions on different oauth accounts cannot collide.
 
+## Intended use
+
+bffs is for switching between accounts **you personally own and are entitled
+to use** — work vs. personal, one account per client so the right party gets
+billed, an API key alongside a subscription. It is not for sharing accounts
+between people (Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms)
+prohibit making your account available to anyone else) or for stacking
+accounts to route around subscription limits. Each account remains subject to
+its own plan limits, and staying within Anthropic's terms is the account
+holder's responsibility.
+
+Note that bffs never touches OAuth credentials: the real `claude` binary owns
+its own credential store per session dir and makes every API call itself —
+bffs only sets `CLAUDE_CONFIG_DIR` (or `ANTHROPIC_API_KEY`) on the child
+process.
+
 ## Install
 
 ```bash
@@ -155,8 +171,9 @@ bffs usage work      # detail: per-model and per-day breakdown, attribution sour
 ```
 
 `bffs usage` estimates each account's recent Claude consumption so you can
-switch to whichever has the most room before a subscription limit: token burn
-in the last 5 hours (Anthropic's session-limit window) and 7 days, detected
+pick the right account for a job — say, starting a long refactor on the
+account that won't be interrupted mid-task: token burn in the last 5 hours
+(Anthropic's session-limit window) and 7 days, detected
 "you've hit your limit" events with their reset times, the account's cached
 plan tier, and a `suggested:` pick — the oauth account with the lowest recent
 weighted burn and no active limit. `bffs list` and `bffs show` gain a cheap

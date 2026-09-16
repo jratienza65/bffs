@@ -172,9 +172,9 @@ func memoryDirFor(root transcripts.Root, slug, project string) string {
 
 // receiveInto opens the Receive screen for root, unless the root is an
 // orphan session dir (read-only: no account would ever read the import).
-func receiveInto(svc *services, root transcripts.Root) tea.Cmd {
+func receiveInto(svc *services, root transcripts.Root, account string) tea.Cmd {
 	if root.Orphan {
 		return status("orphan session dir " + transcripts.Sanitize(root.Owner) + " is read-only; receive into an account's root instead")
 	}
-	return pushScreen(newReceiveScreen(svc, root))
+	return pushScreen(newReceiveScreen(svc, root, account))
 }

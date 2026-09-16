@@ -88,7 +88,7 @@ func TestMenu(t *testing.T) {
 		t.Fatalf("x should open the menu, got %T", h.a.top())
 	}
 	out := h.view()
-	wantAll(t, out, "actions for "+shortPath(f.project), "receive a bundle over the LAN", "export the whole project", "send the whole project", "copy the whole project",
+	wantAll(t, out, "actions for "+shortPath(f.project), "transfer wizard", "receive a bundle over the LAN", "export the whole project", "send the whole project", "copy the whole project",
 		"trust matrix for", "sync the memory of", "scan the memory of")
 	wantNone(t, out, "resume", "rehome")
 	// A letter runs the action straight from the menu.
@@ -99,8 +99,12 @@ func TestMenu(t *testing.T) {
 	h.keys("esc")
 	// enter runs the cursor's item; esc closes the menu.
 	h.keys("x", "enter")
+	if _, ok := h.a.top().(*wizardScreen); !ok {
+		t.Fatalf("enter on the first item should open the transfer wizard, got %T", h.a.top())
+	}
+	h.keys("esc", "x", "down", "enter")
 	if _, ok := h.a.top().(*receiveScreen); !ok {
-		t.Fatalf("enter on the first item should open receive, got %T", h.a.top())
+		t.Fatalf("the second item should open receive, got %T", h.a.top())
 	}
 	h.keys("esc", "x", "esc")
 	if h.a.top() != nil {

@@ -584,7 +584,7 @@ func TestReceiveScreenHostCheckAndMaskedCode(t *testing.T) {
 	// The code field: what is typed never shows, a bad code is named, a
 	// good one is handed to the fetch.
 	svc := f.services()
-	rs := newReceiveScreen(svc, f.homeRoot(svc))
+	rs := newReceiveScreen(svc, f.homeRoot(svc), "")
 	_, _ = rs.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	rs.state = recvCode
 	rs.codeCh = make(chan transfer.Code, 1)
@@ -959,7 +959,7 @@ func TestReceiveKeysWhileResolvingAndConfirming(t *testing.T) {
 		return recvDoneMsg{err: ctx.Err()}
 	}
 	svc := f.services()
-	rs := newReceiveScreen(svc, f.homeRoot(svc))
+	rs := newReceiveScreen(svc, f.homeRoot(svc), "")
 	rs.state = recvConfirm
 	rs.answerCh = make(chan recvAnswer, 1)
 	rs.op, _ = startOp(context.Background(), blocking)

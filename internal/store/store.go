@@ -87,6 +87,21 @@ type Accounts struct {
 type State struct {
 	Active    string          `toml:"active,omitempty"`
 	Isolation IsolationPreset `toml:"isolation,omitempty"`
+
+	// TrustHint controls the post-action note `bffs switch` / `bffs show`
+	// print when the active oauth account has not answered Claude Code's
+	// folder-trust / external-imports dialogs for the current directory
+	// while another account has (pointing at `bffs trust sync`). Tri-state
+	// on purpose: nil (absent from state.toml) and true both show the hint;
+	// only an explicit `trust_hint = false` silences it.
+	TrustHint *bool `toml:"trust_hint,omitempty"`
+
+	// TrustSync is reserved for an automatic trust-sync hook and is not read
+	// by anything yet. The only value under consideration is "launch"
+	// (sync at shim time), which is deliberately unimplemented: the shim
+	// stays silent, fast and import-free. Round-tripped so a value a user
+	// sets ahead of time survives every other state.toml write.
+	TrustSync string `toml:"trust_sync,omitempty"`
 }
 
 func (a Accounts) Names() []string {

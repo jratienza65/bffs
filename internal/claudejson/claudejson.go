@@ -1,11 +1,12 @@
 // Package claudejson reads and patches the per-user ~/.claude.json file that
-// Claude Code maintains. bffs only touches three top-level fields —
+// Claude Code maintains. bffs only touches four top-level fields —
 // oauthAccount (cached account metadata: email, orgUuid, etc.) and userID
 // (the per-user hash), because Claude Code reads identity from those caches
-// rather than re-deriving it from the Keychain on every invocation, and the
+// rather than re-deriving it from the Keychain on every invocation; the
 // bffs entry in mcpServers (see SetMCPServer/RemoveMCPServer, used by
-// `bffs mcp install`). All other fields (projects, other MCP servers, plugin
-// data, etc.) are passed through verbatim.
+// `bffs mcp install`); and entries of projects (per-project trust answers
+// and lastSessionId, see UpdateProjects/SetLastSessionID). All other fields
+// (other MCP servers, plugin data, caches, etc.) are passed through verbatim.
 package claudejson
 
 import (

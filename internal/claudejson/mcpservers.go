@@ -30,12 +30,10 @@ func SetMCPServer(path, name string, s MCPServer) error {
 	if err != nil {
 		return err
 	}
-	entry, err := json.Marshal(s)
-	if err != nil {
-		return fmt.Errorf("encode server entry: %w", err)
+	if err := encodeInto(servers, name, s); err != nil {
+		return err
 	}
-	servers[name] = entry
-	return writeDoc(path, doc, servers, perm)
+	return writeServers(path, doc, servers, perm)
 }
 
 // RemoveMCPServer deletes mcpServers[name] at path. A missing file or missing
@@ -59,7 +57,7 @@ func RemoveMCPServer(path, name string) (bool, error) {
 		return false, nil
 	}
 	delete(servers, name)
-	if err := writeDoc(path, doc, servers, perm); err != nil {
+	if err := writeServers(path, doc, servers, perm); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -98,12 +96,32 @@ func serversOf(doc map[string]json.RawMessage, path string) (map[string]json.Raw
 	return servers, nil
 }
 
-func writeDoc(path string, doc, servers map[string]json.RawMessage, perm os.FileMode) error {
-	enc, err := json.Marshal(servers)
-	if err != nil {
-		return fmt.Errorf("encode mcpServers: %w", err)
+// writeServers stores servers as the top-level mcpServers field and writes
+// the document back.
+func writeServers(path string, doc, servers map[string]json.RawMessage, perm os.FileMode) error {
+	if err := encodeInto(doc, "mcpServers", servers); err != nil {
+		return err
 	}
-	doc["mcpServers"] = enc
+	return writeTop(path, doc, perm)
+}
+
+// encodeInto marshals v and stores it under key in a raw-JSON map — the one
+// step every writer uses to put a decoded value back into a document or a
+// project entry without touching its siblings.
+func encodeInto(m map[string]json.RawMessage, key string, v any) error {
+	enc, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", key, err)
+	}
+	m[key] = enc
+	return nil
+}
+
+// writeTop writes a whole top-level document back to path atomically with
+// the given permissions. Untouched fields are json.RawMessage and so survive
+// verbatim in value; the file is re-indented with sorted keys, which Claude
+// tolerates.
+func writeTop(path string, doc map[string]json.RawMessage, perm os.FileMode) error {
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode: %w", err)

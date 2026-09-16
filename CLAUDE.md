@@ -78,6 +78,10 @@ Resolution: per-account override wins, then global default in `state.toml`, then
 
 In-session subagents can never switch accounts (credentials are process-level, fixed at launch), so delegation means spawning a fresh headless claude child on the target account. `runner.Run` is the shared core: env built via `shim.AccountEnv` on top of `stripMarkers` (an explicit list of session-instance markers — `CLAUDECODE`, `CLAUDE_PID`, `CLAUDE_EFFORT`, the `CLAUDE_CODE_*` instance family — NOT a prefix strip, which would destroy deliberate config like `CLAUDE_CODE_USE_BEDROCK`), oauth login check *before* `SyncOAuthSessionDir` (sync would EnsureDir and trigger the first-run wizard), spawn-and-wait with `Request.ProcessGroup` opt-in (own pgid + group SIGKILL on cancel for captured runs; must stay false for tty use or Ctrl-C breaks), and a `launches.jsonl` event with source `"run"` for usage attribution. The MCP tool is synchronous with `timeout_seconds` clamped to 570s (under Claude Code's ~10min tool-call ceiling; async start/poll tools are the future path, not a bigger clamp) and deliberately does NOT expose `--permission-mode`/`--dangerously-skip-permissions` — escalation stays human, at most via explicit `allowed_tools`.
 
+### Session/memory transfer (in progress on `feat/session-memory-transfer`)
+
+The plan and its task tracker live in `docs/plans/` (deliberately untracked via `.git/info/exclude`; never commit `docs/`). Foundations landed first: the account name `home` is reserved (it names `~/.claude.json` in trust sync and copy), `store.State` carries `trust_hint`/`trust_sync`, and `cmd/exit.go` maps `exitError{code}` to process exit codes (2 = retryable, 130 = interrupted).
+
 ### Finding the real `claude`
 
 `internal/shim/FindRealClaude` walks `PATH`, skipping the bffs binary itself (by `EvalSymlinks` comparison against `os.Executable()`), and caches the result at `<configdir>/real-claude.path`. Override with `BFFS_REAL_CLAUDE` for tests.
@@ -87,10 +91,11 @@ In-session subagents can never switch accounts (credentials are process-level, f
 Plain TOML at `0600` under the OS user-config dir (`~/Library/Application Support/bffs` on macOS, `~/.config/bffs` on Linux, `%AppData%\bffs` on Windows). Override with `BFFS_HOME`.
 
 - `accounts.toml` — account metadata (api_key secrets; oauth display metadata + isolation preset)
-- `state.toml` — global active account, global isolation preset
+- `state.toml` — global active account, global isolation preset, `trust_hint` (tri-state; explicit `false` silences the trust hint in `switch`/`show`), `trust_sync` (reserved, unread)
 - `sessions/<name>/` — per-oauth-account Claude Code config dirs (managed by `internal/sessions`)
 - `real-claude.path` — cached path to the real `claude` binary
 - `launches.jsonl` — append-only shim launch log for usage attribution (`internal/usagelog`)
+- `imports/<bundleID>.json` — import records (0600) written by `bffs import`/`bffs copy`, read back as usage attribution tier 3 (`internal/imports`)
 
 The store package is intentionally pluggable behind one package boundary — see `SECURITY.md` for the planned migration to OS keystores for the api_key secret (Keychain / libsecret / DPAPI).
 
@@ -108,7 +113,10 @@ The store package is intentionally pluggable behind one package boundary — see
 - `internal/mcpserver/` — MCP server (tools, stdio serving, install/uninstall targets)
 - `internal/usagelog/` — append-only launch log (`launches.jsonl`), written by the shim
 - `internal/usage/` — usage analyzer: transcript scanning, session→account attribution, limit events, headroom suggestion
-- `internal/runner/` — spawn-and-wait claude child on a named account (delegated runs)
+- `internal/runner/` — spawn-and-wait claude child on a named account (delegated runs); `Command` builds the `*exec.Cmd` (nil stdio stays nil so a TUI can hand over the terminal), `Run` = `Command` + wait
+- `internal/fsutil/` — atomic write, copy, rename-or-copy move, mkdir lock (Claude's proper-lockfile scheme), touch (leaf)
+- `internal/imports/` — import records under `<config>/imports/` (leaf)
+- `internal/transcripts/` — catalog of Claude Code's on-disk sessions and memories: slug rule, project key (git root), roots (shared pool vs per-account), reserved names, `cleanupPeriodDays`, liveness from `sessions/<pid>.json`, `Sanitize` for rendered strings. Not to be confused with `internal/sessions` (per-account config dirs)
 
 ## Platform notes
 

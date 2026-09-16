@@ -65,9 +65,20 @@ func init() {
 	rootCmd.AddCommand(addCmd)
 }
 
+// reservedAccountName is the pseudo-account that stands for ~/.claude.json
+// — the config unmanaged claude and api_key accounts run with. Trust sync
+// addresses it as `home`, so no real account may take the name.
+const reservedAccountName = "home"
+
+// validateName is the single gate for a new account name: `add`, `login`
+// and `rename` all go through it. The name becomes a directory under
+// sessions/, hence the [A-Za-z0-9_-] charset.
 func validateName(name string) error {
 	if name == "" {
 		return errors.New("name must not be empty")
+	}
+	if name == reservedAccountName {
+		return fmt.Errorf("account name %q is reserved for ~/.claude.json (the unmanaged/api_key home config); choose another name", name)
 	}
 	for _, r := range name {
 		switch {

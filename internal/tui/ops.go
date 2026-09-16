@@ -204,6 +204,11 @@ func newInput(prompt, placeholder string) textinput.Model {
 	ti.Placeholder = placeholder
 	st := ti.Styles()
 	st.Cursor.Blink = false
+	// The placeholder is a hint, not content: it takes the theme's
+	// faint token so it recedes on every palette and still reads on a
+	// terminal with sixteen colours.
+	st.Focused.Placeholder = styleFaint
+	st.Blurred.Placeholder = styleFaint
 	ti.SetStyles(st)
 	_ = ti.Focus()
 	return ti
@@ -388,6 +393,60 @@ func joinLines(lines []string, width int) string {
 	return strings.Join(wrapAll(lines, width), "\n")
 }
 
+// sanitizeStyled keeps the styling a line was rendered with and drops
+// everything else an escape could do: only SGR (ESC[…m) survives.
+//
+// The blanket transcripts.Sanitize this replaces threw the styling away
+// with it — an overlay's head, hints and errors were drawn plain
+// whatever token they were rendered with. Data still cannot reach the
+// terminal: a path or a hostname from another machine carries no SGR of
+// its own, and anything else it carries — a hyperlink, a clipboard
+// write, a window title, a control character — is dropped here as well
+// as at the call site that sanitised it on the way in.
+func sanitizeStyled(s string) string {
+	if !strings.ContainsAny(s, "\x1b\x07") && strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) < 0 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c != 0x1b {
+			if c >= 0x20 && c != 0x7f {
+				b.WriteByte(c)
+			}
+			i++
+			continue
+		}
+		if i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+				j++
+			}
+			if j < len(s) {
+				if s[j] == 'm' {
+					b.WriteString(s[i : j+1]) // styling, and only styling
+				}
+				i = j + 1
+				continue
+			}
+			return b.String() // a truncated sequence ends the line
+		}
+		// Any other escape — OSC, a charset switch, a bare ESC — goes.
+		j := i + 1
+		for j < len(s) && s[j] != 0x07 && s[j] != 0x1b && !(s[j] >= 0x40 && s[j] <= 0x7e) {
+			j++
+		}
+		if j < len(s) && s[j] == 0x07 {
+			j++
+		} else if j < len(s) && s[j] != 0x1b {
+			j++
+		}
+		i = j
+	}
+	return b.String()
+}
+
 // wrapAll sanitises each line and wraps it to width, indenting the
 // continuations by the line's own indentation plus two columns so a
 // wrapped line reads as the tail of the one above rather than as a new
@@ -398,7 +457,7 @@ func wrapAll(lines []string, width int) []string {
 	}
 	out := make([]string, 0, len(lines))
 	for _, l := range lines {
-		l = transcripts.Sanitize(l)
+		l = sanitizeStyled(l)
 		if lipgloss.Width(l) <= width {
 			out = append(out, l)
 			continue

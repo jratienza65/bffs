@@ -18,6 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jratienza65/bffs/internal/bundle"
 	"github.com/jratienza65/bffs/internal/porter"
 	"github.com/jratienza65/bffs/internal/rehome"
@@ -1173,5 +1174,39 @@ func TestOverlayCopyWithY(t *testing.T) {
 	h.keys("y")
 	if strings.HasPrefix(h.a.status, "copied") {
 		t.Errorf("y answered the confirmation and copied instead: %q", h.a.status)
+	}
+}
+
+// An overlay line keeps the styling it was rendered with, and nothing
+// else an escape could do — a path from another machine reaches these
+// lines, and the only thing it may change is nothing.
+func TestOverlayLinesKeepStylingAndDropTheRest(t *testing.T) {
+	styled := styleFaint.Render("export the whole project") + " " + styleError.Render("missing here")
+	got := wrapAll([]string{styled}, 60)[0]
+	if !strings.Contains(got, "\x1b[") {
+		t.Errorf("the styling was stripped: %q", got)
+	}
+	if ansi.Strip(got) != ansi.Strip(styled) {
+		t.Errorf("the text changed: %q vs %q", ansi.Strip(got), ansi.Strip(styled))
+	}
+	for _, hostile := range []struct{ name, in string }{
+		{"a clipboard write", "cwd /x\x1b]52;c;cGF5bG9hZA==\x07/y"},
+		{"a hyperlink", "cwd \x1b]8;;http://evil\x07click\x1b]8;;\x07"},
+		{"a window title", "cwd \x1b]0;pwned\x07/y"},
+		{"a bare escape", "cwd \x1b/y"},
+		{"a control character", "cwd \x07\x08/y"},
+	} {
+		out := wrapAll([]string{hostile.in}, 60)[0]
+		if strings.ContainsAny(out, "\x1b\x07\x08") {
+			t.Errorf("%s survived: %q", hostile.name, out)
+		}
+		if !strings.Contains(out, "cwd ") {
+			t.Errorf("%s took the text with it: %q", hostile.name, out)
+		}
+	}
+	// Styling from data is the one thing that can ride along, and it
+	// can only colour: it cannot escape the line.
+	if out := wrapAll([]string{"cwd \x1b[31m/x"}, 60)[0]; !strings.Contains(out, "\x1b[31m") {
+		t.Errorf("SGR should survive: %q", out)
 	}
 }

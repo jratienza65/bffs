@@ -48,7 +48,7 @@ type newAccountScreen struct {
 }
 
 func newNewAccountScreen(svc *services) *newAccountScreen {
-	name := newInput("name: ", "letters, digits, - or _")
+	name := newInput("name: ", "a name for this account, e.g. work")
 	secret := newInput("key:  ", "sk-ant-"+glyph.ellipsis)
 	secret.EchoMode = textinput.EchoNone
 	return &newAccountScreen{svc: svc, name: name, key: secret}
@@ -75,6 +75,12 @@ func (s *newAccountScreen) Keys() []key.Binding {
 
 func (s *newAccountScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		// Without a width a textinput draws one cell of its
+		// placeholder and nothing else ("name: a").
+		s.name.SetWidth(max(10, msg.Width-8))
+		s.key.SetWidth(max(10, msg.Width-8))
+		return s, nil
 	case loginDoneMsg:
 		return s.finish(msg)
 	case tea.KeyPressMsg:

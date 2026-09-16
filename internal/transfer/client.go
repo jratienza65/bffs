@@ -110,7 +110,7 @@ func Fetch(ctx context.Context, o FetchOptions) (Done, error) {
 	go func() {
 		select {
 		case <-ctx.Done():
-			raw.Close()
+			_ = raw.Close() // cutting the connection is the point
 		case <-stop:
 		}
 	}()
@@ -235,7 +235,7 @@ func Fetch(ctx context.Context, o FetchOptions) (Done, error) {
 	_ = raw.SetWriteDeadline(time.Now().Add(timeouts.Dial))
 	reject := func(reason string) {
 		_ = writeMsg(tconn, rejectMsg{T: tReject, Reason: reason, Host: o.Host, User: o.User})
-		tconn.Close()
+		_ = tconn.Close()
 	}
 	if cerr != nil {
 		reject(reasonDeclined)
@@ -275,7 +275,7 @@ func Fetch(ctx context.Context, o FetchOptions) (Done, error) {
 		// the report along with it. Nothing is drained beyond that wait.
 		_ = writeMsg(tconn, doneMsg{T: tDone, Done: d})
 		lingerUntilClosed(raw, timeouts.Grace)
-		raw.Close()
+		_ = raw.Close()
 		c.emit(kindError, peerS, fmt.Sprintf("import failed: %s", d.Reason))
 		return d, serr
 	}
@@ -284,7 +284,7 @@ func Fetch(ctx context.Context, o FetchOptions) (Done, error) {
 	if err := writeMsg(tconn, doneMsg{T: tDone, Done: d}); err != nil {
 		return d, c.connErr(ctx, fmt.Errorf("reporting completion to %s: %w", name, err))
 	}
-	tconn.Close()
+	_ = tconn.Close()
 	c.emit(kindDone, peerS, fmt.Sprintf("received %d entries (%d bytes) from %s", d.Entries, d.Bytes, name))
 	return d, nil
 }

@@ -118,14 +118,6 @@ func dashIfEmpty(s string) string {
 	return s
 }
 
-// yesOrDash renders a boolean cell the way `bffs memory` does.
-func yesOrDash(b bool) string {
-	if b {
-		return "yes"
-	}
-	return "-"
-}
-
 func isDir(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()

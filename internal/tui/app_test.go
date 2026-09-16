@@ -84,8 +84,8 @@ func (f *fixture) transcript(slug, sid, cwd, prompt string, mtime time.Time, ext
 		f.t.Fatal(err)
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`{"type":"user","cwd":%q,"sessionId":%q,"version":"2.1.259","gitBranch":"main","timestamp":%q,"message":{"role":"user","content":%q}}`+"\n",
-		cwd, sid, mtime.Add(-time.Minute).Format(time.RFC3339), prompt))
+	fmt.Fprintf(&sb, `{"type":"user","cwd":%q,"sessionId":%q,"version":"2.1.259","gitBranch":"main","timestamp":%q,"message":{"role":"user","content":%q}}`+"\n",
+		cwd, sid, mtime.Add(-time.Minute).Format(time.RFC3339), prompt)
 	for _, rec := range extra {
 		b, err := json.Marshal(rec)
 		if err != nil {
@@ -271,16 +271,6 @@ func wantNone(t *testing.T, out string, absent ...string) {
 			t.Errorf("view must not contain %q:\n%s", w, out)
 		}
 	}
-}
-
-// cursorLine is the line the list cursor is on.
-func cursorLine(out string) string {
-	for _, l := range strings.Split(out, "\n") {
-		if strings.Contains(l, "> ") {
-			return l
-		}
-	}
-	return ""
 }
 
 func TestSupportedFalseWithoutTTY(t *testing.T) {

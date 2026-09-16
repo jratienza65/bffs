@@ -142,9 +142,9 @@ func TestWriteMsgRoundTrip(t *testing.T) {
 }
 
 func TestCleanText(t *testing.T) {
-	in := "mac-b\x1b]52;c;SGVsbG8=\x07\r\n​" + strings.Repeat("y", 100)
+	in := "mac-b\x1b]52;c;SGVsbG8=\x07\r\n\u200b" + strings.Repeat("y", 100)
 	got := cleanText(in, 64)
-	if strings.ContainsAny(got, "\x1b\x07\r\n") || strings.Contains(got, "​") {
+	if strings.ContainsAny(got, "\x1b\x07\r\n") || strings.Contains(got, "\u200b") {
 		t.Fatalf("control characters survived: %q", got)
 	}
 	if !strings.HasPrefix(got, "mac-b]52;c;SGVsbG8=") || !strings.HasSuffix(got, "…") {

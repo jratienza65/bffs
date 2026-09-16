@@ -73,7 +73,13 @@ func ServerTLS(cert tls.Certificate) *tls.Config {
 // exporter.
 func ClientTLS(onLeaf func(spki [32]byte)) *tls.Config {
 	return &tls.Config{
-		InsecureSkipVerify: true,
+		// There is no CA in this protocol: A's certificate is ephemeral and
+		// self-signed, and what authenticates A is the pairing code, proved
+		// over exporter-bound HMACs after the handshake (see client.go and
+		// SECURITY.md). VerifyConnection below still pins TLS 1.3, a single
+		// peer certificate and the ALPN, and surfaces sha256(SPKI) as the
+		// "peer key" both machines display.
+		InsecureSkipVerify: true, //nolint:gosec // the pairing code authenticates A, not a CA
 		MinVersion:         tls.VersionTLS13,
 		NextProtos:         []string{alpn},
 		ClientSessionCache: nil,

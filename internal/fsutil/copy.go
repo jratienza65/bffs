@@ -14,8 +14,13 @@ import (
 // and the copy is fsynced (file strictly, parent directory best-effort)
 // before CopyFile returns. On any failure the partially written dst is
 // removed. Timestamps are not preserved; use Touch for that.
+// The paths CopyFile opens come from bffs's own layout — a config dir, a
+// session dir, a staging dir under an os.Root — never straight from a
+// bundle: porter and rehome validate bundle names through
+// bundle.ClassifyName and commit through an os.Root before fsutil sees a
+// path. G304 is answered here rather than excluded for the package.
 func CopyFile(dst, src string, perm os.FileMode) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) //nolint:gosec // caller-owned path, see above
 	if err != nil {
 		return err
 	}
@@ -28,7 +33,7 @@ func CopyFile(dst, src string, perm os.FileMode) error {
 		return fmt.Errorf("copy %q: not a regular file", src)
 	}
 
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm) //nolint:gosec // caller-owned path
 	if err != nil {
 		return err
 	}
@@ -87,7 +92,11 @@ func copyTree(dst, src string) error {
 			}
 			dirs = append(dirs, dirStamp{target, info.ModTime()})
 		case d.Type()&fs.ModeSymlink != 0:
-			link, err := os.Readlink(p)
+			// Recreating symlinks is the point of copyTree (a partial
+			// isolation session dir is mostly symlinks), so the walk
+			// cannot move onto os.Root, which refuses to traverse them.
+			// The tree is bffs's own config layout, never bundle input.
+			link, err := os.Readlink(p) //nolint:gosec // G122: see above
 			if err != nil {
 				return err
 			}

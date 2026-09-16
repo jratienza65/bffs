@@ -109,6 +109,25 @@ jobs:
             ${{ steps.gopaths.outputs.mod }}
           key: ${{ steps.gocache.outputs.cache-primary-key }}
 
+  # golangci-lint on ubuntu only: the analysis is GOOS-dependent (a
+  # //go:build windows file is invisible here), so the matrix legs stay the
+  # compiler's job and this is the one that gates style and gosec. The
+  # version is the one mise.toml pins, so a developer and CI see the same
+  # findings.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.2
+
   # Catches release-config breakage (bad template, unbuildable GOOS/GOARCH)
   # before a tag is cut, not after.
   release-dry-run:

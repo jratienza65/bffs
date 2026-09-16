@@ -470,7 +470,7 @@ func TestExportConfirmFlow(t *testing.T) {
 		t.Errorf("declined export wrote %s", file)
 	}
 
-	c, pr, _, errOut = newSplitCmd("")
+	c, pr, _, _ = newSplitCmd("")
 	err := runExport(c, a.cfgDir, pr, req, false)
 	if err == nil || !strings.Contains(err.Error(), "pass -y") {
 		t.Errorf("non-tty: err = %v", err)

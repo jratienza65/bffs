@@ -84,7 +84,6 @@ type rehomeScreen struct {
 	op      *op
 	askQuit bool
 	width   int
-	loadErr error
 	box     scrollBox
 }
 

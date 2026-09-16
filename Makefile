@@ -13,6 +13,7 @@ GO_BUILD_FLAGS ?=
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
 LDFLAGS  := $(if $(VERSION),-ldflags "-X github.com/jratienza65/bffs/cmd.Version=$(VERSION)")
 
+## build: build the binary into the repo root
 build:
 	go build -p $(GO_P) $(GO_BUILD_FLAGS) $(LDFLAGS) -o $(BINARY) .
 
@@ -21,6 +22,7 @@ build:
 # binary — every subsequent exec is then SIGKILLed ("zsh: killed") even though
 # `codesign -v` reports the file as valid. Unlinking first gives the copy a
 # fresh inode and a clean signature registration.
+## install: build, then install to $(INSTALL_PATH) (sudo for /opt/bffs)
 install: build
 	@echo "  >  Installing $(BINARY) to $(INSTALL_PATH)"
 	@if [ "$(INSTALL_PATH)" = "/opt/bffs" ]; then \
@@ -43,26 +45,31 @@ install: build
 # prefix if you have goreleaser on PATH.
 GORELEASER ?= go run github.com/goreleaser/goreleaser/v2@latest
 
-.PHONY: build install release-check snapshot clean-dist hooks fmt lint fuzz skill-validate bench-shim
+.PHONY: build install release-check snapshot clean-dist hooks fmt lint lint-go test test-race cover golden check tools help fuzz skill-validate bench-shim
 
+## release-check: validate .goreleaser.yaml
 release-check:
 	$(GORELEASER) check
 
 # Full cross-platform build into ./dist without touching GitHub.
+## snapshot: cross-build every target into ./dist without publishing
 snapshot:
 	$(GORELEASER) release --snapshot --clean --skip=publish
 
+## clean-dist: remove ./dist
 clean-dist:
 	rm -rf dist
 
 # ── Contributor tooling ──────────────────────────────────────────
 # Git will not run hooks from a fresh clone on its own (by design), so this
 # is opt-in per checkout. Run it once after cloning.
+## hooks: enable the pre-commit hook for this checkout
 hooks:
 	@git config core.hooksPath .githooks
 	@echo "  >  pre-commit hook enabled (gofmt + go vet, mirrors CI)"
 	@echo "  >  bypass once with: git commit --no-verify"
 
+## fmt: format the tree in place
 fmt:
 	gofmt -w .
 
@@ -74,6 +81,7 @@ fmt:
 # crasher reproduces just as well.
 FUZZTIME ?= 30s
 
+## fuzz: fuzz the bundle reader and the entry-name grammar (FUZZTIME=5m)
 fuzz:
 	go test ./internal/bundle -run '^$$' -fuzz FuzzUnpack -fuzztime $(FUZZTIME) -fuzzminimizetime 0
 	go test ./internal/bundle -run '^$$' -fuzz FuzzValidateEntryName -fuzztime $(FUZZTIME) -fuzzminimizetime 0
@@ -89,13 +97,22 @@ fuzz:
 # The shim execs the installed binary, so `make install` between the two
 # runs. BFFS_HOME points at a throwaway store so the 300 launches neither
 # read the real accounts nor land in the real launch log.
+## bench-shim: time the shim path (hyperfine); the init-cost guard
 bench-shim:
 	@command -v hyperfine >/dev/null 2>&1 || { echo "  >  hyperfine not on PATH (brew install hyperfine)"; exit 1; }
 	@command -v claude >/dev/null 2>&1 || { echo "  >  no claude shim on PATH (run bffs init)"; exit 1; }
 	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
 	BFFS_HOME="$$tmp" BFFS_REAL_CLAUDE=/usr/bin/true hyperfine -N --runs 300 'claude --version'
 
-# Same checks the pre-commit hook and ci.yml run.
+# ── Checks ───────────────────────────────────────────────────────
+# GOLANGCI is whichever golangci-lint this machine can reach: mise's copy
+# first (mise installs it without putting it on PATH unless the shell is
+# activated), then PATH. Empty means the tool is absent, and `make lint`
+# says so instead of failing — the pre-commit hook runs this target and
+# must never be stricter than a machine that has not run `make tools`.
+GOLANGCI := $(shell command -v golangci-lint 2>/dev/null || { command -v mise >/dev/null 2>&1 && mise which golangci-lint 2>/dev/null; })
+
+## lint: gofmt, go vet, and golangci-lint when it is installed
 lint:
 	@unformatted="$$(gofmt -l .)"; \
 	if [ -n "$$unformatted" ]; then \
@@ -104,6 +121,59 @@ lint:
 		exit 1; \
 	fi
 	go vet ./...
+	go vet -tags bffs_notui ./...
+	@if [ -n "$(GOLANGCI)" ]; then \
+		echo "  >  $(GOLANGCI) run ./..."; \
+		"$(GOLANGCI)" run ./...; \
+	else \
+		echo "  >  golangci-lint not installed (make tools); gofmt and vet only"; \
+	fi
+
+## lint-go: golangci-lint alone, failing when it is not installed
+lint-go:
+	@test -n "$(GOLANGCI)" || { echo "golangci-lint not found (make tools)"; exit 1; }
+	"$(GOLANGCI)" run ./...
+
+## test: the suite
+test:
+	go test ./...
+
+## test-race: the suite the way CI runs it
+test-race:
+	go test -race ./...
+
+## cover: write and summarise a coverage profile
+cover:
+	@mkdir -p dist
+	go test -coverprofile=dist/coverage.out -covermode=atomic ./...
+	@go tool cover -func=dist/coverage.out | tail -1
+	@echo "  >  html: go tool cover -html=dist/coverage.out"
+
+## golden: regenerate the TUI frame goldens after an intentional layout change
+golden:
+	go test ./internal/tui -update
+	@git status --short internal/tui/testdata 2>/dev/null || true
+	@echo "  >  the diff of the goldens is the review — read it before committing"
+
+## check: everything CI gates on (lint + race tests)
+check: lint test-race
+
+## tools: install the developer tools pinned in mise.toml
+# mise refuses a config file it has not been told to trust, so the first
+# run on a checkout needs `mise trust` — it is your decision, not the
+# Makefile's, which is why this stops and says so rather than doing it.
+tools:
+	@mise trust --check 2>/dev/null || { echo "  >  mise does not trust ./mise.toml yet: run 'mise trust' first"; exit 1; }
+	mise install
+	@echo "  >  golangci-lint: $$(command -v golangci-lint || mise which golangci-lint 2>/dev/null || echo 'not found — check mise activation')"
+
+## help: list these targets
+help:
+	@echo "bffs — make targets"
+	@echo
+	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /' | sort
+	@echo
+	@echo "  binary: $(BINARY)   version: $(VERSION)"
 
 # Install the embedded bffs-rehome skill into a throwaway Claude config dir
 # (a throwaway BFFS_HOME too, so no real account is touched) and run Claude
@@ -117,6 +187,7 @@ lint:
 # the shim (which then execs itself until the 20 s timeout). BFFS_REAL_CLAUDE
 # pointing nowhere skips the in-install check; the explicit run below is the
 # check, and `claude` on PATH resolves normally there (no throwaway home).
+## skill-validate: install the embedded skill into a temp dir and validate it
 skill-validate: build
 	@if ! command -v claude >/dev/null 2>&1; then echo "  >  claude not on PATH; skipping skill validation"; exit 0; fi; \
 	tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \

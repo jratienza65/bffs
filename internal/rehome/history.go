@@ -100,7 +100,9 @@ func AppendHistory(historyPath, sid string, lines [][]byte, newProject string) (
 	if added == 0 {
 		return 0, nil
 	}
-	f, err := os.OpenFile(historyPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	// historyPath is <configDir>/history.jsonl, built by the caller from
+	// the destination root — never a name out of a bundle.
+	f, err := os.OpenFile(historyPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600) //nolint:gosec // bffs's own path
 	if err != nil {
 		return 0, fmt.Errorf("history: %w", err)
 	}
@@ -176,7 +178,7 @@ func compactKey(raw json.RawMessage) (string, bool) {
 // records are skipped.
 func existingHistoryKeys(historyPath, sid string) (keys map[string]bool, endsWithNewline bool, err error) {
 	keys = map[string]bool{}
-	f, err := os.Open(historyPath)
+	f, err := os.Open(historyPath) //nolint:gosec // <configDir>/history.jsonl, bffs's own path
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return keys, true, nil

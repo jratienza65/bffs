@@ -186,7 +186,7 @@ func importPiped(ctx context.Context, cfgDir string, m *bundle.Manifest, opener 
 		done <- err
 	}()
 	rep, err := Import(ctx, cfgDir, pr, o)
-	pr.CloseWithError(errCopyDone)
+	_ = pr.CloseWithError(errCopyDone)
 	<-done
 	return rep, err
 }
@@ -548,7 +548,9 @@ func readsBack(f bundle.File, target string, alts []string) bool {
 }
 
 func sha256File(p string) (string, error) {
-	fh, err := os.Open(p)
+	// A file the copy just wrote into the destination root, re-read to
+	// verify it against the manifest before --move removes the source.
+	fh, err := os.Open(p) //nolint:gosec // a file bffs just wrote
 	if err != nil {
 		return "", err
 	}
@@ -625,7 +627,7 @@ func pruneEmpty(root *os.Root, rel string) error {
 		return err
 	}
 	entries, err := d.ReadDir(-1)
-	d.Close()
+	_ = d.Close()
 	if err != nil {
 		return err
 	}
@@ -641,7 +643,7 @@ func pruneEmpty(root *os.Root, rel string) error {
 		return err
 	}
 	left, err := d.ReadDir(1)
-	d.Close()
+	_ = d.Close()
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}

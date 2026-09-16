@@ -123,7 +123,7 @@ func applyTheme(p palette, isDark bool) {
 		styleKey = lipgloss.NewStyle().Bold(true)
 		styleDesc = lipgloss.NewStyle().Faint(true)
 		styleLive, styleImported, styleMissing, styleMark, stylePin = lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle().Bold(true), lipgloss.NewStyle()
-		styleOK, styleBad, styleWarn, styleAccent, styleInfo = lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle().Bold(true), lipgloss.NewStyle()
+		styleOK, styleBad, styleWarn, styleAccent = lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle(), lipgloss.NewStyle().Bold(true)
 		stylePrompt = lipgloss.NewStyle().Bold(true)
 		return
 	}
@@ -153,7 +153,6 @@ func applyTheme(p palette, isDark bool) {
 	styleBad = fg(p.bad)
 	styleWarn = fg(p.warn)
 	styleAccent = fg(p.accent)
-	styleInfo = fg(p.info)
 	stylePrompt = fg(p.accent)
 }
 

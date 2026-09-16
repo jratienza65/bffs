@@ -618,7 +618,10 @@ func commitRequest(sp sessionPlan, staged func(string) string, id8 string) (reho
 // readLines returns the newline-separated lines of path, without their
 // terminators and without empty lines.
 func readLines(path string) ([][]byte, error) {
-	f, err := os.Open(path)
+	// A staged file or one of the destination root's own: the bundle's
+	// names were validated by bundle.ClassifyName before unpack wrote
+	// them, and unpack wrote through an os.Root over the staging dir.
+	f, err := os.Open(path) //nolint:gosec // staged or destination path
 	if err != nil {
 		return nil, err
 	}

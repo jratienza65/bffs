@@ -27,7 +27,7 @@ func pidExists(pid int) bool {
 	if err != nil {
 		return errors.Is(err, syscall.ERROR_ACCESS_DENIED)
 	}
-	defer syscall.CloseHandle(h)
+	defer func() { _ = syscall.CloseHandle(h) }()
 	var code uint32
 	if err := syscall.GetExitCodeProcess(h, &code); err != nil {
 		return true
@@ -65,7 +65,7 @@ func procStart(pid int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open process %d: %w", pid, err)
 	}
-	defer syscall.CloseHandle(h)
+	defer func() { _ = syscall.CloseHandle(h) }()
 	var creation, exit, kernel, user syscall.Filetime
 	if err := syscall.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
 		return "", fmt.Errorf("process times of %d: %w", pid, err)

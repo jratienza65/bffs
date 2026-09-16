@@ -19,7 +19,7 @@ var (
 	ErrNotLAN = errors.New("not on a local network of this machine (--allow-routed for multi-VLAN offices)")
 	// ErrPeerNotOwner is returned by Fetch when the peer could not prove it
 	// is the machine that showed the code (nothing is accepted from it).
-	ErrPeerNotOwner = errors.New("the peer is not the machine that showed the code — refusing to receive anything. Someone on this network may be interfering; regenerate the code.")
+	ErrPeerNotOwner = errors.New("the peer is not the machine that showed the code — refusing to receive anything. Someone on this network may be interfering; regenerate the code")
 )
 
 // detailErr carries a situation-specific message while matching a sentinel

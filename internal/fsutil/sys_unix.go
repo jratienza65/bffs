@@ -15,7 +15,7 @@ var errCrossDevice error = syscall.EXDEV
 // durable. Best-effort: some filesystems refuse to fsync directories and the
 // data itself has already been fsynced.
 func syncDir(dir string) {
-	d, err := os.Open(dir)
+	d, err := os.Open(dir) //nolint:gosec // a directory bffs just wrote to
 	if err != nil {
 		return
 	}
@@ -46,5 +46,5 @@ func device(path string) (uint64, error) {
 	if !ok {
 		return 0, fmt.Errorf("stat %q: no device information", path)
 	}
-	return uint64(st.Dev), nil // Dev is int32 on darwin, uint64 on linux
+	return uint64(st.Dev), nil //nolint:unconvert // Dev is int32 on darwin, uint64 on linux
 }

@@ -47,9 +47,8 @@ func TestSelectProject(t *testing.T) {
 	}
 
 	// The same project given relative to HOME resolves to the same thing.
-	rel := "~" + strings.TrimPrefix(e.cwd, filepath.Dir(filepath.Dir(e.claudeDir)))
 	if home := filepath.Dir(e.claudeDir); strings.HasPrefix(e.cwd, home) {
-		rel = "~" + strings.TrimPrefix(e.cwd, home)
+		rel := "~" + strings.TrimPrefix(e.cwd, home)
 		sel2, err := Select(ctx, e.root, nil, nil, SelectOptions{Projects: []string{rel}, Now: fixedNow})
 		if err != nil {
 			t.Fatalf("Select(%q): %v", rel, err)

@@ -14,7 +14,6 @@ import (
 
 	"github.com/jratienza65/bffs/internal/bundle"
 	"github.com/jratienza65/bffs/internal/transcripts"
-	"github.com/jratienza65/bffs/internal/transfer"
 )
 
 // op is one long operation (plan §11 "Long ops"): a goroutine that owns
@@ -61,12 +60,6 @@ func (o *op) emit(m tea.Msg) {
 	default:
 	}
 }
-
-// progress adapts emit to the bundle.Progress callback shape.
-func (o *op) progress(p bundle.Progress) { o.emit(progressMsg{p: p}) }
-
-// event adapts emit to the transfer.Event callback shape.
-func (o *op) event(ev transfer.Event) { o.emit(transferEventMsg{ev: ev}) }
 
 // wait is the command that delivers the next message of the op; a closed
 // channel yields nil, which bubbletea ignores.
@@ -186,9 +179,9 @@ func (v opView) view(width int) string {
 	sb.WriteString("  ")
 	sb.WriteString(barBlocks(pct))
 	if v.seen {
-		sb.WriteString(fmt.Sprintf(" %3.0f%%  %s / %s", pct*100, formatSize(p.Bytes), formatSize(p.TotalBytes)))
+		fmt.Fprintf(&sb, " %3.0f%%  %s / %s", pct*100, formatSize(p.Bytes), formatSize(p.TotalBytes))
 		if p.TotalFiles > 0 {
-			sb.WriteString(fmt.Sprintf("  %d/%d files", p.Files, p.TotalFiles))
+			fmt.Fprintf(&sb, "  %d/%d files", p.Files, p.TotalFiles)
 		}
 	}
 	sb.WriteString("  ")

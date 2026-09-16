@@ -13,12 +13,17 @@ Module path: `github.com/jratienza65/bffs`. Go 1.26.
 The version `bffs --version` reports is never a literal in the source: a release stamps `cmd.Version` at link time (goreleaser, and `make build` from `git describe`), and an unstamped build resolves it in `cmd.versionString` from the build info — the module version for `go install <module>@<version>`, else the commit as `dev+<sha12>[.dirty]`, else `dev`. A hardcoded default is how a v0.3.0 download reported 0.1.0. Only a release-shaped version reaches the skill frontmatter (`cmd.releaseVersion`).
 
 ```bash
+make help               # every target, one line each
 make build              # builds the `bffs` binary in repo root
 make install            # builds, then sudo-installs to /opt/bffs/bffs
+make check              # what CI gates on: lint (gofmt, vet ×2 tags, golangci-lint) + race tests
+make tools              # installs the pinned golangci-lint through mise
 go test ./...           # all tests
 go test ./internal/resolver -run TestResolve   # single package / single test
 go build -o bffs . && ./bffs <subcommand>      # iterate without installing
 ```
+
+Lint is `gofmt` + `go vet` (both build tags) + golangci-lint 2.13.2, pinned in `mise.toml` and in the CI `lint` job so a developer and CI see the same findings. `.golangci.yml` carries the reasoning for every exclusion; the short version is that executing another program (G204) and reading a path bffs itself derived (G304) are what this tool does, while `internal/bundle`, `internal/porter` and `internal/transfer` keep G304 live because their paths can come from another machine — each open there is answered at the site. `make lint` degrades to gofmt and vet when golangci-lint is absent, because the pre-commit hook runs it and must never be stricter than a fresh clone.
 
 After installing the binary, run `bffs init` once to drop the `claude` shim into `~/.bffs/bin/` (macOS/Linux) or `%LOCALAPPDATA%\bffs\bin` (Windows) — `--dir` / `$BFFS_SHIM_DIR` override, `internal/shimcheck.DefaultInstallDir` is the source of truth. Optionally run `bffs mcp install` once to register the MCP server with Claude Code.
 

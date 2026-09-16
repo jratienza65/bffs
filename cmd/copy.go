@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -336,6 +335,3 @@ func renderCopyReceipt(w io.Writer, rep porter.Report, moved bool) {
 		fmt.Fprintf(w, "verify:  %s\n", transcripts.Sanitize(v))
 	}
 }
-
-// copyContext is a small seam so tests can cancel a copy midway.
-var copyContext = func(cmd *cobra.Command) context.Context { return cmdContext(cmd) }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -162,18 +161,13 @@ type memoryListing struct {
 // export walks it (top level plus logs/), slash-relative, sorted.
 func listMemoryFiles(dir string) []memoryListing {
 	var out []memoryListing
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+	_ = walkMemoryDir(dir, func(root *os.Root, rel string, d fs.DirEntry) error {
+		if rel == "." {
 			return nil
 		}
-		rel, rerr := filepath.Rel(dir, path)
-		if rerr != nil || rel == "." {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
 			if rel != transcripts.MemoryLogsSubdir && !strings.HasPrefix(rel, transcripts.MemoryLogsSubdir+"/") {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
@@ -185,10 +179,10 @@ func listMemoryFiles(dir string) []memoryListing {
 			return nil
 		}
 		pinned := false
-		if f, ferr := os.Open(path); ferr == nil {
+		if f, ferr := root.Open(rel); ferr == nil {
 			buf := make([]byte, 512)
 			n, _ := f.Read(buf)
-			f.Close()
+			_ = f.Close()
 			head := string(buf[:n])
 			pinned = strings.HasPrefix(head, "---") && strings.Contains(head, "\npinned: true")
 		}

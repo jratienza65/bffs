@@ -40,7 +40,9 @@ func SameDevice(a, b string) (bool, error) {
 }
 
 func volumeSerial(path string) (uint32, error) {
-	f, err := os.Open(path) // opens directories too (FILE_FLAG_BACKUP_SEMANTICS)
+	// opens directories too (FILE_FLAG_BACKUP_SEMANTICS); the path is one
+	// bffs derived from its own layout, as everywhere else in fsutil.
+	f, err := os.Open(path) //nolint:gosec // caller-owned path
 	if err != nil {
 		return 0, err
 	}

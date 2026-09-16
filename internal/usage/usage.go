@@ -90,7 +90,7 @@ func (w WindowStats) merge(t Tokens) WindowStats {
 	if t.Messages == 0 {
 		return w
 	}
-	w.Tokens = w.Tokens.add(t)
+	w.Tokens = w.add(t)
 	w.Sessions++
 	return w
 }

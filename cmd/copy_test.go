@@ -64,13 +64,11 @@ func TestRenderNothingToCopy(t *testing.T) {
 }
 
 func TestConfirmCount(t *testing.T) {
-	c, pr, _, errOut := newSplitCmd("3\n")
-	_ = c
+	_, pr, _, _ := newSplitCmd("3\n")
 	if err := confirmCount(pr, 3); err != nil {
 		t.Fatalf("exact count: %v", err)
 	}
-	c, pr, _, errOut = newSplitCmd("2\n")
-	_ = c
+	_, pr, _, errOut := newSplitCmd("2\n")
 	if err := confirmCount(pr, 3); err == nil || err.Error() != "aborted" || !strings.Contains(errOut.String(), "aborted") {
 		t.Fatalf("wrong count: err=%v out=%q", err, errOut.String())
 	}

@@ -317,7 +317,10 @@ func installShim(self, shimPath string) error {
 	if err := os.Link(self, shimPath); err == nil {
 		return nil
 	}
-	return os.WriteFile(shimPath, []byte(wrapperScript(self)), 0o755)
+	// 0755 on purpose: this is the `claude` the user's PATH resolves to,
+	// and a shell will not exec it otherwise. It holds no secret — the
+	// script execs the bffs binary, which resolves the account itself.
+	return os.WriteFile(shimPath, []byte(wrapperScript(self)), 0o755) //nolint:gosec // an executable shim, by design
 }
 
 // wrapperScript returns a /bin/sh script that execs the given binary in

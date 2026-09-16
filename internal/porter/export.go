@@ -115,7 +115,7 @@ func BuildManifest(ctx context.Context, sel Selection, o ExportOptions) (*bundle
 	}
 	history, err := collectHistory(ctx, filepath.Join(sel.Root.ConfigDir, transcripts.HistoryFile), wantHistory)
 	if err != nil {
-		b.src.Close()
+		_ = b.src.Close()
 		return nil, nil, nil, err
 	}
 	b.history = history
@@ -125,12 +125,12 @@ func BuildManifest(ctx context.Context, sel Selection, o ExportOptions) (*bundle
 
 	for _, s := range sessions {
 		if err := ctx.Err(); err != nil {
-			b.src.Close()
+			_ = b.src.Close()
 			return nil, nil, nil, err
 		}
 		e, ok, err := b.sessionEntry(s)
 		if err != nil {
-			b.src.Close()
+			_ = b.src.Close()
 			return nil, nil, nil, err
 		}
 		if ok {
@@ -139,7 +139,7 @@ func BuildManifest(ctx context.Context, sel Selection, o ExportOptions) (*bundle
 	}
 	for _, mem := range sel.Memories {
 		if err := ctx.Err(); err != nil {
-			b.src.Close()
+			_ = b.src.Close()
 			return nil, nil, nil, err
 		}
 		var keep map[string]bool
@@ -151,7 +151,7 @@ func BuildManifest(ctx context.Context, sel Selection, o ExportOptions) (*bundle
 		}
 		e, ok, err := b.memoryEntry(mem, keep)
 		if err != nil {
-			b.src.Close()
+			_ = b.src.Close()
 			return nil, nil, nil, err
 		}
 		if ok {
@@ -166,7 +166,7 @@ func BuildManifest(ctx context.Context, sel Selection, o ExportOptions) (*bundle
 		}
 	}
 	if len(m.Entries) == 0 {
-		b.src.Close()
+		_ = b.src.Close()
 		return nil, nil, b.warnings, errors.New("nothing to export: the selection holds no session or memory")
 	}
 	return m, b.src, b.warnings, nil
@@ -276,7 +276,10 @@ func (b *builder) addFile(files *[]bundle.File, name, abs string, keepOpen, requ
 	if !b.admit(name) {
 		return false, nil
 	}
-	f, err := os.Open(abs)
+	// abs is a path under the root being exported, built from a slug the
+	// catalog listed — never a name from a bundle, which is read-only
+	// input on the import side.
+	f, err := os.Open(abs) //nolint:gosec // a file of the pool being exported
 	if err != nil {
 		if required {
 			return false, err
@@ -286,7 +289,7 @@ func (b *builder) addFile(files *[]bundle.File, name, abs string, keepOpen, requ
 	}
 	stat, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		if required {
 			return false, err
 		}
@@ -297,7 +300,7 @@ func (b *builder) addFile(files *[]bundle.File, name, abs string, keepOpen, requ
 	h := sha256.New()
 	n, err := io.Copy(h, io.LimitReader(&ctxReader{ctx: b.ctx, r: f}, size))
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		if required || b.ctx.Err() != nil {
 			return false, fmt.Errorf("hash %s: %w", abs, err)
 		}
@@ -313,7 +316,7 @@ func (b *builder) addFile(files *[]bundle.File, name, abs string, keepOpen, requ
 	if keepOpen {
 		b.src.files[name] = source{file: f, size: size}
 	} else {
-		f.Close()
+		_ = f.Close()
 		b.src.files[name] = source{path: abs}
 	}
 	*files = append(*files, bundle.File{Path: name, Size: size, SHA256: digest, ModTime: stat.ModTime()})
@@ -695,7 +698,7 @@ func collectHistory(ctx context.Context, path string, want map[string]bool) (map
 	if len(want) == 0 {
 		return out, nil
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // history.jsonl of the root being exported
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return out, nil

@@ -72,7 +72,7 @@ func Build(ctx context.Context, w io.Writer, m *Manifest, src Opener, comp Compr
 		return nil, fmt.Errorf("write envelope: %w", err)
 	}
 	var (
-		out io.Writer = w
+		out = w
 		gz  *gzip.Writer
 	)
 	if comp == CompGzip {

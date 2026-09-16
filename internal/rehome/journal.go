@@ -59,7 +59,7 @@ func readJournal(stagingDir string) (Journal, bool) {
 	if stagingDir == "" {
 		return Journal{}, false
 	}
-	data, err := os.ReadFile(filepath.Join(stagingDir, JournalFile))
+	data, err := os.ReadFile(filepath.Join(stagingDir, JournalFile)) //nolint:gosec // a staging dir bffs created
 	if err != nil {
 		return Journal{}, false
 	}

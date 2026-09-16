@@ -147,11 +147,14 @@ func TestReadAndPatchRoundTrip(t *testing.T) {
 	if s.UserID != "uid-OLD" {
 		t.Errorf("UserID: %q", s.UserID)
 	}
-	var oa struct{ EmailAddress, AccountUuid string }
+	var oa struct {
+		EmailAddress string
+		AccountUUID  string `json:"accountUuid"`
+	}
 	if err := json.Unmarshal(s.OAuthAccount, &oa); err != nil {
 		t.Fatal(err)
 	}
-	if oa.EmailAddress != "old@example.com" || oa.AccountUuid != "U-OLD" {
+	if oa.EmailAddress != "old@example.com" || oa.AccountUUID != "U-OLD" {
 		t.Errorf("OAuthAccount: %+v", oa)
 	}
 

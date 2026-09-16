@@ -100,12 +100,3 @@ func listKeyMap() list.KeyMap {
 		ForceQuit:            key.NewBinding(key.WithDisabled()),
 	}
 }
-
-// filterKeys is the help entry a list screen adds while a filter is
-// applied: esc then clears it instead of going back.
-func filterKeys(l list.Model) []key.Binding {
-	if l.FilterState() == list.FilterApplied {
-		return []key.Binding{keys.ClearFilter}
-	}
-	return nil
-}

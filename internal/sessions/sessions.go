@@ -106,7 +106,7 @@ func SyncSymlinks(sessionDir, homeClaudeDir string, preset store.IsolationPreset
 		switch result := ensureSymlink(linkPath, target); result {
 		case ensureOK:
 			// no-op
-		case ensureSkippedConflict:
+		case errEnsureSkippedConflict:
 			skipped = append(skipped, name)
 		default:
 			return skipped, fmt.Errorf("ensure symlink %s -> %s: %w", linkPath, target, result)
@@ -153,12 +153,12 @@ func SyncSymlinks(sessionDir, homeClaudeDir string, preset store.IsolationPreset
 type ensureResult error
 
 var (
-	ensureOK              ensureResult = nil
-	ensureSkippedConflict ensureResult = fmt.Errorf("skipped: real file present")
+	ensureOK                 ensureResult = nil
+	errEnsureSkippedConflict ensureResult = fmt.Errorf("skipped: real file present")
 )
 
 // ensureSymlink atomically swings the symlink at path to point at target.
-// If a non-symlink file/dir is in the way, returns ensureSkippedConflict
+// If a non-symlink file/dir is in the way, returns errEnsureSkippedConflict
 // (the caller logs it; user data is preserved).
 func ensureSymlink(path, target string) ensureResult {
 	info, err := os.Lstat(path)
@@ -172,7 +172,7 @@ func ensureSymlink(path, target string) ensureResult {
 		return fmt.Errorf("lstat: %w", err)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		return ensureSkippedConflict
+		return errEnsureSkippedConflict
 	}
 	cur, err := os.Readlink(path)
 	if err != nil {

@@ -329,7 +329,7 @@ func bindAll(local []LinkAddr, port int, listen Listener) ([]boundListener, erro
 		}
 		got, err := netip.ParseAddrPort(ln.Addr().String())
 		if err != nil {
-			ln.Close()
+			_ = ln.Close()
 			errs = append(errs, fmt.Sprintf("%s: listener reports %q", want, ln.Addr().String()))
 			continue
 		}
@@ -382,7 +382,7 @@ func (s *server) hasConnected() bool {
 // are unaffected.
 func (s *server) closeListeners() {
 	for i := range s.listeners {
-		s.listeners[i].ln.Close()
+		_ = s.listeners[i].ln.Close()
 	}
 }
 
@@ -490,14 +490,14 @@ func (s *server) acceptLoop(b *boundListener) {
 		backoff = acceptBackoffMin
 		peer, ok := remoteAddrPort(conn)
 		if !ok || !IsLAN(peer.Addr(), []LinkAddr{b.link}, s.o.LAN) {
-			conn.Close()
+			_ = conn.Close()
 			s.emit(kindReject, addrString(conn), fmt.Sprintf("refused %s: not on this listener's network", addrHost(conn)))
 			continue
 		}
 		select {
 		case s.sem <- struct{}{}:
 		case <-s.pairCtx.Done():
-			conn.Close()
+			_ = conn.Close()
 			return
 		}
 		s.handlers.Add(1)
@@ -559,7 +559,7 @@ func (s *server) handle(raw net.Conn, peer netip.AddrPort, releaseSlot func()) {
 			c := claimed
 			s.mu.Unlock()
 			if !c {
-				raw.Close()
+				_ = raw.Close()
 			}
 		case <-detach:
 		}
@@ -654,7 +654,7 @@ func (s *server) handle(raw net.Conn, peer netip.AddrPort, releaseSlot func()) {
 	go func() {
 		select {
 		case <-s.ctx.Done():
-			raw.Close()
+			_ = raw.Close()
 		case <-stop:
 		}
 	}()
@@ -716,7 +716,7 @@ consent:
 				s.emit(kindReject, peerS, fmt.Sprintf("%s declined", name))
 			}
 			_ = raw.SetWriteDeadline(time.Now().Add(timeouts.Handshake))
-			tconn.Close()
+			_ = tconn.Close()
 			return
 		case tAccept:
 			if m.V != protocolVersion {
@@ -786,7 +786,7 @@ consent:
 		case d := <-doneCh:
 			s.reported(name, peerS, d, written)
 			_ = raw.SetWriteDeadline(time.Now().Add(timeouts.Handshake))
-			tconn.Close()
+			_ = tconn.Close()
 		case err := <-readErr:
 			if s.ctx.Err() != nil {
 				return

@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -73,16 +72,9 @@ const memoryHashCap = 4 << 20
 // symlinks skipped) to its sha256, size and mtime.
 func memoryHashes(dir string) (map[string]memFile, error) {
 	out := map[string]memFile{}
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
+	err := walkMemoryDir(dir, func(root *os.Root, rel string, d fs.DirEntry) error {
 		if !d.Type().IsRegular() {
 			return nil
-		}
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			return err
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -92,19 +84,19 @@ func memoryHashes(dir string) (map[string]memFile, error) {
 		if info.Size() > memoryHashCap {
 			mf.sha = "large"
 		} else {
-			f, err := os.Open(path)
+			f, err := root.Open(rel)
 			if err != nil {
 				return err
 			}
 			h := sha256.New()
 			_, err = io.Copy(h, f)
-			f.Close()
+			_ = f.Close()
 			if err != nil {
 				return err
 			}
 			mf.sha = hex.EncodeToString(h.Sum(nil))
 		}
-		out[filepath.ToSlash(rel)] = mf
+		out[rel] = mf
 		return nil
 	})
 	return out, err

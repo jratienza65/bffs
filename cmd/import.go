@@ -219,10 +219,10 @@ const (
 // normalised.
 func parseFrom(s string) (fromKind, string, error) {
 	s = strings.TrimSpace(s)
-	switch {
-	case s == "":
+	switch s {
+	case "":
 		return 0, "", errors.New(`--from is required: a .bffs file, or "-" for stdin`)
-	case s == "-":
+	case "-":
 		return fromStdin, "", nil
 	}
 	if info, err := os.Stat(s); err == nil {
@@ -855,10 +855,10 @@ func (a *placementAsker) ask(w io.Writer, s *importSummary, p *importProject) (s
 			}
 			n = v
 		}
-		switch {
-		case n == asIsIdx:
+		switch n {
+		case asIsIdx:
 			return "", false
-		case n == typeIdx:
+		case typeIdx:
 			path, err := a.pr.line("    path: ")
 			if err != nil {
 				return "", false

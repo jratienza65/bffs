@@ -328,15 +328,15 @@ func (st *unpackState) entry(tr *tar.Reader, hdr *tar.Header) error {
 	h := sha256.New()
 	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(tr, hdr.Size))
 	if err != nil {
-		f.Close()
+		_ = f.Close() // the unpack already failed; the staging dir is discarded
 		return fmt.Errorf("writing %q: %w", name, err)
 	}
 	if n != hdr.Size {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("entry %q ended after %d of %d bytes", name, n, hdr.Size)
 	}
 	if err := syncFile(f); err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("sync %q: %w", name, err)
 	}
 	if err := f.Close(); err != nil {

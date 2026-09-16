@@ -1,0 +1,9 @@
+# Developer toolchain. CI pins Go through go.mod (setup-go's
+# go-version-file) and golangci-lint through the version below, so this
+# file is for the machine you work on: `make tools` installs it.
+[tools]
+go = "1.26"
+"go:github.com/golangci/golangci-lint/v2/cmd/golangci-lint" = "2.13.2"
+
+[env]
+GOFLAGS = "-mod=mod"

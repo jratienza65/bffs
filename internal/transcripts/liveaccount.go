@@ -22,6 +22,8 @@ const envConfigDirPrefix = EnvClaudeConfigDir + "="
 var procEnviron = readProcEnviron
 
 // maxProcEnviron bounds the environment block read for one process.
+//
+//nolint:unused // read by liveenv_linux.go; the linter runs one GOOS at a time
 const maxProcEnviron = 4 << 20
 
 // errProcEnvironUnsupported is what readProcEnviron returns where bffs has

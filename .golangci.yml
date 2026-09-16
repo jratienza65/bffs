@@ -1,0 +1,90 @@
+# golangci-lint configuration for bffs.
+# Run through `make lint` (it uses mise's copy when there is one); install
+# with `make tools`. Never stricter than CI, which runs the same config.
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - ""
+
+linters:
+  default: standard          # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - gosec
+    - misspell
+    - unconvert
+    - revive
+
+  settings:
+    gosec:
+      excludes:
+        # bffs owns its directory layout: 0700 for anything holding a
+        # credential or a session dir, 0755 for the shim dir the user's PATH
+        # points at, 0600 for every file it writes. The modes are decided in
+        # internal/store, internal/sessions and internal/fsutil and are
+        # asserted by their tests; G301/G302 would relitigate that per call.
+        - G301
+        - G302
+        # An integer conversion audit (G115) on a codebase whose ints come
+        # from ReadDir, terminal sizes and byte counts is noise; the places
+        # that matter (the bundle reader) bound their own values.
+        - G115
+        # G101 fires on the *names* of the environment variables the shim
+        # sets (EnvAPIKey = "ANTHROPIC_API_KEY"). bffs never holds an OAuth
+        # credential and an api_key secret lives in accounts.toml, which
+        # this rule does not look at.
+        - G101
+        # Executing another program is what bffs is for: the shim execs the
+        # real claude, `bffs run` spawns one on a named account, and the
+        # catalog shells out to git and ps. Every argument list is built in
+        # code, never from a bundle; the binary is resolved through PATH
+        # with the shim itself skipped (internal/shim.FindRealClaude).
+        - G204
+        # G703 traces those same PATH and $HOME lookups: the "taint" is the
+        # user's own environment, which chooses which claude to run.
+        - G703
+    staticcheck:
+      checks:
+        - all
+        # De Morgan on a character-class guard (`!(c >= 'a' && c <= 'z' ||
+        # …)`) reads worse than the negation it replaces, and that is where
+        # every hit in this tree is.
+        - -QF1001
+    revive:
+      rules:
+        - name: exported
+          disabled: true     # internal packages document themselves in prose
+    # No misspell locale: the identifiers follow Go and Charm (color.Color),
+    # the prose is British. Pinning either turns the other into noise.
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      # Fixtures build odd input on purpose and read paths they just wrote.
+      - path: _test\.go
+        linters: [gosec, errcheck]
+      # G304 is "file path from a variable". Everywhere below, the variable is
+      # a path bffs itself derived from its own config dir, the user's
+      # ~/.claude, or a CLI flag the user typed — the file the user asked for.
+      # It is deliberately NOT excluded for internal/bundle, internal/transfer
+      # or internal/porter, where the path can come from a bundle another
+      # machine wrote: that is exactly where the rule earns its keep.
+      # copyTree recreates symlinks — that is what a partial-isolation
+      # session dir is made of — so its walk cannot move onto os.Root,
+      # which refuses to traverse them. The tree it copies is bffs's own
+      # config layout, never bundle input. The memory scans, which do read
+      # directories a bundle filled, walk through os.Root (tui/memorywalk.go).
+      - path: internal/fsutil/
+        text: "G122"
+        linters: [gosec]
+      - path: (cmd|internal/(tui|store|sessions|claudejson|transcripts|usage|usagelog|shim|shimcheck|skillpack|imports|trust|projectconfig|runner|mcpserver))/
+        text: "G304"
+        linters: [gosec]
+
+formatters:
+  enable:
+    - gofmt

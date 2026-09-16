@@ -19,7 +19,9 @@ func FreeSpace(dir string) (int64, error) {
 		}
 		return 0, &pathError{op: "statfs", path: dir, err: err}
 	}
-	bavail, bsize := uint64(st.Bavail), uint64(st.Bsize)
+	// The conversions are not redundant everywhere: Bavail and Bsize are
+	// signed on some of the platforms this file builds for.
+	bavail, bsize := uint64(st.Bavail), uint64(st.Bsize) //nolint:unconvert // platform-dependent types
 	if bsize == 0 || bavail > uint64(1<<62)/bsize {
 		return -1, nil
 	}

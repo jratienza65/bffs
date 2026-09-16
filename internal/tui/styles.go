@@ -34,6 +34,5 @@ var (
 	styleBad      = lipgloss.NewStyle()
 	styleWarn     = lipgloss.NewStyle()
 	styleAccent   = lipgloss.NewStyle().Bold(true)
-	styleInfo     = lipgloss.NewStyle()
 	stylePrompt   = lipgloss.NewStyle().Bold(true)
 )

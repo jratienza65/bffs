@@ -358,7 +358,10 @@ func (c *committer) copyTree(dst, src string) error {
 // root: O_EXCL, fsynced, stamped mtime. A failed copy removes the partial
 // file.
 func (c *committer) copyFile(name, src string, mtime time.Time) error {
-	in, err := os.Open(src)
+	// src is a staged file: bundle.Unpack validated its name against the
+	// entry grammar and wrote it through an os.Root over the staging dir.
+	// The destination side of this copy is the committer's own os.Root.
+	in, err := os.Open(src) //nolint:gosec // staged path, validated by bundle.ClassifyName
 	if err != nil {
 		return err
 	}
@@ -523,7 +526,7 @@ func (c *committer) sameContent(name, src string) (bool, error) {
 		return false, err
 	}
 	defer a.Close()
-	b, err := os.Open(src)
+	b, err := os.Open(src) //nolint:gosec // staged path, as in copyFile
 	if err != nil {
 		return false, err
 	}

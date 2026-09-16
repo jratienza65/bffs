@@ -24,12 +24,12 @@ func TestApplyAccountReplacesExistingEnvVars(t *testing.T) {
 
 	hasFresh := false
 	for _, kv := range got {
-		switch {
-		case kv == EnvAPIKey+"=fresh-key":
+		switch kv {
+		case EnvAPIKey + "=fresh-key":
 			hasFresh = true
-		case kv == EnvAPIKey+"=stale-key",
-			kv == EnvOAuthToken+"=stale-token",
-			kv == EnvClaudeCfgDir+"=/some/stale/dir":
+		case EnvAPIKey + "=stale-key",
+			EnvOAuthToken + "=stale-token",
+			EnvClaudeCfgDir + "=/some/stale/dir":
 			t.Errorf("stale env still present: %q", kv)
 		}
 	}

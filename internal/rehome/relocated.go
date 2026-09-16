@@ -45,7 +45,9 @@ func RelocatedRecord(sid, newCwd string) []byte {
 // user can resume it once in claude (which repairs the tail) or pass
 // --force-stamp.
 func AppendRelocated(path, sid, newCwd string, force bool) error {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0)
+	// path is a transcript of the destination root, named <sid>.jsonl
+	// after the session id the caller validated.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND, 0) //nolint:gosec // destination transcript
 	if err != nil {
 		return err
 	}
@@ -120,7 +122,7 @@ func lastLineState(f io.ReaderAt, size int64) (complete, endsWithNewline bool, e
 // unreadable or empty file is an error. PlanRehome and porter.Import ask
 // it before a relocated record is appended (plan §9.8).
 func CheckLastLine(path string) (ok bool, err error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // a transcript of the root being rehomed
 	if err != nil {
 		return false, err
 	}

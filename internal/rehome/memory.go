@@ -584,7 +584,10 @@ func writeTopic(root *os.Root, dst, src string, neutralise bool) error {
 // YAML block (a first line of "---" up to the next "---") is examined;
 // the body is kept byte for byte.
 func readTopic(src string, neutralise bool) ([]byte, error) {
-	in, err := os.Open(src)
+	// src is either a staged memory file (its name validated by
+	// bundle.ClassifyName) or one already in the destination's memory
+	// directory; both are paths bffs built from its own roots.
+	in, err := os.Open(src) //nolint:gosec // see above
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,10 @@
 // Code session can inspect and stage account changes itself: list accounts,
 // explain which account a directory resolves to and why, set the global
 // default, pin/unpin directory rules, estimate per-account usage headroom,
-// and delegate headless runs to another account.
+// delegate headless runs to another account, and browse Claude Code's own
+// tree read-only: the sessions of a project and who ran them, the
+// auto-memory directories and what they reference, and which accounts have
+// answered the folder-trust and external-imports dialogs.
 //
 // Stdout discipline: on the stdio transport stdout carries JSON-RPC
 // exclusively, so nothing in this package may write to stdout. Cobra wiring
@@ -22,7 +25,7 @@ import (
 // model as mcp__bffs__<tool>.
 const ServerName = "bffs"
 
-// New builds the MCP server with all eight tools registered. version feeds
+// New builds the MCP server with all eleven tools registered. version feeds
 // the MCP handshake (callers pass cmd.Version).
 func New(cfgDir, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{
@@ -106,6 +109,38 @@ func New(cfgDir, version string) *mcp.Server {
 			"have no effect. May take ~15 seconds (it probes real shell startup files).",
 		Annotations: readOnly,
 	}, h.checkShim)
+
+	// The session/memory catalog and the trust matrix are read-only twins
+	// of `bffs sessions list --json`, `bffs memory list --json` and
+	// `bffs trust`. Their write counterparts (trust sync, rehome apply,
+	// sessions rm) stay on the CLI on purpose: a human keystroke there is
+	// the approval.
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "list_sessions",
+		Description: "List Claude Code sessions (transcripts) of a project, newest first: id, title, working directory, " +
+			"size, liveness, import origin, and which bffs account ran each one (best-effort attribution from the " +
+			"launch log, lastSessionId and import records - never a guess). Same rows as `bffs sessions list --json`. " +
+			"Pass the project directory explicitly. Never returns transcript content.",
+		Annotations: readOnly,
+	}, h.listSessions)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "list_memories",
+		Description: "List Claude Code auto-memory directories (projects/<slug>/memory) for a project, or every one in " +
+			"the root: files, sizes, pinned flags, and the absolute paths and @-references inside them - the lines to " +
+			"review after a rehome and the includes that can raise the external CLAUDE.md imports dialog. Same rows as " +
+			"`bffs memory list --json`. Never returns file contents.",
+		Annotations: readOnly,
+	}, h.listMemories)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "trust_status",
+		Description: "Report, per bffs account and for ~/.claude.json (home), whether Claude Code's folder-trust and " +
+			"external-CLAUDE.md-imports dialogs were answered for a project - the reason the dialogs come back after " +
+			"switching accounts. Read-only: it never writes; suggested_command names the exact `bffs trust sync` a " +
+			"person can run in a terminal.",
+		Annotations: readOnly,
+	}, h.trustStatus)
 
 	return s
 }

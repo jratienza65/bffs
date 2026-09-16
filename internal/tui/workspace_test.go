@@ -330,3 +330,36 @@ func TestMouse(t *testing.T) {
 		t.Fatalf("a click on the second menu item should open receive, got %T", h.a.top())
 	}
 }
+
+// Resolving a project's auto-memory directory reads the root's settings
+// and derives the project key, which stats every ancestor and runs git
+// inside a repository. The action list asks for it on every key press,
+// so the answer is kept per project and dropped with the rest of the
+// memory state.
+func TestMemoryDirResolvesOncePerProject(t *testing.T) {
+	dir := t.TempDir()
+	const slug = "-tmp-proj"
+	memDir := filepath.Join(dir, slug, transcripts.MemorySubdir)
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ws := goldenApp(t, 120, 32, nil).ws
+	ws.root = transcripts.Root{Dir: dir}
+	ws.project = &projectRow{slug: slug}
+	ws.projectKey = "project-one"
+	ws.memDirCache, ws.memDirFor = "", ""
+
+	if got := ws.memoryDir(); got != memDir {
+		t.Fatalf("memoryDir() = %q, want %q", got, memDir)
+	}
+	if err := os.RemoveAll(memDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := ws.memoryDir(); got != memDir {
+		t.Errorf("memoryDir() looked at the filesystem again: %q", got)
+	}
+	ws.clearMemory()
+	if got := ws.memoryDir(); got != "" {
+		t.Errorf("after clearMemory, memoryDir() = %q, want the directory to be resolved again (it is gone now)", got)
+	}
+}

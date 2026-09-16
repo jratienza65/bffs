@@ -93,6 +93,8 @@ type workspace struct {
 	mem          *transcripts.Memory
 	memDir       string
 	memLoadedFor string
+	memDirCache  string // what memoryDir() answered, and for which project
+	memDirFor    string
 
 	vp          viewport.Model
 	previewKey  string
@@ -289,11 +291,21 @@ func (ws *workspace) projectLabel() string {
 }
 
 // memoryDir is the project's memory directory when it has one.
+// memoryDir is the project's auto-memory directory, resolved once per
+// project. Resolving it reads the root's settings files and derives the
+// project key, which stats every ancestor of the project directory and
+// runs git when one of them is a repository — and actions() asks for it
+// on every key press, where that cost showed up as a fifth of a second
+// per keystroke (BenchmarkCursorMove).
 func (ws *workspace) memoryDir() string {
 	if ws.project == nil {
 		return ""
 	}
-	return memoryDirFor(ws.root, ws.project.slug, ws.project.cwd)
+	if ws.memDirFor != ws.projectKey {
+		ws.memDirFor = ws.projectKey
+		ws.memDirCache = memoryDirFor(ws.root, ws.project.slug, ws.project.cwd)
+	}
+	return ws.memDirCache
 }
 
 // setRoots fills panel 1 from the accounts and roots and starts the
@@ -422,6 +434,7 @@ func (ws *workspace) clearSessions() {
 
 func (ws *workspace) clearMemory() {
 	ws.mem, ws.memDir, ws.memLoadedFor = nil, "", ""
+	ws.memDirCache, ws.memDirFor = "", ""
 	if ws.tab == tabMemory {
 		ws.itemsKey = ""
 	}
@@ -587,6 +600,7 @@ func (ws *workspace) refresh() tea.Cmd {
 		delete(ws.svc.memories, k)
 	}
 	ws.sessLoadedFor, ws.memLoadedFor = "", ""
+	ws.memDirCache, ws.memDirFor = "", ""
 	ws.itemsKey, ws.previewKey = "", ""
 	ws.pending = map[string]bool{}
 	if ws.rootKey == "" {

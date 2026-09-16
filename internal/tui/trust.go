@@ -220,6 +220,75 @@ func trustRowLabel(name string) string {
 	return transcripts.Sanitize(name)
 }
 
+// trustCols is the matrix's column layout for one pane width. The table
+// wants 84 cells and the main pane gives about 73 at 120 columns, so a
+// fixed layout loses its last columns to the truncation at the end of
+// the row — silently, and with the header cut mid-word. The columns
+// narrow in the order they can afford to, and the two count columns are
+// dropped (and named in the legend) before anything is cut.
+type trustCols struct {
+	account, folder, external, tools, mcp int
+	showTools, showMCP                    bool
+}
+
+func trustColumns(width int) trustCols {
+	c := trustCols{account: 18, folder: 30, external: 17, tools: 6, mcp: 9, showTools: true, showMCP: true}
+	budget := max(0, width-4) // the marker, its space, and the row prefix
+	fits := func() bool { return c.width() <= budget }
+	switch {
+	case fits():
+	case func() bool { c.folder = 24; return fits() }():
+	case func() bool { c.account, c.external = 14, 11; return fits() }():
+	case func() bool { c.showMCP = false; return fits() }():
+	case func() bool { c.showTools = false; return fits() }():
+	default:
+		c.folder = max(9, budget-(c.account+c.external+2))
+	}
+	return c
+}
+
+func (c trustCols) width() int {
+	w := c.account + 1 + c.folder + 1 + c.external
+	if c.showTools {
+		w += 1 + c.tools
+	}
+	if c.showMCP {
+		w += 1 + c.mcp
+	}
+	return w
+}
+
+// row lays one line of the matrix out, header or account.
+func (c trustCols) row(account, folder, external, tools, mcp string) string {
+	line := pad(account, c.account) + " " + pad(folder, c.folder) + " " + pad(external, c.external)
+	if c.showTools {
+		line += " " + pad(tools, c.tools)
+	}
+	if c.showMCP {
+		line += " " + mcp
+	}
+	return line
+}
+
+// externalHeader spells the third column's name to the width it got.
+func (c trustCols) externalHeader() string {
+	if c.external < len("EXTERNAL-IMPORTS") {
+		return "EXT-IMPORTS"
+	}
+	return "EXTERNAL-IMPORTS"
+}
+
+// hidden names the columns this width has no room for.
+func (c trustCols) hidden() string {
+	switch {
+	case !c.showTools && !c.showMCP:
+		return "the tools and mcp columns are hidden"
+	case !c.showMCP:
+		return "the mcp column is hidden"
+	}
+	return ""
+}
+
 func folderCell(st trust.Status) string {
 	switch st.Folder {
 	case trust.Accepted:
@@ -290,17 +359,18 @@ func (s *trustScreen) View(width, height int) string {
 	if s.err != nil {
 		return styleError.Render(truncate(transcripts.Sanitize(s.err.Error()), width))
 	}
+	c := trustColumns(width)
 	lines := []string{
 		truncate(fmt.Sprintf("project:  %s        (key: %s)", shortPath(s.key), transcripts.Sanitize(s.key)), width),
 		"",
-		"  " + pad("ACCOUNT", 18) + " " + pad("FOLDER-TRUST", 30) + " " + pad("EXTERNAL-IMPORTS", 17) + " " + pad("TOOLS", 6) + " MCP",
+		"  " + c.row("ACCOUNT", "FOLDER-TRUST", c.externalHeader(), "TOOLS", "MCP"),
 	}
 	for i, st := range s.statuses {
 		marker := " "
 		if st.Account == s.active {
 			marker = "*"
 		}
-		line := marker + " " + pad(trustRowLabel(st.Account), 18) + " " + pad(folderCell(st), 30) + " " + pad(externalCell(st.External), 17) + " " + pad(countCell(st.Tools, ""), 6) + " " + countCell(st.MCPEnabled, " enabled")
+		line := marker + " " + c.row(trustRowLabel(st.Account), folderCell(st), externalCell(st.External), countCell(st.Tools, ""), countCell(st.MCPEnabled, " enabled"))
 		line = pad(line, max(0, width-2))
 		if i == s.cursor && s.state != trustConfirm {
 			line = styleCursor.Render("> " + line)
@@ -309,7 +379,11 @@ func (s *trustScreen) View(width, height int) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "", styleFaint.Render(truncate(`"-" = never answered on that account (claude will ask); "inherited" = a parent directory is trusted (claude will not ask); * = the active account`, width)))
+	legend := `"-" = never answered on that account (claude will ask); "inherited" = a parent directory is trusted (claude will not ask); * = the active account`
+	if hidden := c.hidden(); hidden != "" {
+		legend = hidden + " — widen the pane (+) to see them. " + legend
+	}
+	lines = append(lines, "", styleFaint.Render(truncate(legend, width)))
 	if s.state == trustConfirm && len(s.statuses) > 0 {
 		row := s.statuses[s.cursor].Account
 		lines = append(lines, "", fmt.Sprintf("project %s → %s (from %s):", shortPath(s.key), trustRowLabel(row), trustRowLabel(s.source)))

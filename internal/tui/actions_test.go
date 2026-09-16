@@ -379,6 +379,32 @@ func TestRehomeScreen(t *testing.T) {
 
 // The trust screen renders the per-account matrix and, on a confirmed
 // row, carries the best source's answers into that account's file.
+// The matrix wants more cells than the main pane has: its columns
+// narrow, then the two count columns drop out and the legend says so —
+// the row is never cut mid-cell with its last columns lost in silence.
+func TestTrustColumnsFitTheirPane(t *testing.T) {
+	prevCols := trustColumns(1000)
+	for _, width := range []int{120, 100, 84, 73, 60, 48, 40} {
+		c := trustColumns(width)
+		if got, budget := c.width(), width-4; got > budget {
+			t.Errorf("at %d columns the matrix is %d cells wide, budget %d", width, got, budget)
+		}
+		if c.account > prevCols.account || c.folder > prevCols.folder {
+			t.Errorf("at %d columns a column grew as the pane shrank: %+v after %+v", width, c, prevCols)
+		}
+		if !c.showMCP && c.hidden() == "" {
+			t.Errorf("at %d columns a column is hidden and the legend does not say so", width)
+		}
+		prevCols = c
+	}
+	if c := trustColumns(48); c.showMCP || c.showTools {
+		t.Errorf("48 columns has no room for the count columns: %+v", c)
+	}
+	if c := trustColumns(1000); !c.showMCP || !c.showTools || c.externalHeader() != "EXTERNAL-IMPORTS" {
+		t.Errorf("a wide pane should get the whole matrix: %+v", c)
+	}
+}
+
 func TestTrustScreen(t *testing.T) {
 	f := newFixture(t)
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))

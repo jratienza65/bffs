@@ -1,14 +1,14 @@
 bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
-┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ export ──────────────────────────────────────────────────────────────────┐
-│   alpha                       ● active │ │ wrote ~/bffs-mac-a.bffs (5.2 MB, 3 sessions, 2 memory files, bundle 6f1e2 │
-│   beta                         partial │ │ c0a)                                                                      │
-│   work                            full │ │                                                                           │
-│                                        │ │ On the other machine: bffs import --from bffs-mac-a.bffs                  │
-├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
-│ 3 projects in /home/d/.claude/projects │ │                                                                           │
-│ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ copy to account ─────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ copy the whole project /home/d/build/projects/bffs and its memory  from…  │
+│   beta                         partial │ │                                                                           │
+│   work                            full │ │   ACCOUNT          TYPE           DESTINATION                             │
+│                                        │ │   alpha            oauth/partial  already shared under partial isolation… │
+├─ 2 projects ───────────────────── 1/3 ─┤ │   beta             oauth/partial  already shared under partial isolation… │
+│ 3 projects in /home/d/.claude/projects │ │ > work             oauth/full     account: work  (/home/d/bffs/sessions/… │
+│ >   /home/d/build/pr…   3 mem 1h ago   │ │   home             home           already shared under partial isolation… │
 │     /home/d/build/si…   4     1d ago   │ │                                                                           │
-│   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │ enter chooses the destination · greyed rows share the source pool · esc…  │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │
@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 
-↑/k up · ↓/j down · pgup page up · pgdown page down · esc done · x more · ? keys · q quit
+↑/k up · ↓/j down · enter choose · esc back · x more · ? keys · q quit

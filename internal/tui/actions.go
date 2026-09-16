@@ -196,10 +196,14 @@ func (svc *services) homeJSON() string {
 	return filepath.Join(filepath.Dir(svc.homeClaudeDir), ".claude.json")
 }
 
+// osHostname is the hostname lookup, a seam so a rendered frame can be
+// pinned in a golden without carrying the machine it was written on.
+var osHostname = os.Hostname
+
 // hostIdent is the hostname the way a manifest constrains it
 // (^[A-Za-z0-9_.-]{1,64}$), "host" when nothing survives.
 func hostIdent() string {
-	h, err := os.Hostname()
+	h, err := osHostname()
 	if err != nil {
 		return "host"
 	}

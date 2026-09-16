@@ -1,15 +1,15 @@
 bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
-┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ export ──────────────────────────────────────────────────────────────────┐
-│   alpha                       ● active │ │ wrote ~/bffs-mac-a.bffs (5.2 MB, 3 sessions, 2 memory files, bundle 6f1e2 │
-│   beta                         partial │ │ c0a)                                                                      │
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ transcript 1e005053 ─────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ 4 records shown, 1 hidden (meta, sidechain, progress)                     │
+│   beta                         partial │ │ 09:00 > add a golden harness for the browser                              │
 │   work                            full │ │                                                                           │
-│                                        │ │ On the other machine: bffs import --from bffs-mac-a.bffs                  │
-├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
-│ 3 projects in /home/d/.claude/projects │ │                                                                           │
+│                                        │ │ 09:00 < Thirteen frames and a fit sweep. The fixture never touches the fi │
+├─ 2 projects ───────────────────── 1/3 ─┤ │ lesystem.                                                                 │
+│ 3 projects in /home/d/.claude/projects │ │         ⚙ Write file_path=internal/tui/frame_test.go                      │
 │ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
-│     /home/d/build/si…   4     1d ago   │ │                                                                           │
+│     /home/d/build/si…   4     1d ago   │ │         ⇠ result: wrote 407 lines                                         │
 │   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
-│                                        │ │                                                                           │
+│                                        │ │ 09:02 — summary: Golden frames and a fit sweep for the browser            │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │

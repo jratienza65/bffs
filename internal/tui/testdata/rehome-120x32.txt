@@ -1,9 +1,9 @@
 bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
-┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ export ──────────────────────────────────────────────────────────────────┐
-│   alpha                       ● active │ │ wrote ~/bffs-mac-a.bffs (5.2 MB, 3 sessions, 2 memory files, bundle 6f1e2 │
-│   beta                         partial │ │ c0a)                                                                      │
-│   work                            full │ │                                                                           │
-│                                        │ │ On the other machine: bffs import --from bffs-mac-a.bffs                  │
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ rehome ──────────────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ rehome 1 session  in shared pool: alpha, beta                             │
+│   beta                         partial │ │                                                                           │
+│   work                            full │ │ reading the sessions' directories and looking for candidates…             │
+│                                        │ │                                                                           │
 ├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
 │ 3 projects in /home/d/.claude/projects │ │                                                                           │
 │ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
@@ -28,5 +28,5 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │    ↓ prompt from the other m… 9d ago   │ │                                                                           │
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
-
-↑/k up · ↓/j down · pgup page up · pgdown page down · esc done · x more · ? keys · q quit
+loading…
+esc back · x more · ? keys · q quit

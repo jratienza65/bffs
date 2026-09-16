@@ -1,14 +1,14 @@
 bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
 ┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ keys ────────────────────────────────────────────────────────────────────┐
-│   alpha                       ● active │ │                                                                           │
-│   beta                         partial │ │                                                                           │
-│   work                            full │ │                                                                           │
-│                                        │ │                                                                           │
-├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
-│ 3 projects in /home/d/.claude/projects │ │                                                                           │
-│ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
-│     /home/d/build/si…   4     1d ago   │ │                                                                           │
-│   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
+│   alpha                       ● active │ │ 1         accounts           ↑/k    up                …                   │
+│   beta                         partial │ │ 2         projects           ↓/j    down                                  │
+│   work                            full │ │ 3         sessions/memory    pgup   page up                               │
+│                                        │ │ tab       next panel         pgdown page down                             │
+├─ 2 projects ───────────────────── 1/3 ─┤ │ shift+tab prev panel         enter  open                                  │
+│ 3 projects in /home/d/.claude/projects │ │ ]         memory tab         space  mark                                  │
+│ >   /home/d/build/pr…   3 mem 1h ago   │ │ [         sessions tab       a      mark all                              │
+│     /home/d/build/si…   4     1d ago   │ │ esc       back               space  switch to account                     │
+│   ! /machine-a/src/p…   1 mem 9d ago   │ │                              /      filter                                │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │
 │                                        │ │                                                                           │

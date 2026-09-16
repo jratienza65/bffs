@@ -1,11 +1,11 @@
 bffs test  alpha › /home/d/build/projects/bffs › sessions                                                               
-┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ export ──────────────────────────────────────────────────────────────────┐
-│   alpha                       ● active │ │ wrote ~/bffs-mac-a.bffs (5.2 MB, 3 sessions, 2 memory files, bundle 6f1e2 │
-│   beta                         partial │ │ c0a)                                                                      │
-│   work                            full │ │                                                                           │
-│                                        │ │ On the other machine: bffs import --from bffs-mac-a.bffs                  │
-├─ 2 projects ───────────────────── 1/3 ─┤ │                                                                           │
-│ 3 projects in /home/d/.claude/projects │ │                                                                           │
+┌─ 1 accounts ───────────────────── 1/3 ─┐ ┌─ transfer wizard ─────────────────────────────────────────────────────────┐
+│   alpha                       ● active │ │ step 1 of 4  What do you want to do?                                      │
+│   beta                         partial │ │                                                                           │
+│   work                            full │ │ > Send sessions from this machine                                         │
+│                                        │ │       serve them over the local network with a pairing code, write a .bf… │
+├─ 2 projects ───────────────────── 1/3 ─┤ │   Receive sessions from another machine                                   │
+│ 3 projects in /home/d/.claude/projects │ │       from a machine running the serve, or from a .bffs file that reache… │
 │ >   /home/d/build/pr…   3 mem 1h ago   │ │                                                                           │
 │     /home/d/build/si…   4     1d ago   │ │                                                                           │
 │   ! /machine-a/src/p…   1 mem 9d ago   │ │                                                                           │
@@ -29,4 +29,4 @@ bffs test  alpha › /home/d/build/projects/bffs › sessions
 │                                        │ │                                                                           │
 └────────────────────────────────────────┘ └───────────────────────────────────────────────────────────────────────────┘
 
-↑/k up · ↓/j down · pgup page up · pgdown page down · esc done · x more · ? keys · q quit
+↑/k up · ↓/j down · enter choose · esc back · x more · ? keys · q quit

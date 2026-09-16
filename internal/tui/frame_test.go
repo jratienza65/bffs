@@ -126,6 +126,9 @@ func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("BFFS_THEME", "")
 	goldenTZ(t)
+	prevHost := osHostname
+	osHostname = func() (string, error) { return "mac-a", nil }
+	t.Cleanup(func() { osHostname = prevHost })
 	svc := goldenServices()
 	a := newApp(svc)
 	ws := a.ws
@@ -183,6 +186,12 @@ func goldenApp(t testing.TB, w, h int, tweak func(*app)) *app {
 		ws.panels[panelItems].setStatus("2 files · 1 pinned · " + shortPath(ws.mem.Dir))
 	}
 	seedPreview(a)
+	// An overlay a tweak put on the stack gets its size the way push
+	// would have given it one; its Init is deliberately not run, so no
+	// state here is waiting on an operation.
+	if a.top() != nil {
+		_ = a.forward(a.mainSize())
+	}
 	ws.layout()
 	return a
 }
@@ -210,6 +219,16 @@ func seedPreview(a *app) {
 	ws.vp.SetContentLines(lines)
 	ws.vp.GotoTop()
 }
+
+// goldenTranscript is a few records of a conversation in Claude's own
+// shape, rendered by the real renderer so the golden shows what the
+// viewer draws rather than a fixture of its own.
+const goldenTranscript = `{"type":"user","timestamp":"2026-08-24T09:00:03Z","message":{"role":"user","content":"add a golden harness for the browser"}}
+{"type":"assistant","timestamp":"2026-08-24T09:00:07Z","message":{"role":"assistant","content":[{"type":"text","text":"Thirteen frames and a fit sweep. The fixture never touches the filesystem."},{"type":"tool_use","name":"Write","input":{"file_path":"internal/tui/frame_test.go"}}]}}
+{"type":"user","timestamp":"2026-08-24T09:00:31Z","isMeta":true,"message":{"role":"user","content":"<system-reminder>hidden</system-reminder>"}}
+{"type":"user","timestamp":"2026-08-24T09:00:32Z","message":{"role":"user","content":[{"type":"tool_result","content":"wrote 407 lines"}]}}
+{"type":"summary","timestamp":"2026-08-24T09:02:00Z","summary":"Golden frames and a fit sweep for the browser"}
+`
 
 // goldenDetail is what loadDetail would have gathered for a row: the
 // artifacts Claude keeps beside a transcript, sized and present.
@@ -348,6 +367,40 @@ func goldenStates() map[string]func(*app) {
 		},
 		"status-error": func(a *app) {
 			a.status, a.statusErr = "refusing to pair with 203.0.113.5: not on a local network of this machine", true
+		},
+		// The action overlays: the screens most likely to overflow, each
+		// drawn over the workspace at the step it opens on.
+		"export": func(a *app) { a.stack = append(a.stack, newExportScreen(a.svc, a.ws.target())) },
+		"copy":   func(a *app) { a.stack = append(a.stack, newCopyScreen(a.svc, a.ws.target())) },
+		"rehome": func(a *app) {
+			a.stack = append(a.stack, newRehomeScreen(a.svc, a.ws.target(), []transcripts.Session{a.ws.sessRows[0].s}))
+		},
+		"trust": func(a *app) {
+			cwd := a.ws.projectCwd()
+			a.stack = append(a.stack, newTrustScreen(a.svc, cwd))
+			var statuses []trust.Status
+			for _, ad := range goldenDrift().accounts {
+				statuses = append(statuses, ad.status)
+			}
+			_ = a.forward(trustLoadedMsg{project: cwd, key: cwd, statuses: statuses, files: map[string]string{
+				"alpha": goldenPool + "/.claude.json",
+				"beta":  goldenPool + "/.claude.json",
+				"home":  "/home/d/.claude.json",
+			}})
+		},
+		"receive": func(a *app) { a.stack = append(a.stack, newReceiveScreen(a.svc, a.ws.root, a.ws.account)) },
+		"transcript": func(a *app) {
+			sess := a.ws.sessRows[0].s
+			a.stack = append(a.stack, newTranscriptScreen(a.svc, sess))
+			lines, records, hidden, truncated, err := renderTranscript(strings.NewReader(goldenTranscript), 1<<20)
+			_ = a.forward(transcriptLoadedMsg{path: sess.Path, lines: lines, records: records, hidden: hidden, truncated: truncated, err: err})
+		},
+		"wizard": func(a *app) {
+			var projects []*projectRow
+			for _, r := range a.ws.panels[panelProjects].rows() {
+				projects = append(projects, r.(*projectRow))
+			}
+			a.stack = append(a.stack, newWizardScreen(a.svc, a.ws.target(), a.ws.root, a.ws.perspectiveAccount(), true, projects))
 		},
 		"filtered": func(a *app) {
 			_ = a.ws.setFocus(panelItems)

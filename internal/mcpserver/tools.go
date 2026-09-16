@@ -33,6 +33,9 @@ type handlers struct {
 	// homeClaudeDir overrides the shared ~/.claude for account_usage; empty
 	// means the real one. A test seam — New() leaves it empty.
 	homeClaudeDir string
+	// version is the bffs version export_bundle stamps into a manifest
+	// (cmd.Version, passed to New).
+	version string
 }
 
 type ListAccountsIn struct{}

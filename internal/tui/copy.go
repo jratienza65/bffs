@@ -110,7 +110,12 @@ func newCopyScreen(svc *services, tgt actionTarget) *copyScreen {
 }
 
 func (s *copyScreen) Init() tea.Cmd { return nil }
-func (s *copyScreen) Title() string { return "copy to account" }
+func (s *copyScreen) Title() string {
+	if s.tgt.only == "memories" {
+		return "sync memory to account"
+	}
+	return "copy to account"
+}
 func (s *copyScreen) running() bool { return s.op.active() }
 
 func (s *copyScreen) Keys() []key.Binding {
@@ -305,7 +310,11 @@ func (s *copyScreen) View(width, height int) string {
 		for _, w := range s.warnings {
 			lines = append(lines, "warning: "+w)
 		}
-		lines = append(lines, "", fmt.Sprintf("copy %s to %s? [y/N]", countNoun(len(s.sel.Sessions), "session"), transcripts.Sanitize(s.dest.name)))
+		what := countNoun(len(s.sel.Sessions), "session")
+		if len(s.sel.Sessions) == 0 {
+			what = countNoun(len(s.sel.Memories), "memory dir") + " (merged into the destination's memory)"
+		}
+		lines = append(lines, "", fmt.Sprintf("copy %s to %s? [y/N]", what, transcripts.Sanitize(s.dest.name)))
 		return joinLines(lines, width)
 	}
 	lines := []string{head, "", s.prog.view(width), ""}

@@ -7,32 +7,33 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
 
-// app is the root model: a stack of screens, the shared services, the
-// terminal size, a one-line status and the help bubble. Navigation
-// happens only through messages (push/pop/replace); the screen on top
-// gets every message the app does not consume itself.
+// app is the root model: the workspace (panels + preview), a stack of
+// overlays drawn in the main pane (action screens, results, the menu,
+// the keys), the terminal size, a one-line status and the help bubble.
+// Navigation between overlays happens only through messages
+// (push/pop/replace); the overlay on top gets every message the app
+// does not consume itself, the workspace gets the data messages.
 type app struct {
 	svc    *services
-	stack  []Screen
+	ws     *workspace
+	stack  []Screen // overlays, bottom to top
 	width  int
 	height int
 
 	status    string
 	statusErr bool
 	help      help.Model
-	showHelp  bool
 	quitting  bool
 }
 
 func newApp(svc *services) *app {
 	h := help.New()
 	h.ShortSeparator = " · "
-	return &app{svc: svc, help: h}
+	return &app{svc: svc, ws: newWorkspace(svc), help: h}
 }
 
 // Init hands the app the roots the services already enumerated; the
@@ -42,7 +43,7 @@ func (a *app) Init() tea.Cmd {
 	return func() tea.Msg { return rootsLoadedMsg{roots: svc.roots, warnings: svc.warnings} }
 }
 
-// top is the visible screen, nil before the first push.
+// top is the visible overlay, nil when the workspace has the keys.
 func (a *app) top() Screen {
 	if len(a.stack) == 0 {
 		return nil
@@ -50,25 +51,24 @@ func (a *app) top() Screen {
 	return a.stack[len(a.stack)-1]
 }
 
-// busy reports whether the top screen runs a long operation: navigation
-// is then blocked and every key is the screen's (esc cancels, q asks
-// whether to quit anyway).
+// busy reports whether the top overlay runs a long operation:
+// navigation is then blocked and every key is the overlay's (esc
+// cancels, q asks whether to quit anyway).
 func (a *app) busy() bool {
 	r, ok := a.top().(running)
 	return ok && r.running()
 }
 
-// contentHeight is what remains for the screen after the header, the
-// status line and the help lines.
-func (a *app) contentHeight() int {
-	return max(0, a.height-2-lipgloss.Height(a.helpView()))
+// contentHeight is what remains for the frame after the header, the
+// status line and the help line.
+func (a *app) contentHeight() int { return max(0, a.height-3) }
+
+// mainSize is the size an overlay draws into: the main pane's inside.
+func (a *app) mainSize() tea.WindowSizeMsg {
+	return tea.WindowSizeMsg{Width: a.ws.mainWidth(), Height: a.ws.bodyHeight()}
 }
 
-func (a *app) sizeMsg() tea.WindowSizeMsg {
-	return tea.WindowSizeMsg{Width: a.width, Height: a.contentHeight()}
-}
-
-// forward sends msg to the top screen and stores what it returns.
+// forward sends msg to the top overlay and stores what it returns.
 func (a *app) forward(msg tea.Msg) tea.Cmd {
 	s := a.top()
 	if s == nil {
@@ -87,7 +87,7 @@ func (a *app) push(s Screen) tea.Cmd {
 	a.status, a.statusErr = "", false
 	init := s.Init()
 	if a.width > 0 {
-		return tea.Batch(init, a.forward(a.sizeMsg()))
+		return tea.Batch(init, a.forward(a.mainSize()))
 	}
 	return init
 }
@@ -95,20 +95,22 @@ func (a *app) push(s Screen) tea.Cmd {
 func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		// A terminal that cannot report its size (a bare pty) reads as
+		// 0×0; draw for 80×24 rather than nothing.
+		if msg.Width <= 0 || msg.Height <= 0 {
+			msg.Width, msg.Height = 80, 24
+		}
 		a.width, a.height = msg.Width, msg.Height
 		a.help.SetWidth(msg.Width)
-		return a, a.forward(a.sizeMsg())
+		a.ws.setSize(msg.Width, a.contentHeight())
+		return a, a.forward(a.mainSize())
 
 	case rootsLoadedMsg:
 		var cmds []tea.Cmd
 		if len(msg.warnings) > 0 {
 			cmds = append(cmds, status("warning: "+strings.Join(msg.warnings, "; ")))
 		}
-		if len(msg.roots) == 1 {
-			cmds = append(cmds, a.push(newProjectsScreen(a.svc, msg.roots[0])))
-		} else {
-			cmds = append(cmds, a.push(newRootsScreen(a.svc, msg.roots)))
-		}
+		cmds = append(cmds, a.ws.setRoots(msg.roots))
 		return a, tea.Batch(cmds...)
 
 	case pushScreenMsg:
@@ -121,20 +123,22 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.push(msg.screen)
 
 	case popScreenMsg:
-		if len(a.stack) <= 1 {
+		if len(a.stack) == 0 {
 			return a, nil
 		}
 		a.stack = a.stack[:len(a.stack)-1]
 		a.status, a.statusErr = "", false
-		cmd := a.forward(a.sizeMsg())
+		cmd := a.forward(a.mainSize())
 		if msg.refresh {
-			// An action changed the tree: every cached catalog is stale.
-			for k := range a.svc.memories {
-				delete(a.svc.memories, k)
-			}
-			cmd = tea.Batch(cmd, a.forward(refreshMsg{}))
+			cmd = tea.Batch(cmd, a.ws.Update(refreshMsg{}))
 		}
 		return a, cmd
+
+	case menuChoiceMsg:
+		if _, ok := a.top().(*menuScreen); ok {
+			a.stack = a.stack[:len(a.stack)-1]
+		}
+		return a, msg.run()
 
 	case statusMsg:
 		if msg.err != nil {
@@ -157,16 +161,18 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return a, a.handleKey(msg)
 	}
-	return a, a.forward(msg)
+	// Data messages: the workspace's and the overlay's are disjoint
+	// types, so both see everything else.
+	return a, tea.Batch(a.ws.Update(msg), a.forward(msg))
 }
 
 // handleKey is the key policy: while an operation runs every key is the
-// screen's (ctrl+c and esc cancel it, q asks before quitting); otherwise
-// ctrl+c always quits; a screen typing into a text field owns everything
-// else; then q quits, ? toggles help, esc goes back unless the screen
-// claims it (a filter to clear, a confirmation to decline), a reserved
-// action key the screen does not bind answers with the hint, and the
-// rest is the screen's.
+// overlay's (ctrl+c and esc cancel it, q asks before quitting);
+// otherwise ctrl+c always quits; an overlay or panel typing into a text
+// field owns everything else; then q quits, ? opens or closes the keys,
+// esc closes an overlay, a reserved action key an overlay does not bind
+// answers with the hint, and the rest is the overlay's or the
+// workspace's.
 func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if a.busy() {
 		return a.forward(msg)
@@ -175,52 +181,62 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		a.quitting = true
 		return tea.Quit
 	}
-	s := a.top()
-	if c, ok := s.(inputCapturer); ok && c.capturingInput() {
+	if s := a.top(); s != nil {
+		if c, ok := s.(inputCapturer); ok && c.capturingInput() {
+			return a.forward(msg)
+		}
+		screenKeys := s.Keys()
+		switch {
+		case key.Matches(msg, keys.Quit) && !key.Matches(msg, screenKeys...):
+			a.quitting = true
+			return tea.Quit
+		case key.Matches(msg, keys.Help) && !key.Matches(msg, screenKeys...):
+			if _, ok := s.(*helpScreen); ok {
+				return popScreen()
+			}
+			return a.push(newHelpScreen(a.overlayHelpGroups(s)))
+		case key.Matches(msg, keys.Back) && !key.Matches(msg, screenKeys...):
+			return popScreen()
+		case key.Matches(msg, reservedKeys) && !key.Matches(msg, screenKeys...):
+			return status(reservedHint)
+		}
 		return a.forward(msg)
 	}
-	var screenKeys []key.Binding
-	if s != nil {
-		screenKeys = s.Keys()
+	if a.ws.capturing() {
+		return a.ws.handleKey(msg)
 	}
 	switch {
-	case key.Matches(msg, keys.Quit) && !key.Matches(msg, screenKeys...):
+	case key.Matches(msg, keys.Quit):
 		a.quitting = true
 		return tea.Quit
-	case key.Matches(msg, keys.Help) && !key.Matches(msg, screenKeys...):
-		a.showHelp = !a.showHelp
-		a.help.ShowAll = a.showHelp
-		return a.forward(a.sizeMsg())
-	case key.Matches(msg, keys.Back) && !key.Matches(msg, screenKeys...):
-		if len(a.stack) <= 1 {
-			return status("q quits")
-		}
-		return popScreen()
-	case key.Matches(msg, reservedKeys) && !key.Matches(msg, screenKeys...):
-		return status(reservedHint)
+	case key.Matches(msg, keys.Help):
+		return a.push(newHelpScreen(a.ws.helpGroups()))
 	}
-	return a.forward(msg)
+	return a.ws.handleKey(msg)
 }
 
-// globalKeys are appended to every screen's help line.
+// overlayHelpGroups lists an overlay's keys and the globals.
+func (a *app) overlayHelpGroups(s Screen) [][]key.Binding {
+	return [][]key.Binding{s.Keys(), globalKeys(), {reservedKeys}}
+}
+
+// globalKeys are appended to every help line.
 func globalKeys() []key.Binding {
-	return []key.Binding{keys.Back, keys.Help, keys.Quit}
+	return []key.Binding{keys.Help, keys.Quit}
 }
 
 func (a *app) helpView() string {
-	s := a.top()
 	var ks []key.Binding
-	if s != nil {
-		ks = s.Keys()
+	if s := a.top(); s != nil {
+		ks = append(ks, s.Keys()...)
+		ks = append(ks, keys.Back)
+	} else {
+		ks = a.ws.keys()
 	}
-	all := append(append([]key.Binding{}, ks...), globalKeys()...)
-	if a.showHelp {
-		return a.help.FullHelpView([][]key.Binding{ks, globalKeys(), {reservedKeys}})
-	}
-	return a.help.ShortHelpView(all)
+	return a.help.ShortHelpView(append(ks, globalKeys()...))
 }
 
-// breadcrumb joins the stack's titles.
+// breadcrumb joins the overlays' titles.
 func (a *app) breadcrumb() string {
 	parts := make([]string, 0, len(a.stack))
 	for _, s := range a.stack {
@@ -234,24 +250,30 @@ func (a *app) View() tea.View {
 		return tea.NewView("")
 	}
 	header := fmt.Sprintf("bffs %s", a.svc.version)
-	if crumb := a.breadcrumb(); crumb != "" {
+	if crumb := a.ws.crumb(); crumb != "" {
 		header += "  " + crumb
 	}
 	header = styleHeader.Render(truncate(header, a.width))
 
-	body := ""
+	var main []string
+	var mainTitle string
 	if s := a.top(); s != nil {
-		body = s.View(a.width, a.contentHeight())
-	} else {
-		body = styleFaint.Render("loading…")
+		size := a.mainSize()
+		main = strings.Split(fitLines(s.View(size.Width, size.Height), size.Width, size.Height), "\n")
+		mainTitle = a.breadcrumb()
 	}
+	body := a.ws.View(a.width, a.contentHeight(), main, mainTitle, main != nil)
 	body = fitLines(body, a.width, a.contentHeight())
 
 	// Errors reach the status line from every engine; sanitised like
 	// everything else that is rendered.
 	statusLine := transcripts.Sanitize(a.status)
-	if l, ok := a.top().(loader); ok && l != nil && l.loading() && statusLine == "" {
-		statusLine = "loading…"
+	if statusLine == "" {
+		if l, ok := a.top().(loader); ok && l != nil && l.loading() {
+			statusLine = "loading…"
+		} else if a.top() == nil && a.ws.previewBusy {
+			statusLine = "loading…"
+		}
 	}
 	if a.statusErr {
 		statusLine = styleError.Render(truncate(statusLine, a.width))
@@ -259,7 +281,7 @@ func (a *app) View() tea.View {
 		statusLine = styleStatus.Render(truncate(statusLine, a.width))
 	}
 
-	v := tea.NewView(strings.Join([]string{header, body, statusLine, a.helpView()}, "\n"))
+	v := tea.NewView(strings.Join([]string{header, body, statusLine, truncate(a.helpView(), a.width)}, "\n"))
 	v.AltScreen = true
 	v.WindowTitle = "bffs " + a.svc.start
 	return v

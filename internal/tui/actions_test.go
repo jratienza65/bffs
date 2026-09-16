@@ -93,16 +93,17 @@ func (f *fixture) homeRoot(svc *services) transcripts.Root {
 	return root
 }
 
-// openSessions starts the harness and opens the fixture's project.
-func (f *fixture) openSessions() (*harness, *sessionsScreen) {
+// openSessions starts the harness with the sessions panel focused on
+// the fixture's project.
+func (f *fixture) openSessions() (*harness, *workspace) {
 	f.t.Helper()
 	h := f.start("sessions")
-	h.keys("enter")
-	s, ok := h.a.top().(*sessionsScreen)
-	if !ok {
-		f.t.Fatalf("enter on a project should open its sessions, got %T", h.a.top())
+	h.keys("3")
+	ws := h.a.ws
+	if ws.focus != panelItems || ws.tab != tabSessions || h.a.top() != nil {
+		f.t.Fatalf("3 should focus the sessions panel: focus=%d tab=%d top=%T", ws.focus, ws.tab, h.a.top())
 	}
-	return h, s
+	return h, ws
 }
 
 // drive feeds msg to the screen and runs the commands it returns the way
@@ -210,8 +211,8 @@ func TestExportFileScreen(t *testing.T) {
 	wantAll(t, h.view(), short8(m.BundleID))
 	// esc closes the result and reloads the sessions underneath.
 	h.keys("esc")
-	if _, ok := h.a.top().(*sessionsScreen); !ok {
-		t.Fatalf("esc on the result should pop to sessions, got %T", h.a.top())
+	if h.a.top() != nil {
+		t.Fatalf("esc on the result should pop to the workspace, got %T", h.a.top())
 	}
 	wantAll(t, h.view(), "first prompt of one")
 }
@@ -228,9 +229,9 @@ func TestCopyScreen(t *testing.T) {
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	f.memory()
 	h := f.start("sessions")
-	h.keys("enter", "enter") // roots → home projects → sessions
-	if _, ok := h.a.top().(*sessionsScreen); !ok {
-		t.Fatalf("expected the sessions screen, got %T", h.a.top())
+	h.keys("3") // the home root's project, sessions panel
+	if h.a.top() != nil || h.a.ws.root.Owner != "" {
+		t.Fatalf("expected the home root's sessions panel, got %T root=%q", h.a.top(), h.a.ws.root.Owner)
 	}
 	h.keys("c")
 	sc, ok := h.a.top().(*copyScreen)
@@ -303,15 +304,11 @@ func TestRehomeScreen(t *testing.T) {
 		map[string]any{"type": "assistant", "sessionId": sid1, "message": map[string]any{"role": "assistant", "content": "ok"}})
 	h := f.start("sessions")
 	wantAll(t, h.view(), "! "+shortPath(old))
-	h.keys("enter")
-	s, ok := h.a.top().(*sessionsScreen)
-	if !ok {
-		t.Fatalf("expected sessions, got %T", h.a.top())
-	}
+	h.keys("3")
 	// Nothing selected and nothing pending: r explains.
 	h.keys("r")
 	wantAll(t, h.view(), "nothing to rehome: select sessions with space")
-	if h.a.top() != s {
+	if h.a.top() != nil {
 		t.Fatalf("r without a subject must stay put, got %T", h.a.top())
 	}
 	h.keys("space", "r")
@@ -368,8 +365,8 @@ func TestRehomeScreen(t *testing.T) {
 	}
 	// The sessions screen underneath lists again after the result closes.
 	h.keys("esc")
-	if top, ok := h.a.top().(*sessionsScreen); !ok || len(top.sel) != 0 {
-		t.Fatalf("esc should pop to a refreshed sessions screen, got %T", h.a.top())
+	if h.a.top() != nil || len(h.a.ws.sel) != 0 {
+		t.Fatalf("esc should pop to a refreshed workspace, got %T sel=%v", h.a.top(), h.a.ws.sel)
 	}
 }
 
@@ -522,13 +519,13 @@ func TestResumeCommand(t *testing.T) {
 	}
 	h, s := f.openSessions()
 	h.keys("down") // the older, live session
-	if r, ok := s.list.SelectedItem().(*sessionRow); !ok || r.s.ID != sid2 || !r.s.Live {
-		t.Fatalf("cursor row = %+v", s.list.SelectedItem())
+	if r, ok := s.panels[panelItems].list.SelectedItem().(*sessionRow); !ok || r.s.ID != sid2 || !r.s.Live {
+		t.Fatalf("cursor row = %+v", s.panels[panelItems].list.SelectedItem())
 	}
 	h.keys("R")
 	wantAll(t, h.view(), "session "+shortID(sid2)+" is open in a running claude; nothing to resume")
-	if h.a.top() != s {
-		t.Fatalf("R must stay on the sessions screen, got %T", h.a.top())
+	if h.a.top() != nil {
+		t.Fatalf("R must stay on the workspace, got %T", h.a.top())
 	}
 	// A missing cwd is refused too.
 	gone := sess[0]
@@ -580,7 +577,7 @@ func TestReceiveScreenHostCheckAndMaskedCode(t *testing.T) {
 	}
 	// esc leaves the screen.
 	h.keys("esc")
-	if _, ok := h.a.top().(*sessionsScreen); !ok {
+	if h.a.top() != nil {
 		t.Fatalf("esc should pop, got %T", h.a.top())
 	}
 
@@ -806,8 +803,8 @@ func TestOpInFlightQuitConfirmAndCancel(t *testing.T) {
 	}
 	// The goroutine reports; the screen pops with a status line.
 	h.run(sc.op.wait())
-	if h.a.top() != s {
-		t.Fatalf("after the cancelled op the sessions screen should be back, got %T", h.a.top())
+	if h.a.top() != nil {
+		t.Fatalf("after the cancelled op the workspace should be back, got %T", h.a.top())
 	}
 	wantAll(t, h.view(), "export cancelled; nothing written")
 	if h.a.busy() {
@@ -847,37 +844,47 @@ func TestActionKeyPlacement(t *testing.T) {
 	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	f.memory()
 	h := f.start("memories")
-	// Projects: i opens receive; the other letters are reserved.
+	ws := h.a.ws
+	if ws.focus != panelItems || ws.tab != tabMemory {
+		t.Fatalf("bffs memory should open on the memory tab: focus=%d tab=%d", ws.focus, ws.tab)
+	}
+	// Memory tab: no rehome, resume or pointer; the hint says where.
+	h.keys("R")
+	wantAll(t, h.view(), "select a session on the sessions tab")
 	h.keys("r")
-	wantAll(t, h.view(), reservedHint)
-	h.keys("i")
+	wantAll(t, h.view(), "nothing to rehome")
+	h.keys("d")
+	wantAll(t, h.view(), "never deletes")
+	// Roots panel: i opens receive into the root.
+	h.keys("1", "i")
 	if _, ok := h.a.top().(*receiveScreen); !ok {
-		t.Fatalf("i on projects should open receive, got %T", h.a.top())
+		t.Fatalf("i on roots should open receive, got %T", h.a.top())
 	}
 	h.keys("esc")
-	h.keys("enter")
-	if _, ok := h.a.top().(*memoriesScreen); !ok {
-		t.Fatalf("expected memories, got %T", h.a.top())
-	}
-	// Memories: no rehome or resume, but export/copy/trust.
-	h.keys("R")
-	wantAll(t, h.view(), reservedHint)
+	// Memory tab: export, copy, trust and the memory sync are there.
+	h.keys("3")
 	h.keys("t")
 	if _, ok := h.a.top().(*trustScreen); !ok {
-		t.Fatalf("t on memories should open trust, got %T", h.a.top())
+		t.Fatalf("t on memory should open trust, got %T", h.a.top())
 	}
 	wantAll(t, h.view(), "FOLDER-TRUST")
 	h.keys("esc")
 	h.keys("e")
 	if _, ok := h.a.top().(*exportScreen); !ok {
-		t.Fatalf("e on memories should open export, got %T", h.a.top())
+		t.Fatalf("e on memory should open export, got %T", h.a.top())
 	}
 	wantAll(t, h.view(), "export the whole project")
 	h.keys("esc")
 	h.keys("c")
 	if _, ok := h.a.top().(*copyScreen); !ok {
-		t.Fatalf("c on memories should open copy, got %T", h.a.top())
+		t.Fatalf("c on memory should open copy, got %T", h.a.top())
 	}
+	h.keys("esc")
+	h.keys("S")
+	if sc, ok := h.a.top().(*copyScreen); !ok || sc.tgt.only != "memories" {
+		t.Fatalf("S should open the memory-only copy, got %T", h.a.top())
+	}
+	wantAll(t, h.view(), "copy the memory of "+shortPath(f.project))
 	h.keys("esc")
 	// Serve refuses at once when there is no local network.
 	old := serveLocal
@@ -885,7 +892,7 @@ func TestActionKeyPlacement(t *testing.T) {
 	t.Cleanup(func() { serveLocal = old })
 	h.keys("s")
 	wantAll(t, h.view(), "no local-network address found")
-	if _, ok := h.a.top().(*memoriesScreen); !ok {
+	if h.a.top() != nil {
 		t.Fatalf("s without a network must stay put, got %T", h.a.top())
 	}
 }
@@ -943,7 +950,7 @@ func TestReceiveKeysWhileResolvingAndConfirming(t *testing.T) {
 	}
 	sc.state = recvResolving // a slow name lookup is in flight; nothing runs yet
 	h.keys("esc")
-	if _, ok := h.a.top().(*sessionsScreen); !ok {
+	if h.a.top() != nil {
 		t.Fatalf("esc while resolving should pop, got %T", h.a.top())
 	}
 

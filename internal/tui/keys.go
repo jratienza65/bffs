@@ -17,6 +17,23 @@ type keyMap struct {
 	Help           key.Binding
 	Quit           key.Binding
 	PageUp, PageDn key.Binding
+
+	// The action keys (plan §11): each pushes an action screen from the
+	// sessions or memories screen; i (receive) works from every screen.
+	Export  key.Binding
+	Send    key.Binding
+	Receive key.Binding
+	Copy    key.Binding
+	Rehome  key.Binding
+	Resume  key.Binding
+	Trust   key.Binding
+
+	// Inside an action screen: the [y/N] answer, cancelling a running
+	// operation, closing a result.
+	Yes    key.Binding
+	No     key.Binding
+	Cancel key.Binding
+	Done   key.Binding
 }
 
 var keys = keyMap{
@@ -34,12 +51,36 @@ var keys = keyMap{
 	Quit:        key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	PageUp:      key.NewBinding(key.WithKeys("pgup", "b"), key.WithHelp("pgup", "page up")),
 	PageDn:      key.NewBinding(key.WithKeys("pgdown", "f"), key.WithHelp("pgdown", "page down")),
+
+	Export:  key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "export to file")),
+	Send:    key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "send over LAN")),
+	Receive: key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "receive")),
+	Copy:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy to account")),
+	Rehome:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rehome")),
+	Resume:  key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "resume in claude")),
+	Trust:   key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "trust")),
+
+	Yes:    key.NewBinding(key.WithKeys("y", "Y", "enter"), key.WithHelp("y", "yes")),
+	No:     key.NewBinding(key.WithKeys("n", "N", "esc"), key.WithHelp("n", "no")),
+	Cancel: key.NewBinding(key.WithKeys("esc", "ctrl+c"), key.WithHelp("esc", "cancel")),
+	Done:   key.NewBinding(key.WithKeys("esc", "enter"), key.WithHelp("esc", "done")),
 }
 
-// reservedKeys are the action slots of the next version: export, send,
-// receive, copy, rehome, resume, trust, scan paths and delete. A screen
-// that binds one of them (p on the sessions and memories screens) gets
-// it; anywhere else the key answers with reservedHint.
-var reservedKeys = key.NewBinding(key.WithKeys("e", "s", "i", "c", "r", "R", "t", "p", "d"), key.WithHelp("e s i c r R t d", "actions"))
+// actionKeys are the bindings a sessions screen offers; the memories
+// screen leaves out rehome and resume, which are about one transcript.
+func actionKeys(sessions bool) []key.Binding {
+	ks := []key.Binding{keys.Export, keys.Send, keys.Receive, keys.Copy}
+	if sessions {
+		ks = append(ks, keys.Rehome, keys.Resume)
+	}
+	return append(ks, keys.Trust)
+}
 
-const reservedHint = "(actions arrive in a later version)"
+// reservedKeys are the action slots a screen does not bind: d (delete —
+// deliberately absent from the browser, plan Q7) everywhere, and the
+// other action letters on screens where the action has no subject (a
+// project's memory cannot be resumed). Anywhere they are not bound the
+// key answers with reservedHint.
+var reservedKeys = key.NewBinding(key.WithKeys("e", "s", "i", "c", "r", "R", "t", "p", "d"), key.WithHelp("d", "no delete here (bffs sessions rm)"))
+
+const reservedHint = "(not available on this screen; d never deletes — use bffs sessions rm)"

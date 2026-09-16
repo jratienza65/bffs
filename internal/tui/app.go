@@ -8,6 +8,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/jratienza65/bffs/internal/transcripts"
 )
 
 // app is the root model: a stack of screens, the shared services, the
@@ -22,7 +24,6 @@ type app struct {
 
 	status    string
 	statusErr bool
-	busy      bool // a long operation runs: navigation is blocked (action screens)
 	help      help.Model
 	showHelp  bool
 	quitting  bool
@@ -47,6 +48,14 @@ func (a *app) top() Screen {
 		return nil
 	}
 	return a.stack[len(a.stack)-1]
+}
+
+// busy reports whether the top screen runs a long operation: navigation
+// is then blocked and every key is the screen's (esc cancels, q asks
+// whether to quit anyway).
+func (a *app) busy() bool {
+	r, ok := a.top().(running)
+	return ok && r.running()
 }
 
 // contentHeight is what remains for the screen after the header, the
@@ -117,7 +126,15 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.stack = a.stack[:len(a.stack)-1]
 		a.status, a.statusErr = "", false
-		return a, a.forward(a.sizeMsg())
+		cmd := a.forward(a.sizeMsg())
+		if msg.refresh {
+			// An action changed the tree: every cached catalog is stale.
+			for k := range a.svc.memories {
+				delete(a.svc.memories, k)
+			}
+			cmd = tea.Batch(cmd, a.forward(refreshMsg{}))
+		}
+		return a, cmd
 
 	case statusMsg:
 		if msg.err != nil {
@@ -128,11 +145,14 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case opDoneMsg:
-		a.busy = false
 		if msg.err != nil {
 			a.status, a.statusErr = msg.err.Error(), true
 		}
 		return a, a.forward(msg)
+
+	case quitMsg:
+		a.quitting = true
+		return a, tea.Quit
 
 	case tea.KeyPressMsg:
 		return a, a.handleKey(msg)
@@ -140,12 +160,17 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, a.forward(msg)
 }
 
-// handleKey is the key policy: ctrl+c always quits; a screen typing into
-// a filter owns everything else; then q quits, ? toggles help, esc goes
-// back unless the screen claims it (a filter to clear), a reserved
+// handleKey is the key policy: while an operation runs every key is the
+// screen's (ctrl+c and esc cancel it, q asks before quitting); otherwise
+// ctrl+c always quits; a screen typing into a text field owns everything
+// else; then q quits, ? toggles help, esc goes back unless the screen
+// claims it (a filter to clear, a confirmation to decline), a reserved
 // action key the screen does not bind answers with the hint, and the
 // rest is the screen's.
 func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	if a.busy() {
+		return a.forward(msg)
+	}
 	if msg.String() == "ctrl+c" {
 		a.quitting = true
 		return tea.Quit
@@ -154,21 +179,15 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if c, ok := s.(inputCapturer); ok && c.capturingInput() {
 		return a.forward(msg)
 	}
-	if a.busy {
-		if key.Matches(msg, keys.Quit) {
-			return status("an operation is running; wait for it to finish")
-		}
-		return a.forward(msg)
-	}
 	var screenKeys []key.Binding
 	if s != nil {
 		screenKeys = s.Keys()
 	}
 	switch {
-	case key.Matches(msg, keys.Quit):
+	case key.Matches(msg, keys.Quit) && !key.Matches(msg, screenKeys...):
 		a.quitting = true
 		return tea.Quit
-	case key.Matches(msg, keys.Help):
+	case key.Matches(msg, keys.Help) && !key.Matches(msg, screenKeys...):
 		a.showHelp = !a.showHelp
 		a.help.ShowAll = a.showHelp
 		return a.forward(a.sizeMsg())
@@ -228,7 +247,9 @@ func (a *app) View() tea.View {
 	}
 	body = fitLines(body, a.width, a.contentHeight())
 
-	statusLine := a.status
+	// Errors reach the status line from every engine; sanitised like
+	// everything else that is rendered.
+	statusLine := transcripts.Sanitize(a.status)
 	if l, ok := a.top().(loader); ok && l != nil && l.loading() && statusLine == "" {
 		statusLine = "loading…"
 	}

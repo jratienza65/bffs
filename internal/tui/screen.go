@@ -18,7 +18,7 @@ type Screen interface {
 }
 
 // inputCapturer is implemented by a screen that is typing into a text
-// field (a list filter): every key but ctrl+c is then its own.
+// field (a list filter, a path): every key but ctrl+c is then its own.
 type inputCapturer interface {
 	capturingInput() bool
 }
@@ -27,4 +27,11 @@ type inputCapturer interface {
 // shows it in the status line.
 type loader interface {
 	loading() bool
+}
+
+// running is implemented by an action screen while its long operation
+// runs: the app then blocks navigation and hands it every key, ctrl+c
+// included, so esc cancels the operation and q asks before quitting.
+type running interface {
+	running() bool
 }

@@ -210,6 +210,14 @@ func orDiscard(w io.Writer) io.Writer {
 	return w
 }
 
+// StripSessionMarkers returns env without the session-instance markers a
+// running claude exports (CLAUDECODE, CLAUDE_PID, CLAUDE_EFFORT, the
+// CLAUDE_CODE_* instance family), so a child claude starts as a fresh
+// session even when launched from inside one. Deliberate configuration
+// such as CLAUDE_CODE_USE_BEDROCK is kept. Callers that spawn claude
+// without going through Command (no account to inject) use it directly.
+func StripSessionMarkers(env []string) []string { return stripMarkers(env) }
+
 // stripMarkers drops the session-instance markers from env.
 func stripMarkers(env []string) []string {
 	out := env[:0]

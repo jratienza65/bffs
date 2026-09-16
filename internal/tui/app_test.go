@@ -389,10 +389,8 @@ func TestSessionsScreen(t *testing.T) {
 	h.keys("a")
 	wantNone(t, h.view(), "selected", "[x]")
 
-	// Reserved action keys answer with the hint; p opens scan paths.
-	h.keys("e")
-	wantAll(t, h.view(), reservedHint)
-	h.keys("R")
+	// d (delete) is the one reserved slot; p opens scan paths.
+	h.keys("d")
 	wantAll(t, h.view(), reservedHint)
 	h.keys("p")
 	if _, ok := h.a.top().(*scanPathsScreen); !ok {
@@ -416,9 +414,9 @@ func TestSessionsScreen(t *testing.T) {
 		t.Fatalf("esc with a filter applied must clear it, not pop; top = %T", h.a.top())
 	}
 
-	// Help toggles the full view, with the reserved slots named.
+	// Help toggles the full view, with the actions and the reserved slot named.
 	h.keys("?")
-	wantAll(t, h.view(), "actions", "select all", "sessions⇄memories")
+	wantAll(t, h.view(), "export to file", "send over LAN", "rehome", "resume in claude", "no delete here", "select all", "sessions⇄memories")
 	h.keys("?")
 
 	// enter opens the read-only detail of the cursor's session.

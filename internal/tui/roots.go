@@ -78,7 +78,7 @@ func (s *rootsScreen) Init() tea.Cmd        { return nil }
 func (s *rootsScreen) Title() string        { return "roots" }
 func (s *rootsScreen) capturingInput() bool { return s.list.SettingFilter() }
 func (s *rootsScreen) Keys() []key.Binding {
-	return append([]key.Binding{keys.Up, keys.Down, keys.Open, keys.Filter}, filterKeys(s.list)...)
+	return append([]key.Binding{keys.Up, keys.Down, keys.Open, keys.Filter, keys.Receive}, filterKeys(s.list)...)
 }
 
 func (s *rootsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
@@ -87,9 +87,18 @@ func (s *rootsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.list.SetSize(msg.Width, msg.Height)
 		return s, nil
 	case tea.KeyPressMsg:
-		if !s.list.SettingFilter() && key.Matches(msg, keys.Open) {
+		if s.list.SettingFilter() {
+			break
+		}
+		switch {
+		case key.Matches(msg, keys.Open):
 			if r, ok := s.list.SelectedItem().(*rootRow); ok {
 				return s, pushScreen(newProjectsScreen(s.svc, r.root))
+			}
+			return s, nil
+		case key.Matches(msg, keys.Receive):
+			if r, ok := s.list.SelectedItem().(*rootRow); ok {
+				return s, receiveInto(s.svc, r.root)
 			}
 			return s, nil
 		}

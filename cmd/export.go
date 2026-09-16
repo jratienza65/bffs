@@ -834,7 +834,7 @@ func serveExport(ctx context.Context, cmd *cobra.Command, req exportRequest, set
 				return exportWriteError(err, m)
 			}
 			if !bytes.Equal(raw, manifestBytes) {
-				return errors.New("manifest changed between the summary and the stream")
+				return errors.New("manifest changed between the summary and the stream (a session was written while you answered); run bffs export --serve again")
 			}
 			return bw.Flush()
 		},

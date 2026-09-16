@@ -135,8 +135,13 @@ func claudeShimName() string {
 	return "claude"
 }
 
+// isTTY reports whether there is a person at both ends of a prompt:
+// stdin to answer it and stderr, where prompts are written, to show it.
+// A run with either one piped is not interactive — a question written
+// into a pipe is never answered, and one asked of a pipe is answered by
+// whatever bytes happen to be there.
 func isTTY() bool {
-	return term.IsTerminal(int(os.Stdin.Fd()))
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
 }
 
 // probeInstallDir asks, for each shell invocation mode, whether a bffs shim in

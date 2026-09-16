@@ -211,7 +211,7 @@ func runCopy(cmd *cobra.Command, dir string, pr *prompter, req copyRequest, tty 
 			renderHeld(errOut, held, live)
 			return exitWith(1, errors.New("every selected session is open in a running claude; nothing was moved"))
 		}
-		return errors.New("nothing selected: no sessions or memory dirs matched")
+		return errors.New("nothing selected: no sessions or memory dirs matched; list what is there with bffs sessions list, or widen the selection (--project, --session, --all-projects)")
 	}
 
 	// The plan is what the question is about, so it goes where the

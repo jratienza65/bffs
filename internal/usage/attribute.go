@@ -33,12 +33,23 @@ func attributeSession(sess *session, lastIDs map[string][]string, events []usage
 		return "", ""
 	}
 	// 3. Launch-log correlation by (cwd, time).
-	if sess.cwd == "" || sess.firstTS.IsZero() {
+	return attributeByLaunch(sess.cwd, sess.firstTS, events)
+}
+
+// attributeByLaunch is the launch-log tier shared by attributeSession and
+// Attributor: the latest shim launch from cwd no later than firstTS (plus
+// slack) names the account, unless a second account — an unmanaged launch
+// counts as one — launched from the same cwd inside the ambiguity window.
+// Only launch events are consulted: import records never feed this tier
+// (A-15), so an imported session's time and cwd cannot be mistaken for a
+// launch here.
+func attributeByLaunch(cwd string, firstTS time.Time, events []usagelog.Event) (account, src string) {
+	if cwd == "" || firstTS.IsZero() {
 		return "", ""
 	}
-	cwd := filepath.Clean(sess.cwd)
-	winLo := sess.firstTS.Add(-attribAmbiguityWindow)
-	winHi := sess.firstTS.Add(attribSlack)
+	cwd = filepath.Clean(cwd)
+	winLo := firstTS.Add(-attribAmbiguityWindow)
+	winHi := firstTS.Add(attribSlack)
 	var best *usagelog.Event
 	distinct := map[string]bool{}
 	for i := range events {

@@ -93,6 +93,9 @@ is used (falling back to the global default in state.toml, then "partial").`,
 			fmt.Fprintf(out, "warning: %s exists in %s as a real file; left untouched (pass --reset to replace it with the symlink)\n", s, sessionDir)
 		}
 		fmt.Fprintf(out, "Reisolated %q (preset=%s, dir=%s).\n", name, effective, sessionDir)
+		if effective == store.IsolationFull {
+			fmt.Fprintf(out, "to take your history with you: bffs copy --from home --to %s --all-projects\n", name)
+		}
 		return nil
 	},
 }

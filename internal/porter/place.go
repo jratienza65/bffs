@@ -147,6 +147,9 @@ func planEntries(ctx context.Context, m *bundle.Manifest, o ImportOptions, dest 
 		if err != nil {
 			return importPlan{}, err
 		}
+		if o.ExcludeRoot != "" {
+			ss = excludeUnderRoot(ss, o.ExcludeRoot) // a CopyLocal's source copies are no collision (plan §9.4)
+		}
 		for _, s := range ss {
 			existing[s.ID] = append(existing[s.ID], s)
 		}

@@ -760,7 +760,7 @@ func TestServeScreenLoopback(t *testing.T) {
 		if sc.bound && !bannerSeen {
 			bannerSeen = true
 			wantAll(t, v, "On the other machine, run:    bffs import --from 127.0.0.1:", "7K3Q-M9XD", "this machine's key: ",
-				"Waiting for the other machine…  code valid for ", "3 attempts, one transfer", "(esc cancels)")
+				"Waiting for the other machine…  code valid for ", "3 attempts, one transfer", "c copies the code", "esc cancels)")
 			if strings.Contains(v, "this machine's key: unknown") {
 				t.Errorf("key fingerprint missing:\n%s", v)
 			}
@@ -1146,5 +1146,32 @@ func TestOverlayBelowTheBreakpointGetsTheFrameWidth(t *testing.T) {
 	// And with no overlay the preview is still hidden at that width.
 	if got := goldenApp(t, 80, 24, nil).mainSize().Width; got != 0 {
 		t.Errorf("without an overlay the main pane is hidden below the breakpoint; width = %d", got)
+	}
+}
+
+// An overlay is not a viewport, so a drag cannot select in it: y copies
+// what it shows. A confirmation binds y for "yes" and keeps it.
+func TestOverlayCopyWithY(t *testing.T) {
+	f := newFixture(t)
+	f.transcript(f.slug, sid1, f.project, "first prompt of one", fixedNow.Add(-time.Hour))
+	h, _ := f.openSessions()
+	h.send(pushScreenMsg{screen: newResultScreen("export", []string{"wrote ~/bffs-mac-a.bffs (5.2 MB)", "", "On the other machine: bffs import --from bffs-mac-a.bffs"}, nil)})
+	h.keys("y")
+	if h.a.statusKind != noteDone || !strings.HasPrefix(h.a.status, "copied") {
+		t.Errorf("y on a result should copy what it shows: kind=%v status=%q", h.a.statusKind, h.a.status)
+	}
+
+	// On a confirmation y still means yes: the screen binds it, and the
+	// app leaves a key the screen binds alone.
+	h.keys("esc")
+	h.keys("e")
+	sc, ok := h.a.top().(*exportScreen)
+	if !ok {
+		t.Fatalf("e should open the export screen, got %T", h.a.top())
+	}
+	sc.state, h.a.status, h.a.statusKind = exportConfirm, "", noteInfo
+	h.keys("y")
+	if strings.HasPrefix(h.a.status, "copied") {
+		t.Errorf("y answered the confirmation and copied instead: %q", h.a.status)
 	}
 }

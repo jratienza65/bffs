@@ -123,6 +123,9 @@ func (s *serveScreen) Keys() []key.Binding {
 	if s.state == serveConfirm {
 		return append([]key.Binding{keys.Yes, keys.No}, scrollKeys()...)
 	}
+	if s.state == serveServing {
+		return []key.Binding{key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "copy the code")), keys.Cancel}
+	}
 	return []key.Binding{keys.Cancel}
 }
 
@@ -397,6 +400,12 @@ func (s *serveScreen) key(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, nil
 	}
 	switch {
+	case msg.String() == "c" && s.state == serveServing:
+		// The code has to be typed on the other machine, and a
+		// terminal that has the mouse cannot be asked to select it.
+		// It is already on this screen; the clipboard is not a new
+		// place for it, and it still reaches no log and no argv.
+		return s, tea.Batch(tea.SetClipboard(s.code.Display()), statusDone("copied the pairing code"))
 	case key.Matches(msg, keys.Cancel):
 		s.op.stop()
 	case key.Matches(msg, keys.Quit):
@@ -429,7 +438,7 @@ func (s *serveScreen) banner(width int) []string {
 	}
 	left := time.Until(s.deadline)
 	lines = append(lines, "",
-		truncate(fmt.Sprintf("Waiting for the other machine"+glyph.ellipsis+"  code valid for %s, %d attempts, one transfer.   (esc cancels)", fmtMMSS(left), serveAttempts), width))
+		fmt.Sprintf("Waiting for the other machine"+glyph.ellipsis+"  code valid for %s, %d attempts, one transfer.   (c copies the code"+sepDot+"esc cancels)", fmtMMSS(left), serveAttempts))
 	return lines
 }
 

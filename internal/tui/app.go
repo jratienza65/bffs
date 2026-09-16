@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/jratienza65/bffs/internal/transcripts"
 )
@@ -269,6 +270,17 @@ func (a *app) modeLabel() (string, bool) {
 	return "BROWSE", false
 }
 
+// copyOverlay puts the text an overlay is showing on the clipboard, as
+// drawn and with the styling stripped.
+func (a *app) copyOverlay(s Screen) tea.Cmd {
+	size := a.mainSize()
+	text := strings.TrimRight(ansi.Strip(s.View(size.Width, size.Height)), " \n")
+	if strings.TrimSpace(text) == "" {
+		return statusWarn("nothing to copy here")
+	}
+	return tea.Batch(tea.SetClipboard(text), statusDone(copiedNote(text)))
+}
+
 // post puts a note on the status line and starts the timer that takes
 // it down: a note left standing is read as the answer to the next key.
 func (a *app) post(kind noteKind, text string) tea.Cmd {
@@ -316,6 +328,11 @@ func (a *app) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return a.push(newHelpScreen(a.overlayHelpGroups(s)))
 		case key.Matches(msg, keys.Back) && !key.Matches(msg, screenKeys...):
 			return popScreen()
+		case key.Matches(msg, keys.Yank) && !key.Matches(msg, screenKeys...):
+			// An overlay is not a viewport, so a drag cannot select in
+			// it; y takes what it is showing instead. A confirmation
+			// binds y for "yes", and the guard above leaves it alone.
+			return a.copyOverlay(s)
 		case key.Matches(msg, reservedKeys) && !key.Matches(msg, screenKeys...):
 			return statusWarn(reservedHint)
 		}

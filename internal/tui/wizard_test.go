@@ -187,28 +187,27 @@ func TestWizardReceiveFromFile(t *testing.T) {
 	a.transcript(a.slug, sid1, a.project, "first prompt of one", fixedNow.Add(-time.Hour))
 	a.memory()
 	ha := a.start("sessions")
-	ha.keys("e", "enter", "y")
-	ex, ok := ha.a.stack[0].(*resultScreen)
+	// Write the bundle outside the project, so nothing was just created
+	// inside the directory the test then moves away: on Windows a fresh
+	// file keeps its directory busy while the scanner reads it.
+	bundlePath := filepath.Join(t.TempDir(), "a.bffs")
+	ha.keys("e")
+	ex, ok := ha.a.top().(*exportScreen)
 	if !ok {
-		t.Fatalf("export should end on a result, got %T", ha.a.top())
+		t.Fatalf("e should open the export screen, got %T", ha.a.top())
 	}
-	_ = ex
-	var bundlePath string
-	if entries, err := filepath.Glob(filepath.Join(a.project, "*.bffs")); err == nil && len(entries) == 1 {
-		bundlePath = entries[0]
-	} else {
-		t.Fatalf("bundle not found in %s: %v", a.project, entries)
+	ex.input.SetValue(bundlePath)
+	ha.keys("enter", "y")
+	if _, ok := ha.a.top().(*resultScreen); !ok {
+		t.Fatalf("export should end on a result, got %T:\n%s", ha.a.top(), ha.view())
+	}
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("bundle not written: %v", err)
 	}
 
-	// The bundle travels; the project moves away, as on another machine,
-	// so the import has to ask where it lives.
-	carried := filepath.Join(t.TempDir(), "a.bffs")
-	if err := os.Rename(bundlePath, carried); err != nil {
-		t.Fatal(err)
-	}
-	bundlePath = carried
-	// Windows refuses to rename the process's own working directory,
-	// and the fixture chdir'd into the project.
+	// The project moves away, as on another machine, so the import has to
+	// ask where it lives. Windows refuses to rename the process's own
+	// working directory, and the fixture chdir'd into the project.
 	t.Chdir(t.TempDir())
 	if err := os.Rename(a.project, a.project+"-moved"); err != nil {
 		t.Fatal(err)
